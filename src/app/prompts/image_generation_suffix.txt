@@ -1,0 +1,1 @@
+Aspect ratio: {ASPECT_RATIO}. Seed: {SEED}. Do not include: {NEGATIVE_PROMPT}.

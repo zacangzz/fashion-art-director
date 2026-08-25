@@ -1,0 +1,65 @@
+import React from 'react';
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen, fireEvent } from '@testing-library/react';
+import MoodboardUploader from './MoodboardUploader';
+
+describe('MoodboardUploader', () => {
+  it('renders upload dropzone instructions and starting prompt input', () => {
+    render(<MoodboardUploader files={[]} onFilesChange={() => {}} onAnalyze={() => {}} />);
+    expect(screen.getByText(/Moodboard Ingestion/i)).toBeInTheDocument();
+    expect(screen.getByText(/Drop 1–5 reference images or PDFs here/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Starting Scene Prompt/i)).toBeInTheDocument();
+    expect(screen.getByText(/Required/i)).toBeInTheDocument();
+  });
+
+  it('disables analyze button when no files are selected', () => {
+    render(<MoodboardUploader files={[]} prompt="Sample prompt" onFilesChange={() => {}} onAnalyze={() => {}} />);
+    const btn = screen.getByRole('button', { name: /Upload 1–5 Reference Files to Begin/i });
+    expect(btn).toBeDisabled();
+  });
+
+  it('disables analyze button when files are present but prompt is empty', () => {
+    const file = new File(['dummy'], 'sample.png', { type: 'image/png' });
+    render(<MoodboardUploader files={[file]} prompt="" onFilesChange={() => {}} onAnalyze={() => {}} />);
+    const btn = screen.getByRole('button', { name: /Enter Starting Prompt to Generate Baselines/i });
+    expect(btn).toBeDisabled();
+  });
+
+  it('calls onAnalyze with prompt when button is clicked with files and prompt', () => {
+    const onAnalyze = vi.fn();
+    const onPromptChange = vi.fn();
+    const file = new File(['dummy'], 'sample.png', { type: 'image/png' });
+    render(
+      <MoodboardUploader
+        files={[file]}
+        onFilesChange={() => {}}
+        prompt="Editorial sun-drenched terrace"
+        onPromptChange={onPromptChange}
+        onAnalyze={onAnalyze}
+      />
+    );
+
+    const textarea = screen.getByLabelText(/Starting Scene Prompt/i);
+    expect(textarea.value).toBe('Editorial sun-drenched terrace');
+
+    const btn = screen.getByRole('button', { name: /Analyze & Generate 4 Baselines/i });
+    expect(btn).not.toBeDisabled();
+    fireEvent.click(btn);
+    expect(onAnalyze).toHaveBeenCalledWith('Editorial sun-drenched terrace');
+  });
+
+  it('displays analyzing loading state', () => {
+    const file = new File(['dummy'], 'sample.png', { type: 'image/png' });
+    render(
+      <MoodboardUploader
+        files={[file]}
+        prompt="Sample"
+        onFilesChange={() => {}}
+        onAnalyze={() => {}}
+        isAnalyzing={true}
+      />
+    );
+    expect(screen.getByText(/Analyzing & Generating 4 Baselines.../i)).toBeInTheDocument();
+  });
+});
+

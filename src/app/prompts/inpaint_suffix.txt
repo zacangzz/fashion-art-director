@@ -1,0 +1,1 @@
+Do not include: {NEGATIVE_PROMPT}. Do not change anything outside the white mask region.

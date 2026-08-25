@@ -1,0 +1,15 @@
+.env
+.worktrees/
+.venv/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+studio.db
+storage/*
+storage/
+!storage/moodboards/
+!storage/generations/
+!storage/logs/
+!storage/**/.gitkeep
+src/frontend/dist/
+src/frontend/node_modules/
