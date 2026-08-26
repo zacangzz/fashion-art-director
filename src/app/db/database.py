@@ -1,7 +1,6 @@
 import json
-import sqlite3
-import aiosqlite
 from typing import List, Dict, Any, Optional
+import aiosqlite
 from app.utils.logger import get_logger
 
 logger = get_logger("database")
@@ -67,16 +66,18 @@ CREATE TABLE IF NOT EXISTS generations (
     aspect_ratio TEXT NOT NULL DEFAULT '2:3',
     resolution_width INTEGER NOT NULL DEFAULT 1440,
     resolution_height INTEGER NOT NULL DEFAULT 1440,
+    conversation_id TEXT NULL,
     FOREIGN KEY(parent_id) REFERENCES generations(id),
     FOREIGN KEY(moodboard_id) REFERENCES moodboards(id)
 );
 """
 
 class DatabaseManager:
-    def __init__(self, db_path: str = "./studio.db"):
+    def __init__(self, db_path: str = "./storage/studio.db"):
         if db_path.startswith("sqlite:///"):
             db_path = db_path.replace("sqlite:///", "")
         self.db_path = db_path
+        self._table_columns_cache: Optional[set] = None
 
     async def init_db(self) -> None:
         logger.info(f"Initializing SQLite database at: {self.db_path}")
@@ -87,7 +88,6 @@ class DatabaseManager:
             await db.execute(CREATE_WARDROBE_ITEMS_TABLE)
             await db.execute(CREATE_COMPOSITION_ASSIGNMENTS_TABLE)
 
-            
             # Check for column migrations if table already exists with legacy columns
             async with db.execute("PRAGMA table_info(generations)") as cursor:
                 columns = [row[1] for row in await cursor.fetchall()]
@@ -106,7 +106,11 @@ class DatabaseManager:
                 if "aspect_ratio" not in columns:
                     logger.info("Migrating DB: adding column 'aspect_ratio'")
                     await db.execute("ALTER TABLE generations ADD COLUMN aspect_ratio TEXT DEFAULT '2:3'")
-                    
+
+            # Cache current table columns for rapid future insertions
+            async with db.execute("PRAGMA table_info(generations)") as cursor:
+                self._table_columns_cache = {row[1] for row in await cursor.fetchall()}
+
             await db.commit()
             logger.info("Database schema verification and migrations complete.")
 
@@ -163,11 +167,10 @@ class DatabaseManager:
         data["is_baseline"] = bool(data.get("is_baseline", False))
         return data
 
-
     async def create_generation(self, gen_data: Dict[str, Any]) -> None:
         """
-        Dynamically inspects existing table columns to support both modern and legacy schemas
-        without NOT NULL constraint failures.
+        Dynamically inspects table columns with cache to support modern and legacy schemas
+        without NOT NULL constraint failures or redundant PRAGMA round-trips.
         """
         schema_val = gen_data.get("schema_json") or gen_data.get("tags_snapshot") or "{}"
 
@@ -186,9 +189,11 @@ class DatabaseManager:
         compiled_prompt = gen_data.get("compiled_prompt") or gen_data.get("prompt", "")
 
         async with aiosqlite.connect(self.db_path) as db:
-            # Query existing table columns
-            async with db.execute("PRAGMA table_info(generations)") as cursor:
-                table_columns = {row[1] for row in await cursor.fetchall()}
+            if self._table_columns_cache is None:
+                async with db.execute("PRAGMA table_info(generations)") as cursor:
+                    self._table_columns_cache = {row[1] for row in await cursor.fetchall()}
+
+            table_columns = self._table_columns_cache
 
             # Build insert map based on existing columns in the table
             insert_fields = {
@@ -202,6 +207,7 @@ class DatabaseManager:
                 "aspect_ratio": gen_data.get("aspect_ratio", "2:3"),
                 "resolution_width": gen_data.get("resolution_width", 1440),
                 "resolution_height": gen_data.get("resolution_height", 1440),
+                "conversation_id": gen_data.get("conversation_id"),
             }
 
             # Map schema & prompt to both modern and legacy column names if present
@@ -250,29 +256,49 @@ class DatabaseManager:
         """
         Traces ancestor chain up to the root baseline, and finds direct descendants.
         """
-        all_gens = await self.list_generations()
-        gen_map = {g["id"]: g for g in all_gens}
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT id, parent_id FROM generations") as cursor:
+                pairs = {row["id"]: row["parent_id"] for row in await cursor.fetchall()}
 
-        current = gen_map.get(generation_id)
-        if not current:
+        if generation_id not in pairs:
             return {"root_id": generation_id, "ancestors": [], "descendants": []}
 
-        # Find ancestors
-        ancestors = []
-        curr_parent_id = current.get("parent_id")
-        while curr_parent_id and curr_parent_id in gen_map:
-            parent = gen_map[curr_parent_id]
-            ancestors.append(parent)
-            curr_parent_id = parent.get("parent_id")
+        # Find ancestor IDs
+        ancestor_ids = []
+        curr_parent_id = pairs.get(generation_id)
+        while curr_parent_id and curr_parent_id in pairs:
+            ancestor_ids.append(curr_parent_id)
+            curr_parent_id = pairs.get(curr_parent_id)
 
-        root_id = ancestors[-1]["id"] if ancestors else current["id"]
+        root_id = ancestor_ids[-1] if ancestor_ids else generation_id
 
-        # Find descendants
-        descendants = [g for g in all_gens if g.get("parent_id") == generation_id]
+        # Find descendant IDs
+        descendant_ids = [gid for gid, pid in pairs.items() if pid == generation_id]
+
+        # Fetch only required ancestor and descendant generation records
+        needed_ids = set(ancestor_ids + descendant_ids)
+        if not needed_ids:
+            return {"root_id": root_id, "ancestors": [], "descendants": []}
+
+        placeholders = ", ".join(["?"] * len(needed_ids))
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                f"SELECT * FROM generations WHERE id IN ({placeholders})",
+                list(needed_ids),
+            ) as cursor:
+                fetched_rows = {
+                    row["id"]: self._normalize_generation_row(dict(row))
+                    for row in await cursor.fetchall()
+                }
+
+        ancestors = [fetched_rows[aid] for aid in reversed(ancestor_ids) if aid in fetched_rows]
+        descendants = [fetched_rows[did] for did in descendant_ids if did in fetched_rows]
 
         return {
             "root_id": root_id,
-            "ancestors": list(reversed(ancestors)),
+            "ancestors": ancestors,
             "descendants": descendants,
         }
 
@@ -443,4 +469,71 @@ class DatabaseManager:
                             data["region_bbox"] = None
                     results.append(data)
                 return results
+
+    async def get_tables_summary(self) -> Dict[str, Any]:
+        """Returns row counts and column names for all database tables."""
+        allowed_tables = [
+            "generations",
+            "moodboards",
+            "conversations",
+            "wardrobe_items",
+            "composition_assignments",
+        ]
+        summary = {}
+        async with aiosqlite.connect(self.db_path) as db:
+            for table in allowed_tables:
+                try:
+                    async with db.execute(f"SELECT COUNT(*) FROM {table}") as cursor:
+                        row = await cursor.fetchone()
+                        count = row[0] if row else 0
+                    async with db.execute(f"PRAGMA table_info({table})") as cursor:
+                        cols = [{"name": r[1], "type": r[2]} for r in await cursor.fetchall()]
+                    summary[table] = {"row_count": count, "columns": cols}
+                except Exception as err:
+                    logger.warning(f"Failed to inspect table {table}: {err}")
+                    summary[table] = {"row_count": 0, "columns": []}
+        return summary
+
+    async def get_table_records(
+        self,
+        table_name: str,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> Dict[str, Any]:
+        """Safely queries paginated rows from a database table."""
+        allowed_tables = [
+            "generations",
+            "moodboards",
+            "conversations",
+            "wardrobe_items",
+            "composition_assignments",
+        ]
+        if table_name not in allowed_tables:
+            raise ValueError(f"Invalid or unauthorized table name '{table_name}'.")
+
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(f"SELECT COUNT(*) FROM {table_name}") as cursor:
+                total_row = await cursor.fetchone()
+                total = total_row[0] if total_row else 0
+
+            query = f"SELECT * FROM {table_name} ORDER BY rowid DESC LIMIT ? OFFSET ?"
+            async with db.execute(query, (limit, offset)) as cursor:
+                raw_rows = await cursor.fetchall()
+                rows = []
+                for r in raw_rows:
+                    row_dict = dict(r)
+                    # For generations table, normalize schema/prompt fields
+                    if table_name == "generations":
+                        row_dict = self._normalize_generation_row(row_dict)
+                    rows.append(row_dict)
+
+            return {
+                "table": table_name,
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+                "rows": rows,
+            }
+
 

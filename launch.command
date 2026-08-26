@@ -167,12 +167,13 @@ else
 fi
 
 # ------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # STEP 3: Environment Synchronization & Locked Dependencies
 # ------------------------------------------------------------------------------
 print_step "3" "Synchronizing Python Virtual Environment & Locked Dependencies"
 
 if command -v uv &> /dev/null; then
-    print_info "Syncing dependencies strictly from locked configuration (uv.lock)..."
+    print_info "Syncing dependencies strictly from project configuration (pyproject.toml / uv.lock)..."
     if [ -f "uv.lock" ]; then
         uv sync --frozen
     else
@@ -181,41 +182,44 @@ if command -v uv &> /dev/null; then
     source .venv/bin/activate
     PYTHON_EXEC="$(which python)"
     PYTHON_VER=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')")
-    print_success "Virtual environment synchronized: Python v$PYTHON_VER with locked packages."
+    print_success "Virtual environment synchronized with uv: Python v$PYTHON_VER"
 else
     if [ ! -d ".venv" ]; then
         print_info "Creating '.venv' via python3 -m venv..."
         python3 -m venv .venv
     fi
     source .venv/bin/activate
-    print_info "Installing dependencies from requirements.txt..."
-    pip install -q -r requirements.txt
+    print_info "Installing package dependencies from pyproject.toml..."
+    pip install -q -e .
     PYTHON_EXEC="$(which python)"
     PYTHON_VER=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')")
     print_success "Virtual environment ready: Python v$PYTHON_VER"
 fi
 
 # ------------------------------------------------------------------------------
-# STEP 4: Configuration & API Key Validation
+# STEP 4: Configuration & API Key Setup
 # ------------------------------------------------------------------------------
 print_step "4" "Validating Environment Configuration (.env)"
 
 if [ ! -f ".env" ]; then
     if [ -f ".env.example" ]; then
-        print_info "Creating .env from .env.example..."
+        print_info "No .env found. Creating .env from .env.example template..."
         cp .env.example .env
+        print_success ".env file created from .env.example"
     else
+        print_info "No .env or .env.example found. Generating default .env..."
         cat <<EOF > .env
 GEMINI_API_KEY=your_google_ai_studio_api_key_here
 PORT=7860
 HOST=127.0.0.1
 DEBUG=True
-DATABASE_URL=sqlite:///./studio.db
+DATABASE_URL=sqlite:///./storage/studio.db
 STORAGE_DIR=./storage
-VISION_MODEL=gemini-3.1-flash-lite
-IMAGEN_MODEL=gemini-3.1-flash-lite-image
-INPAINT_MODEL=gemini-3.1-flash-image
+VISION_MODEL=gemini-3.5-flash-lite
+IMAGEN_MODEL=gemini-3-pro-image
+INPAINT_MODEL=gemini-3-pro-image
 EOF
+        print_success "Default .env generated"
     fi
 fi
 
@@ -226,9 +230,10 @@ set +a
 
 PORT="${PORT:-7860}"
 HOST="${HOST:-127.0.0.1}"
-VISION_MODEL="${VISION_MODEL:-gemini-3.1-flash-lite}"
-IMAGEN_MODEL="${IMAGEN_MODEL:-gemini-3.1-flash-lite-image}"
-INPAINT_MODEL="${INPAINT_MODEL:-gemini-3.1-flash-image}"
+DATABASE_URL="${DATABASE_URL:-sqlite:///./storage/studio.db}"
+VISION_MODEL="${VISION_MODEL:-gemini-3.5-flash-lite}"
+IMAGEN_MODEL="${IMAGEN_MODEL:-gemini-3-pro-image}"
+INPAINT_MODEL="${INPAINT_MODEL:-gemini-3-pro-image}"
 
 # Strip inline comments or whitespace
 VISION_MODEL=$(echo "$VISION_MODEL" | cut -d'#' -f1 | xargs)
@@ -238,28 +243,38 @@ GEMINI_KEY_CLEAN=$(echo "${GEMINI_API_KEY:-}" | cut -d'#' -f1 | xargs)
 
 if [ -z "$GEMINI_KEY_CLEAN" ] || [ "$GEMINI_KEY_CLEAN" = "your_google_ai_studio_api_key_here" ] || [ "$GEMINI_KEY_CLEAN" = "YOUR_GEMINI_API_KEY_HERE" ]; then
     print_warning "GEMINI_API_KEY is not configured yet in .env."
+    echo -e "      ${BOLD}${YELLOW}Get a Gemini API key at: ${CYAN}https://aistudio.google.com/app/apikey${RESET}"
+    
+    # Prompt interactively if stdin or /dev/tty is accessible
+    user_key=""
     if [ -t 0 ]; then
-        echo -e "      ${BOLD}${YELLOW}Enter your Gemini API key from https://aistudio.google.com${RESET}"
-        read -r -p "      (or press Enter to skip and configure later): " user_key
-        user_key=$(echo "$user_key" | xargs)
-        if [ -n "$user_key" ]; then
-            if grep -q "^GEMINI_API_KEY=" .env; then
-                sed -i '' "s|^GEMINI_API_KEY=.*|GEMINI_API_KEY=$user_key|" .env 2>/dev/null || sed -i "s|^GEMINI_API_KEY=.*|GEMINI_API_KEY=$user_key|" .env
-            else
-                echo "GEMINI_API_KEY=$user_key" >> .env
-            fi
-            GEMINI_KEY_CLEAN="$user_key"
-            KEY_PREVIEW="${GEMINI_KEY_CLEAN:0:6}...${GEMINI_KEY_CLEAN: -4}"
-            print_success "GEMINI_API_KEY saved to .env (${KEY_PREVIEW})"
+        read -r -p "      🔑 Enter your Gemini API key (or press Enter to skip): " user_key
+    elif [ -e /dev/tty ]; then
+        read -r -p "      🔑 Enter your Gemini API key (or press Enter to skip): " user_key </dev/tty 2>/dev/null || true
+    fi
+
+    user_key=$(echo "$user_key" | xargs)
+    if [ -n "$user_key" ]; then
+        if grep -q "^GEMINI_API_KEY=" .env; then
+            sed -i '' "s|^GEMINI_API_KEY=.*|GEMINI_API_KEY=$user_key|" .env 2>/dev/null || sed -i "s|^GEMINI_API_KEY=.*|GEMINI_API_KEY=$user_key|" .env
+        else
+            echo "GEMINI_API_KEY=$user_key" >> .env
         fi
+        export GEMINI_API_KEY="$user_key"
+        GEMINI_KEY_CLEAN="$user_key"
+        KEY_PREVIEW="${GEMINI_KEY_CLEAN:0:6}...${GEMINI_KEY_CLEAN: -4}"
+        print_success "GEMINI_API_KEY saved to .env (${KEY_PREVIEW})"
+    else
+        print_warning "No key entered. You can edit .env manually before performing generations."
     fi
 fi
 
 if [ -n "$GEMINI_KEY_CLEAN" ] && [ "$GEMINI_KEY_CLEAN" != "your_google_ai_studio_api_key_here" ] && [ "$GEMINI_KEY_CLEAN" != "YOUR_GEMINI_API_KEY_HERE" ]; then
     KEY_PREVIEW="${GEMINI_KEY_CLEAN:0:6}...${GEMINI_KEY_CLEAN: -4}"
-    print_success "GEMINI_API_KEY detected (${KEY_PREVIEW})"
+    print_success "GEMINI_API_KEY configured (${KEY_PREVIEW})"
 fi
 
+print_info "Database:       ${BOLD}${DATABASE_URL}${RESET}"
 print_info "Vision Model:   ${BOLD}${VISION_MODEL}${RESET}"
 print_info "Imagen Model:   ${BOLD}${IMAGEN_MODEL}${RESET}"
 print_info "Inpaint Model:  ${BOLD}${INPAINT_MODEL}${RESET}"
@@ -268,8 +283,8 @@ print_info "Inpaint Model:  ${BOLD}${INPAINT_MODEL}${RESET}"
 # STEP 5: Storage Directories & Database Check
 # ------------------------------------------------------------------------------
 print_step "5" "Checking Local Storage & SQLite Database"
-mkdir -p "storage/moodboards" "storage/generations" "storage/logs"
-print_success "Storage directories verified (storage/moodboards, storage/generations, storage/logs)."
+mkdir -p "storage/moodboards" "storage/generations" "storage/logs" "storage/wardrobe/items" "storage/wardrobe/sources"
+print_success "Storage directories verified (storage/moodboards, storage/generations, storage/logs, storage/wardrobe)."
 
 # ------------------------------------------------------------------------------
 # STEP 6: Frontend Production Assets Check & Build

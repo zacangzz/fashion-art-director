@@ -4,7 +4,9 @@
 .pytest_cache/
 __pycache__/
 *.py[cod]
+*.db
 studio.db
+storage/studio.db
 storage/*
 storage/
 !storage/moodboards/

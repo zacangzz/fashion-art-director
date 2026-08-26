@@ -68,7 +68,7 @@ The application implements a **4-Step Sequential Workflow**:
 - **Automated 4-Baseline Sweep**: Parallel dispatch of 4 unique seed candidates immediately after multimodal moodboard ingestion.
 - **Precision Masked Inpainting**: In-canvas brush editor with undo/redo, brush size control, mask clearing, and boundary-preserving diffusion inpainting.
 - **Dedicated Export Suite**: 1-click single-file and 5-ratio ZIP bundle export across standard industry formats (`4:5`, `9:16`, `1.85:1`, `1:1`, `1.8:1`) with metadata.
-- **Local Sovereignty & Audit Logging**: 100% local persistence in SQLite (`studio.db`) and file storage (`storage/`), with transparent JSONL audit trails (`vision_audit.jsonl` and `generation_audit.jsonl`).
+- **Local Sovereignty & Audit Logging**: 100% local persistence in SQLite (`storage/studio.db`) and file storage (`storage/`), with transparent JSONL audit trails (`vision_audit.jsonl` and `generation_audit.jsonl`).
 
 ---
 

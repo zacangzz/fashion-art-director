@@ -5,13 +5,11 @@ import {
   Sparkles,
   Trash2,
   X,
-  Plus,
   Layers,
   CheckCircle2,
   AlertCircle,
   Tag,
   GripHorizontal,
-  ChevronRight,
   RefreshCw,
   HelpCircle,
 } from 'lucide-react';

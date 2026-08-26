@@ -3,20 +3,21 @@ import io
 import json
 import uuid
 import time
-import hashlib
+import asyncio
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 from PIL import Image
 from google import genai
-from google.genai import types
 
 from app.db.database import DatabaseManager
 from app.utils.logger import get_logger
+from app.utils.telemetry import TelemetryLogger
 from app.utils.prompt_loader import (
     WARDROBE_SEGMENTATION_PROMPT,
     CLOTHING_REGION_DETECTION_PROMPT,
     SUBJECT_GROUNDING_PROMPT,
 )
+from app.utils.image_utils import to_image_part
 
 logger = get_logger("wardrobe_service")
 
@@ -29,13 +30,19 @@ class WardrobeService:
         storage_dir: str,
         vision_model: str = "gemini-3.1-flash-lite",
         audit_path: Optional[str] = None,
+        client: Optional[genai.Client] = None,
     ):
         self.db = db_manager
         self.api_key = api_key
         self.storage_dir = storage_dir
         self.vision_model = vision_model
         self.audit_path = audit_path
-        self.client = genai.Client(api_key=api_key)
+        self.client = client or genai.Client(api_key=api_key)
+        self.telemetry = TelemetryLogger(
+            audit_path=self.audit_path,
+            component="wardrobe",
+            storage_dir=self.storage_dir,
+        )
 
         # Ensure storage subdirectories exist
         self.sources_dir = os.path.join(storage_dir, "wardrobe", "sources")
@@ -47,15 +54,12 @@ class WardrobeService:
         if not self.audit_path:
             return
         try:
-            os.makedirs(os.path.dirname(self.audit_path), exist_ok=True)
-            record = {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "event_type": event_type,
-                "request_id": request_id,
+            self.telemetry.record_event(
+                event=event_type,
+                request_id=request_id,
+                component="wardrobe",
                 **kwargs,
-            }
-            with open(self.audit_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(record, default=str) + "\n")
+            )
         except Exception as e:
             logger.warning(f"Failed to write wardrobe audit log: {e}")
 
@@ -70,6 +74,15 @@ class WardrobeService:
                 lines = lines[:-1]
             text = "\n".join(lines).strip()
         return text
+
+    async def _generate_content_async(self, contents: List[Any], config: Optional[Any] = None) -> Any:
+        kwargs = {"model": self.vision_model, "contents": contents}
+        if config is not None:
+            kwargs["config"] = config
+        return await asyncio.to_thread(
+            self.client.models.generate_content,
+            **kwargs,
+        )
 
     def _normalize_bbox(
         self,
@@ -156,16 +169,8 @@ class WardrobeService:
         with open(source_filepath, "wb") as f:
             f.write(image_bytes)
 
-        # Determine MIME type
-        mime_type = "image/png"
-        if image_bytes.startswith(b"\xff\xd8"):
-            mime_type = "image/jpeg"
-        elif image_bytes.startswith(b"RIFF") and b"WEBP" in image_bytes[:16]:
-            mime_type = "image/webp"
-
         # Call Gemini Vision to detect items and bounding boxes
-        started = time.perf_counter()
-        image_part = types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
+        image_part = to_image_part(image_bytes)
         contents = [image_part, WARDROBE_SEGMENTATION_PROMPT]
 
         self._audit(
@@ -177,11 +182,8 @@ class WardrobeService:
         )
 
         try:
-            response = self.client.models.generate_content(
-                model=self.vision_model,
-                contents=contents,
-            )
-            raw_text = response.text or ""
+            response = await self._generate_content_async(contents)
+            raw_text = getattr(response, "text", "") or ""
             logger.info(f"Gemini vision response received for sheet {sheet_id}: {raw_text[:200]}...")
         except Exception as exc:
             logger.error(f"Gemini vision segmentation error: {exc}", exc_info=True)
@@ -245,23 +247,24 @@ class WardrobeService:
             right = int(crop_xmax * img_w)
             bottom = int(crop_ymax * img_h)
 
-            # Safeguard dimensions
-            if right - left < 20 or bottom - top < 20:
+            # Ensure valid bounding box
+            if right <= left or bottom <= top:
                 continue
 
-            item_id = f"wd_{uuid.uuid4().hex[:8]}"
-            crop_img = base_img.crop((left, top, right, bottom))
-            crop_filename = f"{item_id}.png"
-            crop_filepath = os.path.join(self.items_dir, crop_filename)
-            crop_img.save(crop_filepath, format="PNG")
+            cropped_img = base_img.crop((left, top, right, bottom))
+            item_id = f"item_{uuid.uuid4().hex[:8]}"
+            cropped_filename = f"{item_id}.png"
+            cropped_filepath = os.path.join(self.items_dir, cropped_filename)
+
+            cropped_img.save(cropped_filepath, format="PNG")
 
             item_record = {
                 "id": item_id,
                 "source_image_path": source_filepath,
                 "label": label,
                 "category": category,
-                "cropped_image_path": crop_filepath,
-                "bbox_json": [ymin, xmin, ymax, xmax],
+                "cropped_image_path": cropped_filepath,
+                "bbox_json": json.dumps([ymin, xmin, ymax, xmax]),
                 "created_at": now_iso,
             }
             await self.db.create_wardrobe_item(item_record)
@@ -276,38 +279,11 @@ class WardrobeService:
                 "created_at": now_iso,
             })
 
-        # If all items failed validation, fallback to whole image crop
-        if not created_cards:
-            item_id = f"wd_{uuid.uuid4().hex[:8]}"
-            crop_filename = f"{item_id}.png"
-            crop_filepath = os.path.join(self.items_dir, crop_filename)
-            base_img.save(crop_filepath, format="PNG")
-            fallback_record = {
-                "id": item_id,
-                "source_image_path": source_filepath,
-                "label": "Garment Outfit",
-                "category": "full_outfit",
-                "cropped_image_path": crop_filepath,
-                "bbox_json": [0.0, 0.0, 1.0, 1.0],
-                "created_at": now_iso,
-            }
-            await self.db.create_wardrobe_item(fallback_record)
-            created_cards.append({
-                "id": item_id,
-                "label": "Garment Outfit",
-                "category": "full_outfit",
-                "image_url": f"/api/wardrobe/items/{item_id}/image",
-                "source_image_url": f"/api/wardrobe/sources/{source_filename}",
-                "bbox": [0.0, 0.0, 1.0, 1.0],
-                "created_at": now_iso,
-            })
-
         self._audit(
             "wardrobe_segmentation_response",
             request_id,
             sheet_id=sheet_id,
-            items_count=len(created_cards),
-            duration_ms=round((time.perf_counter() - started) * 1000, 1),
+            items_extracted=len(created_cards),
         )
 
         return created_cards
@@ -317,27 +293,16 @@ class WardrobeService:
         Analyzes a generated image to detect subject clothing regions with bounding boxes.
         Used for auto-mask overlay preview.
         """
-        request_id = f"reg_{uuid.uuid4().hex}"
         logger.info("Detecting clothing regions for auto-mask preview...")
-
-        mime_type = "image/png"
-        if image_bytes.startswith(b"\xff\xd8"):
-            mime_type = "image/jpeg"
-        elif image_bytes.startswith(b"RIFF") and b"WEBP" in image_bytes[:16]:
-            mime_type = "image/webp"
-
-        image_part = types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
+        image_part = to_image_part(image_bytes)
         contents = [image_part, CLOTHING_REGION_DETECTION_PROMPT]
 
         base_img = Image.open(io.BytesIO(image_bytes))
         img_w, img_h = base_img.size
 
         try:
-            response = self.client.models.generate_content(
-                model=self.vision_model,
-                contents=contents,
-            )
-            raw_text = response.text or ""
+            response = await self._generate_content_async(contents)
+            raw_text = getattr(response, "text", "") or ""
             cleaned = self._clean_json_text(raw_text)
             parsed = json.loads(cleaned)
             regions_raw = parsed if isinstance(parsed, list) else parsed.get("regions", [])
@@ -429,7 +394,7 @@ class WardrobeService:
                 "target_subject": target_subject,
                 "body_location": body_loc,
                 "spatial_anchor": spatial_anchor,
-                "current_attire": f"the existing clothing/styling at this position",
+                "current_attire": "the existing clothing/styling at this position",
             })
 
         return {
@@ -471,14 +436,7 @@ class WardrobeService:
             )
 
         pin_text = "DROPPED GARMENT PINS TO ANALYZE:\n" + "\n".join(pin_lines)
-
-        mime_type = "image/png"
-        if image_bytes.startswith(b"\xff\xd8"):
-            mime_type = "image/jpeg"
-        elif image_bytes.startswith(b"RIFF") and b"WEBP" in image_bytes[:16]:
-            mime_type = "image/webp"
-
-        image_part = types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
+        image_part = to_image_part(image_bytes)
         contents = [
             image_part,
             pin_text,
@@ -493,11 +451,8 @@ class WardrobeService:
         )
 
         try:
-            response = self.client.models.generate_content(
-                model=self.vision_model,
-                contents=contents,
-            )
-            raw_text = response.text or ""
+            response = await self._generate_content_async(contents)
+            raw_text = getattr(response, "text", "") or ""
             cleaned = self._clean_json_text(raw_text)
             parsed = json.loads(cleaned)
 
@@ -537,4 +492,3 @@ class WardrobeService:
             logger.warning(f"Vision subject grounding pre-pass failed ({exc}); using fallback heuristic.", exc_info=True)
             self._audit("wardrobe_grounding_error", request_id, error=str(exc))
             return fallback_result
-

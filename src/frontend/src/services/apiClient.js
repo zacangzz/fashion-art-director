@@ -344,4 +344,82 @@ export async function composeWardrobe(payload) {
   return handleApiResponse(response, 'Wardrobe composition failed');
 }
 
+/**
+ * Fetches structured audit events with optional filtering.
+ * @param {Object} [params]
+ * @returns {Promise<{total: number, limit: number, offset: number, events: Array}>}
+ */
+export async function fetchTelemetryEvents({ component, event, requestId, status, search, limit = 50, offset = 0 } = {}) {
+  const query = new URLSearchParams();
+  if (component) query.set('component', component);
+  if (event) query.set('event', event);
+  if (requestId) query.set('request_id', requestId);
+  if (status) query.set('status', status);
+  if (search) query.set('search', search);
+  query.set('limit', String(limit));
+  query.set('offset', String(offset));
+
+  const response = await fetch(`/api/telemetry/events?${query.toString()}`);
+  return handleApiResponse(response, 'Failed to fetch telemetry events');
+}
+
+/**
+ * Fetches the complete chronological trace of events for a request ID.
+ * @param {string} requestId
+ * @returns {Promise<Array>}
+ */
+export async function fetchRequestTrace(requestId) {
+  const response = await fetch(`/api/telemetry/events/${encodeURIComponent(requestId)}`);
+  return handleApiResponse(response, `Failed to fetch trace for request ${requestId}`);
+}
+
+/**
+ * Fetches summary statistics across stored telemetry events.
+ * @returns {Promise<Object>}
+ */
+export async function fetchTelemetryStats() {
+  const response = await fetch('/api/telemetry/stats');
+  return handleApiResponse(response, 'Failed to fetch telemetry statistics');
+}
+
+/**
+ * Fetches recent application log lines.
+ * @param {Object} [params]
+ * @returns {Promise<{total_lines: number, logs: string[]}>}
+ */
+export async function fetchSystemLogs({ lines = 200, level } = {}) {
+  const query = new URLSearchParams();
+  query.set('lines', String(lines));
+  if (level) query.set('level', level);
+
+  const response = await fetch(`/api/telemetry/logs?${query.toString()}`);
+  return handleApiResponse(response, 'Failed to fetch system logs');
+}
+
+/**
+ * Fetches SQLite database tables summary with row counts.
+ * @returns {Promise<{tables: Object}>}
+ */
+export async function fetchDatabaseSummary() {
+  const response = await fetch('/api/telemetry/db/summary');
+  return handleApiResponse(response, 'Failed to fetch database summary');
+}
+
+/**
+ * Fetches paginated records for a database table.
+ * @param {string} tableName
+ * @param {Object} [params]
+ * @returns {Promise<{table: string, total: number, limit: number, offset: number, rows: Array}>}
+ */
+export async function fetchDatabaseTableRecords(tableName, { limit = 50, offset = 0 } = {}) {
+  const query = new URLSearchParams();
+  query.set('limit', String(limit));
+  query.set('offset', String(offset));
+
+  const response = await fetch(`/api/telemetry/db/${encodeURIComponent(tableName)}?${query.toString()}`);
+  return handleApiResponse(response, `Failed to fetch records for table ${tableName}`);
+}
+
+
+
 

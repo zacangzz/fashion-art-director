@@ -1,30 +1,20 @@
-import json
-import os
-from typing import Optional, Dict, Any, List
+from typing import Dict, Any, List
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter
 from app.config import get_settings
-from app.db.database import DatabaseManager
 from app.schemas.domain import (
     FineTuneGenerationRequest,
     FineTuneGenerationResponse,
     GenerationRequest,
     GenerationResponse,
 )
-from app.services.generation_service import GenerationService, compile_prompt
+from app.services.generation_service import compile_prompt
 from app.utils.error_handler import parse_and_raise_http_error
+from app.dependencies import get_generation_service
 
 router = APIRouter(prefix="/api", tags=["generation"])
-
 settings = get_settings()
-db_manager = DatabaseManager(settings.DATABASE_URL)
-generation_service = GenerationService(
-    db_manager=db_manager,
-    api_key=settings.GEMINI_API_KEY,
-    storage_dir=settings.STORAGE_DIR,
-    model_name=settings.IMAGEN_MODEL,
-    audit_path=os.path.join(settings.STORAGE_DIR, "logs", "generation_audit.jsonl"),
-)
+generation_service = get_generation_service()
 
 
 @router.post("/generate/fine-tune", response_model=FineTuneGenerationResponse)
@@ -50,7 +40,6 @@ async def fine_tune_generation(request: FineTuneGenerationRequest):
         return FineTuneGenerationResponse(**result)
     except Exception as exc:
         parse_and_raise_http_error(exc, model_name=settings.IMAGEN_MODEL, context="Seed-Locked Fine-Tuning")
-
 
 
 def _serialize_legacy_input(request: GenerationRequest) -> str:

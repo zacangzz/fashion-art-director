@@ -1,19 +1,16 @@
 import uuid
 import json
-from datetime import datetime, timezone
+import asyncio
 from pathlib import Path
-from typing import List, Dict, Any, Tuple, Optional, Union
+from typing import List, Dict, Any, Optional
 from google import genai
 from google.genai import types
 
-from app.schemas.domain import (
-    TagChip,
-    TagCategory,
-    TagStudioState,
-    SceneSchema,
-)
+from app.schemas.domain import TagChip, TagCategory
 from app.utils.logger import get_logger
+from app.utils.telemetry import TelemetryLogger, get_current_request_id
 from app.utils.prompt_loader import EXTRACTION_SYSTEM_PROMPT, USER_BASELINE_TEMPLATE
+from app.utils.image_utils import to_image_part
 
 logger = get_logger("vision_service")
 
@@ -43,25 +40,21 @@ DEFAULT_FALLBACK_TAGS: Dict[str, List[Dict[str, Any]]] = {
     ],
     TagCategory.ENVIRONMENT.value: [
         {"label": "architectural spatial setting", "weight": 1.0},
+        {"label": "refined ambient light", "weight": 1.0},
     ],
     TagCategory.LAYOUT_FRAMING.value: [
-        {"label": "cinematic medium shot", "weight": 1.0},
-        {"label": "balanced dynamic composition", "weight": 1.0},
+        {"label": "cinematic rule-of-thirds composition", "weight": 1.0},
     ],
     TagCategory.LIGHTING.value: [
-        {"label": "natural directional sunlight", "weight": 1.0},
-        {"label": "soft ambient fill with gentle contrast", "weight": 1.0},
+        {"label": "directional soft natural key light", "weight": 1.0},
     ],
     TagCategory.COLOR_PROFILE.value: [
-        {"label": "warm harmonious color palette", "weight": 1.0},
-        {"label": "rich analog film tone", "weight": 1.0},
+        {"label": "muted rich editorial palette", "weight": 1.0},
     ],
     TagCategory.CAMERA_OPTICS.value: [
-        {"label": "35mm prime lens", "weight": 1.0},
-        {"label": "shallow depth of field f/2.0", "weight": 1.0},
+        {"label": "85mm prime lens f/1.8 shallow depth", "weight": 1.0},
     ],
     TagCategory.MOOD_ERA.value: [
-        {"label": "editorial luxury aesthetic", "weight": 1.0},
         {"label": "timeless candid vibe", "weight": 1.0},
     ],
 }
@@ -73,39 +66,45 @@ class VisionService:
         api_key: str,
         model_name: str = "gemini-3.1-flash-lite",
         audit_path: Optional[Path] = None,
+        client: Optional[genai.Client] = None,
     ):
         self.api_key = api_key
         self.model_name = model_name
-        self.client = genai.Client(api_key=self.api_key)
+        self.client = client or genai.Client(api_key=self.api_key)
         self.audit_path = Path(audit_path or "storage/logs/vision_audit.jsonl")
+        self.telemetry = TelemetryLogger(
+            audit_path=self.audit_path,
+            component="vision",
+            storage_dir=self.audit_path.parent.parent if self.audit_path else "./storage",
+        )
 
     def _audit(self, event: str, request_id: str, **details: Any) -> None:
-        record = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "event": event,
-            "request_id": request_id,
-            **details,
-        }
         try:
-            self.audit_path.parent.mkdir(parents=True, exist_ok=True)
-            with self.audit_path.open("a", encoding="utf-8") as audit_file:
-                audit_file.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+            self.telemetry.record_event(
+                event=event,
+                request_id=request_id,
+                component="vision",
+                **details,
+            )
         except Exception as audit_err:
             logger.warning(f"Could not write Vision audit event: {audit_err}")
 
-    def _prepare_image_parts(self, image_bytes_list: List[bytes]) -> List[Any]:
-        contents = []
-        for img_bytes in image_bytes_list:
-            mime_type = "image/png"
-            if img_bytes.startswith(b"\xff\xd8"):
-                mime_type = "image/jpeg"
-            elif img_bytes.startswith(b"RIFF") and b"WEBP" in img_bytes[:16]:
-                mime_type = "image/webp"
-            elif img_bytes.startswith(b"%PDF"):
-                mime_type = "application/pdf"
+    def _prepare_image_parts(self, image_bytes_list: List[bytes]) -> List[types.Part]:
+        return [to_image_part(b) for b in image_bytes_list]
 
-            contents.append(types.Part.from_bytes(data=img_bytes, mime_type=mime_type))
-        return contents
+    async def _generate_content_async(self, contents: List[Any], config: types.GenerateContentConfig) -> Any:
+        aio_client = getattr(self.client, "aio", None)
+        if aio_client is not None:
+            models = getattr(aio_client, "models", None)
+            gen_func = getattr(models, "generate_content", None)
+            if callable(gen_func) and asyncio.iscoroutinefunction(gen_func):
+                return await gen_func(model=self.model_name, contents=contents, config=config)
+        return await asyncio.to_thread(
+            self.client.models.generate_content,
+            model=self.model_name,
+            contents=contents,
+            config=config,
+        )
 
     async def extract_tag_studio_state(
         self,
@@ -125,18 +124,15 @@ class VisionService:
         logger.info(
             f"Extracting 9-category visual tags from {len(image_bytes_list)} moodboard file(s){prompt_log} using {self.model_name}..."
         )
-        contents = self._prepare_image_parts(image_bytes_list)
+        contents: List[Any] = self._prepare_image_parts(image_bytes_list)
 
         instruction = EXTRACTION_SYSTEM_PROMPT
         if prompt and prompt.strip():
-            instruction = (
-                f"{instruction.rstrip()}\n\n"
-                f'{USER_BASELINE_TEMPLATE.replace("{USER_PROMPT}", prompt.strip())}'
-            )
+            user_prompt_instruction = USER_BASELINE_TEMPLATE.replace("{USER_PROMPT}", prompt.strip())
+            contents.append(user_prompt_instruction)
 
-        contents.append(instruction)
+        request_id = get_current_request_id() or f"vision_{uuid.uuid4().hex}"
 
-        request_id = f"vision_{uuid.uuid4().hex}"
         self._audit(
             "vision_request",
             request_id,
@@ -147,12 +143,13 @@ class VisionService:
             locked_categories=locked_categories or [],
         )
 
+        gen_config = types.GenerateContentConfig(
+            response_mime_type="application/json",
+            system_instruction=instruction,
+        )
+
         try:
-            response = self.client.models.generate_content(
-                model=self.model_name,
-                contents=contents,
-                config=types.GenerateContentConfig(response_mime_type="application/json"),
-            )
+            response = await self._generate_content_async(contents, gen_config)
         except Exception as model_err:
             self._audit("vision_error", request_id, stage="model_call", error=repr(model_err))
             raise

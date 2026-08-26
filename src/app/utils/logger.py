@@ -6,6 +6,17 @@ from pathlib import Path
 LOG_DIR = Path(__file__).resolve().parents[3] / "storage" / "logs"
 LOG_FILE = LOG_DIR / "studio.log"
 
+class RequestContextFilter(logging.Filter):
+    """
+    Injects context-local request_id into standard log records.
+    """
+    def filter(self, record: logging.LogRecord) -> bool:
+        from app.utils.telemetry import get_current_request_id
+        req_id = get_current_request_id()
+        record.request_id = f" [req:{req_id}]" if req_id else ""
+        return True
+
+
 def setup_logging(log_level: int = logging.INFO) -> logging.Logger:
     """
     Configures unified logging for the Studio application.
@@ -20,8 +31,10 @@ def setup_logging(log_level: int = logging.INFO) -> logging.Logger:
     if root_logger.handlers:
         return root_logger
 
+    context_filter = RequestContextFilter()
+
     log_format = logging.Formatter(
-        fmt="%(asctime)s [%(levelname)s] [%(name)s:%(lineno)d] %(message)s",
+        fmt="%(asctime)s [%(levelname)s]%(request_id)s [%(name)s:%(lineno)d] %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
@@ -29,6 +42,7 @@ def setup_logging(log_level: int = logging.INFO) -> logging.Logger:
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(log_level)
     console_handler.setFormatter(log_format)
+    console_handler.addFilter(context_filter)
     root_logger.addHandler(console_handler)
 
     # 2. Rotating File Handler (Max 10MB per file, up to 5 backups)
@@ -41,6 +55,7 @@ def setup_logging(log_level: int = logging.INFO) -> logging.Logger:
         )
         file_handler.setLevel(log_level)
         file_handler.setFormatter(log_format)
+        file_handler.addFilter(context_filter)
         root_logger.addHandler(file_handler)
     except Exception as e:
         print(f"Warning: Could not initialize file logging at {LOG_FILE}: {e}")

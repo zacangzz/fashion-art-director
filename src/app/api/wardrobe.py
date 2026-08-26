@@ -1,11 +1,9 @@
 import os
 import uuid
-from typing import Optional, List
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form, status
+from fastapi import APIRouter, HTTPException, UploadFile, File, status
 from fastapi.responses import FileResponse
 
 from app.config import get_settings
-from app.db.database import DatabaseManager
 from app.schemas.domain import (
     GarmentCard,
     WardrobeUploadResponse,
@@ -16,29 +14,15 @@ from app.schemas.domain import (
     WardrobeComposeRequest,
     WardrobeComposeResponse,
 )
-from app.services.wardrobe_service import WardrobeService
-from app.services.generation_service import GenerationService
 from app.utils.error_handler import parse_and_raise_http_error
+from app.dependencies import get_db_manager, get_wardrobe_service, get_generation_service
 
 router = APIRouter(prefix="/api/wardrobe", tags=["wardrobe"])
-
 settings = get_settings()
-db_manager = DatabaseManager(settings.DATABASE_URL)
-wardrobe_service = WardrobeService(
-    db_manager=db_manager,
-    api_key=settings.GEMINI_API_KEY,
-    storage_dir=settings.STORAGE_DIR,
-    vision_model=settings.VISION_MODEL,
-    audit_path=os.path.join(settings.STORAGE_DIR, "logs", "wardrobe_audit.jsonl"),
-)
-generation_service = GenerationService(
-    db_manager=db_manager,
-    api_key=settings.GEMINI_API_KEY,
-    storage_dir=settings.STORAGE_DIR,
-    model_name=settings.IMAGEN_MODEL,
-    audit_path=os.path.join(settings.STORAGE_DIR, "logs", "generation_audit.jsonl"),
-    wardrobe_service=wardrobe_service,
-)
+
+db_manager = get_db_manager()
+wardrobe_service = get_wardrobe_service()
+generation_service = get_generation_service()
 
 
 @router.post("/upload", response_model=WardrobeUploadResponse)
@@ -98,7 +82,6 @@ async def delete_all_wardrobe_items():
     """
     count = await wardrobe_service.delete_all_items()
     return {"status": "deleted", "count": count}
-
 
 
 @router.get("/items/{item_id}/image")

@@ -13,7 +13,6 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
-  Terminal,
   Eye,
   Crosshair,
 } from 'lucide-react';

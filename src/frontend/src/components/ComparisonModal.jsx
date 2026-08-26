@@ -8,7 +8,6 @@ import {
   Terminal,
   Copy,
   Check,
-  FileText,
 } from 'lucide-react';
 
 export default function ComparisonModal({

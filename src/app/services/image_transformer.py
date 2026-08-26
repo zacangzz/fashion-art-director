@@ -9,6 +9,9 @@ PRESETS: Dict[str, tuple[int, int]] = {
     "03_WideBanner_1440x780": (1440, 780),        # ~1.85:1 Banner
     "04_Square_1440x1440": (1440, 1440),          # 1:1 High-Res Square
     "05_LandscapeDisplay_1730x960": (1730, 960),  # ~1.8:1 Landscape
+    "06_4KUHD_Landscape_3840x2160": (3840, 2160), # 16:9 4K UHD Landscape
+    "07_4KPortrait_2160x3840": (2160, 3840),     # 9:16 4K Vertical / Poster
+    "08_4KSquare_2160x2160": (2160, 2160),        # 1:1 4K Square Print
 }
 
 def resize_and_crop(image: Image.Image, target_width: int, target_height: int) -> Image.Image:
@@ -56,8 +59,9 @@ def resize_and_crop(image: Image.Image, target_width: int, target_height: int) -
 
 def generate_all_presets(master_image_input: Union[str, Path, Image.Image]) -> Dict[str, bytes]:
     """
-    Processes a master image against all 5 predefined target resolution presets.
-    Returns a dictionary mapping filename (e.g. '01_SocialFeed_1080x1350.png') to PNG bytes.
+    Processes a master image against all predefined target resolution presets.
+    Returns a dictionary mapping filename (e.g. '01_SocialFeed_1080x1350.png') to PNG bytes
+    with embedded 300 DPI print metadata.
     """
     if isinstance(master_image_input, (str, Path)):
         image = Image.open(master_image_input)
@@ -75,8 +79,9 @@ def generate_all_presets(master_image_input: Union[str, Path, Image.Image]) -> D
     for preset_name, (w, h) in PRESETS.items():
         processed_img = resize_and_crop(image, w, h)
         buffer = io.BytesIO()
-        processed_img.save(buffer, format="PNG")
+        processed_img.save(buffer, format="PNG", dpi=(300, 300))
         filename = f"{preset_name}.png"
         preset_outputs[filename] = buffer.getvalue()
 
     return preset_outputs
+

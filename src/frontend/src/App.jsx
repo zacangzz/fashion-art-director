@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Sparkles,
   Layers,
@@ -8,6 +8,8 @@ import {
   History as HistoryIcon,
   AlertCircle,
   X,
+  Activity,
+  ExternalLink,
 } from 'lucide-react';
 
 import MoodboardUploader from './components/MoodboardUploader';
@@ -20,13 +22,10 @@ import ExportStudio from './components/ExportStudio';
 import HistoryDrawer from './components/HistoryDrawer';
 import ComparisonModal from './components/ComparisonModal';
 
-// TagStudio preserved in codebase as dead code per plan
-import TagStudio from './components/TagStudio';
 import { DEFAULT_TAG_STATE } from './utils/defaultTags';
 import { compileModularPrompt } from './utils/promptCompiler';
 import {
   analyzeAndGenerateBaselines,
-  fineTuneGeneration,
   refineGeneration,
   composeWardrobe,
   fetchConversation,
@@ -572,6 +571,18 @@ export default function App() {
 
         {/* Header Actions */}
         <div className="header-actions">
+          <a
+            href="/telemetry"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn-secondary btn-sm"
+            title="Open Studio Observability, Telemetry & Database in a separate tab"
+          >
+            <Activity size={14} className="text-indigo-400" />
+            <span>Observability & Logs</span>
+            <ExternalLink size={11} className="opacity-60" />
+          </a>
+
           <button
             type="button"
             className="btn-secondary btn-sm"

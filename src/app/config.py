@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     PORT: int = 7860
     HOST: str = "127.0.0.1"
     DEBUG: bool = True
-    DATABASE_URL: str = "sqlite:///./studio.db"
+    DATABASE_URL: str = "sqlite:///./storage/studio.db"
     STORAGE_DIR: str = "./storage"
     VISION_MODEL: str = "gemini-3.1-flash-lite"
     IMAGEN_MODEL: str = "gemini-3.1-flash-lite-image"

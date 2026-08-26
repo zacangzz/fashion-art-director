@@ -4,6 +4,7 @@ Use the reference image as a structural and visual anchor. Apply the user's requ
 
 FIDELITY & TEXTURE LOCK:
 - Maintain 1:1 original source sharpness, photorealistic micro-textures, and high-frequency details (skin pores, hair clarity, crisp fabric texture, natural micro-contrast).
+- Maintain print-grade optical resolution without downsampling blur, compression artifacts, or pixelation.
 - Zero artificial smoothing, plastic skin, or waxy softening.
 - Ensure strict visual fidelity and sharpness on all unedited areas.
 

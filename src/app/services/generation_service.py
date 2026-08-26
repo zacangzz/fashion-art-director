@@ -1,7 +1,6 @@
 import os
 import io
 import uuid
-import json
 import random
 import asyncio
 import hashlib
@@ -16,6 +15,7 @@ from google.genai import types
 from app.db.database import DatabaseManager
 from app.schemas.domain import SceneSchema
 from app.utils.logger import get_logger
+from app.utils.telemetry import TelemetryLogger
 from app.utils.prompt_loader import (
     DEFAULT_NEGATIVE_PROMPT,
     IMAGE_GENERATION_SUFFIX,
@@ -24,6 +24,7 @@ from app.utils.prompt_loader import (
     REFINEMENT_SYSTEM_PROMPT,
     WARDROBE_COMPOSITION_SYSTEM_PROMPT,
 )
+from app.utils.image_utils import to_image_part
 
 
 logger = get_logger("generation_service")
@@ -39,7 +40,13 @@ ASPECT_RATIO_RESOLUTIONS = {
     "4:3": (1440, 1080),
     "3:4": (1080, 1440),
     "21:9": (2560, 1080),
+    "4k:16:9": (3840, 2160),
+    "4k:9:16": (2160, 3840),
+    "4k:1:1": (2160, 2160),
+    "4k:2:3": (2160, 3240),
+    "4k:3:2": (3240, 2160),
 }
+
 
 
 def _normalize_categories_dict(cats: Optional[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
@@ -335,7 +342,6 @@ def compile_delta_prompt(
 
 
 def analyze_mask_bytes(mask_bytes: bytes) -> Dict[str, Any]:
-
     """
     Analyzes mask PNG bytes to compute dimensions, pixel counts, coverage percentage,
     bounding box coordinates, normalized bounding box, centroid, and SHA-256 hash.
@@ -345,63 +351,52 @@ def analyze_mask_bytes(mask_bytes: bytes) -> Dict[str, Any]:
     width, height = mask_img.size
     total_pixels = width * height
 
-    # Convert to grayscale mode for threshold analysis
+    # Convert to binary mask for fast bbox & pixel analysis
     gray_mask = mask_img.convert("L")
-    pixels = list(gray_mask.get_flattened_data()) if hasattr(gray_mask, "get_flattened_data") else list(gray_mask.getdata())
-
-
-    # White/active pixels (threshold > 127)
-    masked_indices = [i for i, val in enumerate(pixels) if val > 127]
-    masked_pixels = len(masked_indices)
-    unmasked_pixels = total_pixels - masked_pixels
-    coverage_pct = round((masked_pixels / total_pixels) * 100.0, 2) if total_pixels > 0 else 0.0
+    binary_mask = gray_mask.point(lambda p: 255 if p > 127 else 0)
+    raw_bbox = binary_mask.getbbox()
 
     bounding_box = None
     norm_bounding_box = None
     centroid = None
+    masked_pixels = 0
 
-    if masked_pixels > 0:
-        min_x = width
-        min_y = height
-        max_x = 0
-        max_y = 0
-        sum_x = 0
-        sum_y = 0
+    if raw_bbox is not None:
+        min_x, min_y, max_x_excl, max_y_excl = raw_bbox
+        max_x = max_x_excl - 1
+        max_y = max_y_excl - 1
 
-        for idx in masked_indices:
-            y = idx // width
-            x = idx % width
-            if x < min_x:
-                min_x = x
-            if x > max_x:
-                max_x = x
-            if y < min_y:
-                min_y = y
-            if y > max_y:
-                max_y = y
-            sum_x += x
-            sum_y += y
+        pixels = list(binary_mask.get_flattened_data()) if hasattr(binary_mask, "get_flattened_data") else list(binary_mask.getdata())
+        masked_indices = [i for i, val in enumerate(pixels) if val > 0]
+        masked_pixels = len(masked_indices)
 
-        bounding_box = {
-            "min_x": int(min_x),
-            "min_y": int(min_y),
-            "max_x": int(max_x),
-            "max_y": int(max_y),
-            "width": int(max_x - min_x + 1),
-            "height": int(max_y - min_y + 1),
-        }
-        norm_bounding_box = {
-            "min_x": round(min_x / width, 4),
-            "min_y": round(min_y / height, 4),
-            "max_x": round(max_x / width, 4),
-            "max_y": round(max_y / height, 4),
-        }
-        centroid = {
-            "x": round(sum_x / masked_pixels, 1),
-            "y": round(sum_y / masked_pixels, 1),
-            "norm_x": round((sum_x / masked_pixels) / width, 4),
-            "norm_y": round((sum_y / masked_pixels) / height, 4),
-        }
+        if masked_pixels > 0:
+            sum_x = sum(idx % width for idx in masked_indices)
+            sum_y = sum(idx // width for idx in masked_indices)
+
+            bounding_box = {
+                "min_x": int(min_x),
+                "min_y": int(min_y),
+                "max_x": int(max_x),
+                "max_y": int(max_y),
+                "width": int(max_x - min_x + 1),
+                "height": int(max_y - min_y + 1),
+            }
+            norm_bounding_box = {
+                "min_x": round(min_x / width, 4),
+                "min_y": round(min_y / height, 4),
+                "max_x": round(max_x / width, 4),
+                "max_y": round(max_y / height, 4),
+            }
+            centroid = {
+                "x": round(sum_x / masked_pixels, 1),
+                "y": round(sum_y / masked_pixels, 1),
+                "norm_x": round((sum_x / masked_pixels) / width, 4),
+                "norm_y": round((sum_y / masked_pixels) / height, 4),
+            }
+
+    unmasked_pixels = total_pixels - masked_pixels
+    coverage_pct = round((masked_pixels / total_pixels) * 100.0, 2) if total_pixels > 0 else 0.0
 
     return {
         "sha256": sha256_hash,
@@ -428,15 +423,21 @@ class GenerationService:
         inpaint_model_name: str = "imagen-3.0-capability-001",
         audit_path: Optional[Path] = None,
         wardrobe_service: Optional[Any] = None,
+        client: Optional[genai.Client] = None,
     ):
         self.db = db_manager
         self.api_key = api_key
         self.storage_dir = storage_dir
         self.model_name = model_name
         self.inpaint_model_name = inpaint_model_name
-        self.client = genai.Client(api_key=self.api_key)
+        self.client = client or genai.Client(api_key=self.api_key)
         self.audit_path = Path(audit_path or os.path.join(storage_dir, "logs", "generation_audit.jsonl"))
         self._wardrobe_service = wardrobe_service
+        self.telemetry = TelemetryLogger(
+            audit_path=self.audit_path,
+            component="generation",
+            storage_dir=self.storage_dir,
+        )
 
     @property
     def wardrobe_service(self):
@@ -451,14 +452,12 @@ class GenerationService:
 
     def _audit(self, event: str, request_id: str, **details: Any) -> None:
         try:
-            self.audit_path.parent.mkdir(parents=True, exist_ok=True)
-            with self.audit_path.open("a", encoding="utf-8") as audit_file:
-                audit_file.write(json.dumps({
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "event": event,
-                    "request_id": request_id,
-                    **details,
-                }, ensure_ascii=False, default=str) + "\n")
+            self.telemetry.record_event(
+                event=event,
+                request_id=request_id,
+                component="generation",
+                **details,
+            )
         except Exception as audit_err:
             logger.warning(f"Could not write generation audit event: {audit_err}")
 
@@ -491,7 +490,12 @@ class GenerationService:
                     "negative_prompt": negative_prompt,
                 }, reference_image=None)
             try:
-                response = self.client.models.generate_images(model=self.model_name, prompt=prompt, config=config)
+                response = await asyncio.to_thread(
+                    self.client.models.generate_images,
+                    model=self.model_name,
+                    prompt=prompt,
+                    config=config,
+                )
             except Exception as model_err:
                 if audit_request_id:
                     self._audit("image_model_error", audit_request_id, error=repr(model_err))
@@ -509,12 +513,7 @@ class GenerationService:
             # Modern multimodal generation call (e.g. gemini-3.1-flash-lite-image)
             contents = []
             if reference_image_bytes:
-                mime_type = "image/png"
-                if reference_image_bytes.startswith(b"\xff\xd8"):
-                    mime_type = "image/jpeg"
-                elif reference_image_bytes.startswith(b"RIFF") and b"WEBP" in reference_image_bytes[:16]:
-                    mime_type = "image/webp"
-                contents.append(types.Part.from_bytes(data=reference_image_bytes, mime_type=mime_type))
+                contents.append(to_image_part(reference_image_bytes))
 
             suffix = IMAGE_GENERATION_SUFFIX.format(
                 ASPECT_RATIO=aspect_ratio or "unspecified",
@@ -540,7 +539,11 @@ class GenerationService:
             contents.append(full_prompt)
 
             try:
-                response = self.client.models.generate_content(model=self.model_name, contents=contents)
+                response = await asyncio.to_thread(
+                    self.client.models.generate_content,
+                    model=self.model_name,
+                    contents=contents,
+                )
             except Exception as model_err:
                 if audit_request_id:
                     self._audit("image_model_error", audit_request_id, error=repr(model_err))
@@ -587,7 +590,11 @@ class GenerationService:
                         "negative_prompt": negative_prompt})
 
         try:
-            response = self.client.models.generate_content(model=self.model_name, contents=contents)
+            response = await asyncio.to_thread(
+                self.client.models.generate_content,
+                model=self.model_name,
+                contents=contents,
+            )
         except Exception as model_err:
             if audit_request_id:
                 self._audit("multi_image_model_error", audit_request_id, error=repr(model_err))
@@ -620,14 +627,38 @@ class GenerationService:
         """
         gen_id = f"gen_base_{uuid.uuid4().hex[:8]}"
         created_at = datetime.now(timezone.utc).isoformat()
+        req_id = f"baseline_single_{uuid.uuid4().hex[:10]}"
         logger.info(f"Generating baseline candidate {gen_id} (seed={seed})...")
 
-        image_bytes = await self._call_image_model(
-            prompt=positive_prompt,
-            negative_prompt=negative_prompt,
+        started = time.perf_counter()
+        self._audit(
+            "baseline_single_request",
+            req_id,
+            moodboard_id=moodboard_id,
             seed=seed,
             aspect_ratio=aspect_ratio,
+            positive_prompt=positive_prompt,
+            negative_prompt=negative_prompt,
+            model=self.model_name,
         )
+
+        try:
+            image_bytes = await self._call_image_model(
+                prompt=positive_prompt,
+                negative_prompt=negative_prompt,
+                seed=seed,
+                aspect_ratio=aspect_ratio,
+                audit_request_id=req_id,
+            )
+        except Exception as err:
+            self._audit(
+                "baseline_single_error",
+                req_id,
+                moodboard_id=moodboard_id,
+                seed=seed,
+                error=str(err),
+            )
+            raise
 
         gen_dir = os.path.join(self.storage_dir, "generations")
         os.makedirs(gen_dir, exist_ok=True)
@@ -638,6 +669,7 @@ class GenerationService:
             f.write(image_bytes)
 
         width, height = ASPECT_RATIO_RESOLUTIONS.get(aspect_ratio, (1080, 1620))
+        duration_ms = round((time.perf_counter() - started) * 1000, 1)
 
         record = {
             "id": gen_id,
@@ -655,6 +687,15 @@ class GenerationService:
             "resolution_height": height,
         }
         await self.db.create_generation(record)
+        self._audit(
+            "baseline_single_response",
+            req_id,
+            generation_id=gen_id,
+            moodboard_id=moodboard_id,
+            seed=seed,
+            duration_ms=duration_ms,
+            output={"sha256": hashlib.sha256(image_bytes).hexdigest(), "bytes": len(image_bytes), "filename": filename},
+        )
         logger.info(f"Saved baseline record {gen_id} to database and disk at {filepath}")
 
         return {
@@ -685,7 +726,20 @@ class GenerationService:
 
         # Generate 4 distinct seeds
         seeds = random.sample(range(100000, 9999999), 4)
+        req_id = f"baseline_batch_{uuid.uuid4().hex[:10]}"
         logger.info(f"Spawning 4 concurrent baseline tasks for moodboard '{moodboard_id}' across seeds: {seeds}")
+
+        started = time.perf_counter()
+        self._audit(
+            "baseline_batch_request",
+            req_id,
+            moodboard_id=moodboard_id,
+            seeds=seeds,
+            aspect_ratio=aspect_ratio,
+            compiled_prompt=compiled_prompt,
+            categories_count={k: len(v) if isinstance(v, list) else 0 for k, v in categories.items()} if isinstance(categories, dict) else {},
+            model=self.model_name,
+        )
 
         tasks = [
             self.generate_single_baseline(
@@ -699,8 +753,28 @@ class GenerationService:
             for seed in seeds
         ]
 
-        results = await asyncio.gather(*tasks)
-        logger.info(f"Successfully generated all 4 baseline candidates for moodboard '{moodboard_id}'")
+        try:
+            results = await asyncio.gather(*tasks)
+        except Exception as err:
+            self._audit(
+                "baseline_batch_error",
+                req_id,
+                moodboard_id=moodboard_id,
+                seeds=seeds,
+                error=str(err),
+            )
+            raise
+
+        batch_duration_ms = round((time.perf_counter() - started) * 1000, 1)
+        self._audit(
+            "baseline_batch_response",
+            req_id,
+            moodboard_id=moodboard_id,
+            seeds=seeds,
+            generation_ids=[r["id"] for r in results],
+            duration_ms=batch_duration_ms,
+        )
+        logger.info(f"Successfully generated all 4 baseline candidates for moodboard '{moodboard_id}' in {batch_duration_ms}ms")
         return list(results)
 
     async def fine_tune_generation(
@@ -963,14 +1037,8 @@ class GenerationService:
         with open(parent_img_path, "rb") as f:
             parent_bytes = f.read()
 
-        parent_mime = "image/png"
-        if parent_bytes.startswith(b"\xff\xd8"):
-            parent_mime = "image/jpeg"
-        elif parent_bytes.startswith(b"RIFF") and b"WEBP" in parent_bytes[:16]:
-            parent_mime = "image/webp"
-
         contents: List[Any] = [
-            types.Part.from_bytes(data=parent_bytes, mime_type=parent_mime),
+            to_image_part(parent_bytes),
             "Primary Base Scene Image above (showing the current model/subject)."
         ]
 
@@ -998,12 +1066,6 @@ class GenerationService:
             with open(crop_path, "rb") as f:
                 garment_bytes = f.read()
 
-            g_mime = "image/png"
-            if garment_bytes.startswith(b"\xff\xd8"):
-                g_mime = "image/jpeg"
-            elif garment_bytes.startswith(b"RIFF") and b"WEBP" in garment_bytes[:16]:
-                g_mime = "image/webp"
-
             label = wardrobe_item.get("label", f"Garment {pin_num}")
             category = wardrobe_item.get("category", "tops")
 
@@ -1015,7 +1077,6 @@ class GenerationService:
                 "drop_pos": drop_pos,
                 "target_desc": target_desc,
                 "garment_bytes": garment_bytes,
-                "g_mime": g_mime,
                 "region_bbox": assignment.get("region_bbox"),
             })
             assignments_for_grounding.append({
@@ -1055,7 +1116,7 @@ class GenerationService:
             )
 
             contents.append(f"Reference Garment #{pin_num} (Label: {item['label']}):")
-            contents.append(types.Part.from_bytes(data=item["garment_bytes"], mime_type=item["g_mime"]))
+            contents.append(to_image_part(item["garment_bytes"]))
 
             loaded_assignments.append({
                 "id": f"asgn_{uuid.uuid4().hex[:8]}",
@@ -1257,7 +1318,8 @@ class GenerationService:
         )
 
         try:
-            response = self.client.models.generate_content(
+            response = await asyncio.to_thread(
+                self.client.models.generate_content,
                 model=self.inpaint_model_name,
                 contents=contents,
                 config=config,

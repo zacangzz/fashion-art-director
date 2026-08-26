@@ -1,16 +1,14 @@
 from fastapi import APIRouter, HTTPException, status
-from app.config import get_settings
-from app.db.database import DatabaseManager
 from app.schemas.domain import (
     HistoryResponse,
     GenerationRecordResponse,
     LineageResponse,
 )
+from app.dependencies import get_db_manager
 
 router = APIRouter(prefix="/api", tags=["history"])
+db_manager = get_db_manager()
 
-settings = get_settings()
-db_manager = DatabaseManager(settings.DATABASE_URL)
 
 def _to_generation_response(r: dict) -> GenerationRecordResponse:
     return GenerationRecordResponse(
@@ -86,4 +84,3 @@ async def restore_generation(generation_id: str):
             detail=f"Generation '{generation_id}' not found",
         )
     return _to_generation_response(rec)
-

@@ -3,12 +3,9 @@ import {
   Download,
   Package,
   FileImage,
-  Sliders,
   Check,
   Layers,
-  Sparkles,
   Info,
-  ExternalLink,
   Grid,
   Maximize2,
   CheckCircle2,
@@ -65,7 +62,38 @@ export const RATIO_PRESETS = [
     desc: 'Desktop displays, presentation cards & cards',
     badge: 'Display Landscape',
   },
+  {
+    id: '4k:16:9',
+    label: '16:9 4K UHD Master',
+    res: '3840 × 2160 px',
+    width: 3840,
+    height: 2160,
+    aspectRatio: '16 / 9',
+    desc: 'Ultra-HD 4K displays, horizontal prints & billboard assets',
+    badge: '4K Print / UHD',
+  },
+  {
+    id: '4k:9:16',
+    label: '9:16 4K Vertical Poster',
+    res: '2160 × 3840 px',
+    width: 2160,
+    height: 3840,
+    aspectRatio: '9 / 16',
+    desc: 'Large vertical gallery posters & 4K kiosk displays',
+    badge: '4K Poster',
+  },
+  {
+    id: '4k:1:1',
+    label: '1:1 4K Square Print',
+    res: '2160 × 2160 px',
+    width: 2160,
+    height: 2160,
+    aspectRatio: '1 / 1',
+    desc: 'High-res square fine art & exhibition catalog prints',
+    badge: '4K Fine Art',
+  },
 ];
+
 
 export default function ExportStudio({
   generationResult,
@@ -415,19 +443,19 @@ export default function ExportStudio({
             </div>
           </div>
 
-          {/* 5-Ratio Production Bundle */}
+          {/* Multi-Ratio & 4K Production Bundle */}
           <div className="export-card">
             <div className="export-card-header">
               <div className="card-title-group">
                 <Package size={16} />
-                <span className="card-title">1-Click 5-Ratio Production Bundle</span>
+                <span className="card-title">1-Click Production & 4K Print Bundle</span>
               </div>
-              <span className="badge-pill">ZIP Archive</span>
+              <span className="badge-pill">300 DPI ZIP</span>
             </div>
 
             <div className="export-options-body">
               <p className="bundle-description">
-                Batch renders all 5 centered production crops accompanied by JSON lineage and generation audit metadata:
+                Batch renders all centered social & 4K print crops with embedded 300 DPI metadata and generation audit lineage:
               </p>
 
               <ul className="bundle-presets-bullet-list">
@@ -448,11 +476,12 @@ export default function ExportStudio({
               >
                 <Package size={16} />
                 <span>
-                  {isExporting ? 'Packaging 5-Ratio ZIP...' : 'Download 5-Ratio Production Bundle (.ZIP)'}
+                  {isExporting ? 'Packaging Production ZIP...' : 'Download Production & 4K Bundle (.ZIP)'}
                 </span>
               </button>
             </div>
           </div>
+
         </div>
       </div>
     </div>

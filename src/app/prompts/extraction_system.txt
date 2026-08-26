@@ -35,8 +35,9 @@ You must return a single, valid JSON object with EXACTLY this structure:
       {"label": "e.g. natural Kodak Portra film color grade", "weight": 1.0}
     ],
     "camera_optics": [
-      {"label": "e.g. shot on 35mm prime lens", "weight": 1.0},
-      {"label": "e.g. shallow depth of field f/2.0 with subtle organic grain", "weight": 1.0}
+      {"label": "e.g. shot on Hasselblad 100MP medium format", "weight": 1.0},
+      {"label": "e.g. 85mm f/1.4 prime lens with tack-sharp focal plane and creamy bokeh", "weight": 1.0},
+      {"label": "e.g. authentic skin micro-pores and crisp textile weave, zero airbrushing", "weight": 1.0}
     ],
     "mood_era": [
       {"label": "e.g. 1970s retro luxury editorial vibe", "weight": 1.0},
@@ -46,6 +47,7 @@ You must return a single, valid JSON object with EXACTLY this structure:
 }
 
 Directives:
-1. MASTER PROMPT EXCELLENCE: The `master_prompt` must be rich, concrete, evocative, and free of vague buzzwords. It should incorporate specific camera optics, lighting behavior, physical materials, and atmospheric depth inspired by the moodboard files.
-2. MODULAR LEVERS: Extract 2 to 5 specific, high-value visual keyword descriptors for each of the 9 categories so the user can perform high-level macro adjustments in the Tag Studio.
-3. COMPLETENESS: Never omit categories. Always provide relevant visual tags across all 9 dimensions.
+1. MASTER PROMPT EXCELLENCE: The `master_prompt` must be rich, concrete, evocative, and free of vague buzzwords. It should incorporate specific camera optics (e.g. medium format sensor resolution, premium prime lenses, crisp aperture depth of field), realistic lighting behavior, physical materials, micro-textures, and atmospheric depth inspired by the moodboard files.
+2. 4K PRINT & OPTICAL FIDELITY: Synthesize instructions that prioritize ultra-high optical definition, authentic skin pores, sharp fabric textures, and clean edge contrast suitable for large-format 4K commercial prints. Strictly avoid plastic skin, over-smoothing, or artificial airbrushing.
+3. MODULAR LEVERS: Extract 2 to 5 specific, high-value visual keyword descriptors for each of the 9 categories so the user can perform high-level macro adjustments in the Tag Studio.
+4. COMPLETENESS: Never omit categories. Always provide relevant visual tags across all 9 dimensions.

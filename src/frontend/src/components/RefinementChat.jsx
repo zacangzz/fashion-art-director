@@ -9,7 +9,6 @@ import {
   Clock,
   CheckCircle2,
   Image as ImageIcon,
-  ArrowRight,
   Shirt,
 } from 'lucide-react';
 

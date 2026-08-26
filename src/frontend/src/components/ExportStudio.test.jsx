@@ -11,13 +11,13 @@ describe('ExportStudio Component', () => {
     compiled_prompt: 'Editorial portrait of a model in haute couture suit',
   };
 
-  it('renders all 5 production aspect ratio preview cards', () => {
+  it('renders all production and 4K aspect ratio preview cards', () => {
     render(<ExportStudio generationResult={mockGenResult} />);
 
     expect(screen.getByText('Export & Multi-Ratio Production Studio')).toBeInTheDocument();
     expect(screen.getByText('Aspect Ratio Crops Live Preview')).toBeInTheDocument();
 
-    // Verify all 5 ratio presets are present
+    // Verify all ratio presets are present
     RATIO_PRESETS.forEach((preset) => {
       expect(screen.getAllByText(preset.id).length).toBeGreaterThan(0);
       expect(screen.getAllByText(preset.label).length).toBeGreaterThan(0);
@@ -46,11 +46,12 @@ describe('ExportStudio Component', () => {
       />
     );
 
-    const bundleBtn = screen.getByRole('button', { name: /Download 5-Ratio Production Bundle/i });
+    const bundleBtn = screen.getByRole('button', { name: /Download Production & 4K Bundle/i });
     fireEvent.click(bundleBtn);
 
     expect(handleExport).toHaveBeenCalledWith('gen_export_123');
   });
+
 
   it('allows toggling between PNG and JPEG format and adjusting quality', () => {
     render(<ExportStudio generationResult={mockGenResult} />);

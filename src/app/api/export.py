@@ -1,16 +1,12 @@
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import Response
 
-from app.config import get_settings
-from app.db.database import DatabaseManager
 from app.schemas.domain import ExportBundleRequest
-from app.services.export_service import ExportService
+from app.dependencies import get_export_service
 
 router = APIRouter(prefix="/api/export", tags=["export"])
+export_service = get_export_service()
 
-settings = get_settings()
-db_manager = DatabaseManager(settings.DATABASE_URL)
-export_service = ExportService(db_manager=db_manager)
 
 @router.post("/bundle")
 async def export_bundle(request: ExportBundleRequest):

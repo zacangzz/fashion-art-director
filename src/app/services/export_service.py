@@ -2,7 +2,6 @@ import io
 import json
 import os
 import zipfile
-from typing import Optional
 from app.db.database import DatabaseManager
 from app.services.image_transformer import generate_all_presets
 

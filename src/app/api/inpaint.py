@@ -1,25 +1,14 @@
-import os
 from typing import Optional
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, status
 
 from app.config import get_settings
-from app.db.database import DatabaseManager
 from app.schemas.domain import InpaintResponse
-from app.services.generation_service import GenerationService
 from app.utils.error_handler import parse_and_raise_http_error
+from app.dependencies import get_generation_service
 
 router = APIRouter(prefix="/api", tags=["inpaint"])
-
 settings = get_settings()
-db_manager = DatabaseManager(settings.DATABASE_URL)
-generation_service = GenerationService(
-    db_manager=db_manager,
-    api_key=settings.GEMINI_API_KEY,
-    storage_dir=settings.STORAGE_DIR,
-    model_name=settings.IMAGEN_MODEL,
-    inpaint_model_name=settings.INPAINT_MODEL,
-    audit_path=os.path.join(settings.STORAGE_DIR, "logs", "generation_audit.jsonl"),
-)
+generation_service = get_generation_service()
 
 ALLOWED_MIME_TYPES = {"image/png", "image/jpeg", "image/webp"}
 

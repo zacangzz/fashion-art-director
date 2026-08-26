@@ -1,30 +1,23 @@
 import os
 import uuid
-from typing import Optional, List
+from typing import List
 from fastapi import APIRouter, HTTPException, status
 
 from app.config import get_settings
-from app.db.database import DatabaseManager
 from app.schemas.domain import (
     RefinementRequest,
     RefinementResponse,
     ConversationMessage,
     ConversationResponse,
 )
-from app.services.generation_service import GenerationService
 from app.utils.error_handler import parse_and_raise_http_error
+from app.dependencies import get_db_manager, get_generation_service
 
 router = APIRouter(prefix="/api", tags=["refinement"])
-
 settings = get_settings()
-db_manager = DatabaseManager(settings.DATABASE_URL)
-generation_service = GenerationService(
-    db_manager=db_manager,
-    api_key=settings.GEMINI_API_KEY,
-    storage_dir=settings.STORAGE_DIR,
-    model_name=settings.IMAGEN_MODEL,
-    audit_path=os.path.join(settings.STORAGE_DIR, "logs", "generation_audit.jsonl"),
-)
+
+db_manager = get_db_manager()
+generation_service = get_generation_service()
 
 
 @router.post("/refine", response_model=RefinementResponse)
@@ -37,7 +30,6 @@ async def refine_image(request: RefinementRequest):
         conv_id = request.conversation_id
         if not conv_id:
             conv_id = f"conv_{uuid.uuid4().hex[:8]}"
-            # Ensure conversation record exists
             await db_manager.create_conversation(
                 conv_id=conv_id,
                 baseline_generation_id=request.parent_id,
@@ -69,7 +61,7 @@ async def get_conversation_history(conversation_id: str):
         )
 
     generations = await db_manager.list_conversation_messages(conversation_id)
-    
+
     # Also fetch baseline record to include as initial message
     baseline_record = await db_manager.get_generation(conv["baseline_generation_id"])
     messages: List[ConversationMessage] = []

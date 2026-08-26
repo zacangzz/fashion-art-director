@@ -24,7 +24,7 @@ def test_generate_all_presets():
     src = create_synthetic_image(3840, 2160)
     presets = generate_all_presets(src)
     
-    assert len(presets) == 5
+    assert len(presets) == len(PRESETS)
     expected_filenames = {f"{key}.png" for key in PRESETS.keys()}
     assert set(presets.keys()) == expected_filenames
     
@@ -34,3 +34,6 @@ def test_generate_all_presets():
         preset_key = filename.replace(".png", "")
         expected_size = PRESETS[preset_key]
         assert img.size == expected_size
+        # Verify 300 DPI metadata in info
+        if "dpi" in img.info:
+            assert round(img.info["dpi"][0]) == 300

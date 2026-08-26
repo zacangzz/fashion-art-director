@@ -42,8 +42,8 @@ Double-click `./launch.command` or run:
 ### Manual Setup
 1. **Backend**:
    ```bash
-   uv venv .venv && source .venv/bin/activate
-   uv pip install -r requirements.txt
+   uv sync
+   source .venv/bin/activate
    cp .env.example .env # Configure your GEMINI_API_KEY
    uvicorn --app-dir src app.main:app --port 7860 --reload
    ```

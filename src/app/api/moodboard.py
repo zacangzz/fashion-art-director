@@ -4,32 +4,21 @@ import uuid
 from typing import List, Optional
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, status
 from app.config import get_settings
-from app.db.database import DatabaseManager
 from app.schemas.domain import (
     AnalyzeAndBaselinesResponse,
     BaselineSummary,
     MoodboardAnalysisResponse,
     TagChip,
 )
-from app.services.vision_service import VisionService
-from app.services.generation_service import GenerationService
 from app.utils.error_handler import parse_and_raise_http_error
+from app.dependencies import get_db_manager, get_vision_service, get_generation_service
 
 router = APIRouter(prefix="/api/moodboard", tags=["moodboard"])
-
 settings = get_settings()
-db_manager = DatabaseManager(settings.DATABASE_URL)
-vision_service = VisionService(
-    settings.GEMINI_API_KEY,
-    model_name=settings.VISION_MODEL,
-    audit_path=os.path.join(settings.STORAGE_DIR, "logs", "vision_audit.jsonl"),
-)
-generation_service = GenerationService(
-    db_manager=db_manager,
-    api_key=settings.GEMINI_API_KEY,
-    storage_dir=settings.STORAGE_DIR,
-    model_name=settings.IMAGEN_MODEL,
-)
+
+db_manager = get_db_manager()
+vision_service = get_vision_service()
+generation_service = get_generation_service()
 
 ALLOWED_MIME_TYPES = {"image/png", "image/jpeg", "image/webp", "application/pdf"}
 
@@ -187,4 +176,3 @@ async def analyze_moodboard(
         extracted_chips=chips,
         extracted_json=None,
     )
-
