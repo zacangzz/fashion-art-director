@@ -29,22 +29,19 @@ from app.utils.image_utils import to_image_part
 
 logger = get_logger("generation_service")
 
-ASPECT_RATIO_RESOLUTIONS = {
-    "1.8:1": (1920, 1080),
-    "16:9": (1920, 1080),
-    "1:1": (1440, 1440),
-    "4:5": (1080, 1350),
-    "2:3": (1080, 1620),
-    "9:16": (1080, 1920),
-    "3:2": (1620, 1080),
-    "4:3": (1440, 1080),
-    "3:4": (1080, 1440),
-    "21:9": (2560, 1080),
-    "4k:16:9": (3840, 2160),
-    "4k:9:16": (2160, 3840),
-    "4k:1:1": (2160, 2160),
-    "4k:2:3": (2160, 3240),
-    "4k:3:2": (3240, 2160),
+ASPECT_RATIO_RESOLUTIONS: Dict[str, tuple[int, int]] = {
+    "1:1": (3840, 3840),
+    "16:9": (3840, 2160),
+    "9:16": (2160, 3840),
+    "21:9": (3840, 1645),
+    "2:3": (2560, 3840),
+    "3:2": (3840, 2560),
+    "4:5": (3072, 3840),
+    "5:4": (3840, 3072),
+    "3:4": (2880, 3840),
+    "4:3": (3840, 2880),
+    "1.8:1": (3840, 2133),
+    "1.85:1": (3840, 2075),
 }
 
 
@@ -461,6 +458,34 @@ class GenerationService:
         except Exception as audit_err:
             logger.warning(f"Could not write generation audit event: {audit_err}")
 
+    def _process_and_save_image(
+        self,
+        image_bytes: bytes,
+        filepath: str,
+        aspect_ratio: str,
+    ) -> tuple[int, int]:
+        """
+        Ensures consistent 4K master output resolution across all generation endpoints.
+        Scales up using Lanczos resampling if needed, embeds 600 DPI, and saves as PNG.
+        """
+        target_res = ASPECT_RATIO_RESOLUTIONS.get(aspect_ratio, (3840, 3840))
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        try:
+            pil_img = Image.open(io.BytesIO(image_bytes))
+            if pil_img.mode not in ("RGB", "RGBA"):
+                pil_img = pil_img.convert("RGB")
+            curr_w, curr_h = pil_img.size
+            if curr_w < target_res[0] or curr_h < target_res[1]:
+                logger.info(f"Upscaling generated image from {curr_w}x{curr_h} to 4K target {target_res[0]}x{target_res[1]}")
+                pil_img = pil_img.resize(target_res, Image.Resampling.LANCZOS)
+            pil_img.save(filepath, format="PNG", dpi=(600, 600))
+            return pil_img.size
+        except Exception as err:
+            logger.warning(f"Error processing 4K image with PIL, saving raw bytes: {err}")
+            with open(filepath, "wb") as f:
+                f.write(image_bytes)
+            return target_res
+
     async def _call_image_model(
         self,
         prompt: str,
@@ -665,10 +690,7 @@ class GenerationService:
         filename = f"{gen_id}_master.png"
         filepath = os.path.join(gen_dir, filename)
 
-        with open(filepath, "wb") as f:
-            f.write(image_bytes)
-
-        width, height = ASPECT_RATIO_RESOLUTIONS.get(aspect_ratio, (1080, 1620))
+        width, height = self._process_and_save_image(image_bytes, filepath, aspect_ratio)
         duration_ms = round((time.perf_counter() - started) * 1000, 1)
 
         record = {
@@ -870,10 +892,7 @@ class GenerationService:
         filename = f"{child_id}_master.png"
         filepath = os.path.join(gen_dir, filename)
 
-        with open(filepath, "wb") as f:
-            f.write(image_bytes)
-
-        width, height = ASPECT_RATIO_RESOLUTIONS.get(aspect_ratio, (1080, 1620))
+        width, height = self._process_and_save_image(image_bytes, filepath, aspect_ratio)
 
         record_state = {
             "narrative": eff_narrative,
@@ -970,10 +989,7 @@ class GenerationService:
         filename = f"{child_id}_master.png"
         filepath = os.path.join(gen_dir, filename)
 
-        with open(filepath, "wb") as f:
-            f.write(image_bytes)
-
-        width, height = ASPECT_RATIO_RESOLUTIONS.get(aspect_ratio, (1080, 1620))
+        width, height = self._process_and_save_image(image_bytes, filepath, aspect_ratio)
 
         record = {
             "id": child_id,
@@ -1173,10 +1189,7 @@ class GenerationService:
         filename = f"{child_id}_master.png"
         filepath = os.path.join(gen_dir, filename)
 
-        with open(filepath, "wb") as f:
-            f.write(image_bytes)
-
-        width, height = ASPECT_RATIO_RESOLUTIONS.get(aspect_ratio, (1080, 1620))
+        width, height = self._process_and_save_image(image_bytes, filepath, aspect_ratio)
 
         record = {
             "id": child_id,
@@ -1381,9 +1394,8 @@ class GenerationService:
         mask_filename = f"{child_id}_mask.png"
         mask_filepath = os.path.join(gen_dir, mask_filename)
 
-        # Save both master output image and the mask artifact to disk
-        with open(filepath, "wb") as f:
-            f.write(output_image_bytes)
+        # Save both master output image (processed to 4K) and the mask artifact to disk
+        width, height = self._process_and_save_image(output_image_bytes, filepath, aspect_ratio)
         with open(mask_filepath, "wb") as f:
             f.write(mask_bytes)
 
@@ -1405,8 +1417,6 @@ class GenerationService:
             },
             duration_ms=duration_ms,
         )
-
-        width, height = ASPECT_RATIO_RESOLUTIONS.get(aspect_ratio, (1080, 1620))
 
         # Store inpaint metadata in generation schema_json
         inpaint_meta = {
@@ -1486,10 +1496,7 @@ class GenerationService:
         filename = f"{gen_id}_master.png"
         filepath = os.path.join(gen_dir, filename)
 
-        with open(filepath, "wb") as f:
-            f.write(image_bytes)
-
-        width, height = ASPECT_RATIO_RESOLUTIONS.get(aspect_ratio, (1440, 1440))
+        width, height = self._process_and_save_image(image_bytes, filepath, aspect_ratio)
 
         record = {
             "id": gen_id,

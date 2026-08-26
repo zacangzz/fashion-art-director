@@ -64,4 +64,9 @@ def get_generation_service() -> GenerationService:
 
 @lru_cache()
 def get_export_service() -> ExportService:
-    return ExportService(db_manager=get_db_manager())
+    settings = get_settings()
+    return ExportService(
+        db_manager=get_db_manager(),
+        generation_service=get_generation_service(),
+        storage_dir=settings.STORAGE_DIR,
+    )

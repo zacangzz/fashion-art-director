@@ -1,3 +1,10 @@
+"""
+[ARCHIVED MODULE]
+Legacy Pillow multi-ratio downscaling and cropping preset transformer.
+Archived in favor of Gemini AI direct master restoration & export workflow.
+Maintained only for backward compatibility.
+"""
+
 import io
 from pathlib import Path
 from typing import Dict, Union
@@ -61,7 +68,7 @@ def generate_all_presets(master_image_input: Union[str, Path, Image.Image]) -> D
     """
     Processes a master image against all predefined target resolution presets.
     Returns a dictionary mapping filename (e.g. '01_SocialFeed_1080x1350.png') to PNG bytes
-    with embedded 300 DPI print metadata.
+    with embedded 600 DPI ultra-high-resolution print metadata.
     """
     if isinstance(master_image_input, (str, Path)):
         image = Image.open(master_image_input)
@@ -79,9 +86,10 @@ def generate_all_presets(master_image_input: Union[str, Path, Image.Image]) -> D
     for preset_name, (w, h) in PRESETS.items():
         processed_img = resize_and_crop(image, w, h)
         buffer = io.BytesIO()
-        processed_img.save(buffer, format="PNG", dpi=(300, 300))
+        processed_img.save(buffer, format="PNG", dpi=(600, 600))
         filename = f"{preset_name}.png"
         preset_outputs[filename] = buffer.getvalue()
 
     return preset_outputs
+
 

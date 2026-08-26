@@ -1,69 +1,92 @@
 import React from 'react';
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
-import ExportStudio, { RATIO_PRESETS } from './ExportStudio';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import ExportStudio from './ExportStudio';
+import * as apiClient from '../services/apiClient';
 
 describe('ExportStudio Component', () => {
   const mockGenResult = {
     generation_id: 'gen_export_123',
     master_image_url: 'https://example.com/master.png',
     seed: 9876543,
+    aspect_ratio: '2:3',
     compiled_prompt: 'Editorial portrait of a model in haute couture suit',
   };
 
-  it('renders all production and 4K aspect ratio preview cards', () => {
-    render(<ExportStudio generationResult={mockGenResult} />);
-
-    expect(screen.getByText('Export & Multi-Ratio Production Studio')).toBeInTheDocument();
-    expect(screen.getByText('Aspect Ratio Crops Live Preview')).toBeInTheDocument();
-
-    // Verify all ratio presets are present
-    RATIO_PRESETS.forEach((preset) => {
-      expect(screen.getAllByText(preset.id).length).toBeGreaterThan(0);
-      expect(screen.getAllByText(preset.label).length).toBeGreaterThan(0);
-    });
+  beforeEach(() => {
+    vi.restoreAllMocks();
   });
 
-  it('allows selecting different ratio cards to update enlarged inspector', () => {
+  it('renders original preview thumbnail, metadata, and Prepare for Export button', () => {
     render(<ExportStudio generationResult={mockGenResult} />);
 
-    // Initially 1:1 is selected
-    expect(screen.getByText(/Inspector: 1:1 Square/i)).toBeInTheDocument();
-
-    // Click on 9:16 Story card
-    const storyTab = screen.getByRole('tab', { name: /9:16 Story \/ Reels/i });
-    fireEvent.click(storyTab);
-
-    expect(screen.getByText(/Inspector: 9:16 Story \/ Reels/i)).toBeInTheDocument();
+    expect(screen.getByText('Master Export & AI Restoration Studio')).toBeInTheDocument();
+    expect(screen.getAllByText(/Format: 2:3/i).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText(/Original Preview/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Prepare for Export/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Download Original Master/i })).toBeInTheDocument();
   });
 
-  it('triggers onExportBundle when 1-click bundle button is clicked', () => {
-    const handleExport = vi.fn();
+  it('handles Prepare for Export API call and displays AI Enhanced Master', async () => {
+    const mockPreparedResult = {
+      generation_id: 'gen_export_master_456',
+      parent_id: 'gen_export_123',
+      master_image_url: 'https://example.com/master_enhanced.png',
+      aspect_ratio: '2:3',
+      resolution: { width: 2160, height: 3240 },
+      seed: 9876543,
+      compiled_prompt: 'Editorial portrait of a model in haute couture suit',
+      created_at: '2026-08-26T00:00:00Z',
+    };
+
+    const prepareSpy = vi.spyOn(apiClient, 'prepareExport').mockResolvedValueOnce(mockPreparedResult);
+    const onMasterPrepared = vi.fn();
+
     render(
       <ExportStudio
         generationResult={mockGenResult}
-        onExportBundle={handleExport}
+        onExportMasterPrepared={onMasterPrepared}
       />
     );
 
-    const bundleBtn = screen.getByRole('button', { name: /Download Production & 4K Bundle/i });
-    fireEvent.click(bundleBtn);
+    const prepareBtn = screen.getByRole('button', { name: /Prepare for Export/i });
+    fireEvent.click(prepareBtn);
 
-    expect(handleExport).toHaveBeenCalledWith('gen_export_123');
+    await waitFor(() => {
+      expect(prepareSpy).toHaveBeenCalledWith('gen_export_123');
+      expect(screen.getByText(/AI Enhanced Master Ready/i)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Download High Quality Master \(\.png\)/i })).toBeInTheDocument();
+      expect(onMasterPrepared).toHaveBeenCalledWith(mockPreparedResult);
+    });
   });
 
+  it('allows toggling between Split, Enhanced, and Original compare modes once prepared', async () => {
+    const mockPreparedResult = {
+      generation_id: 'gen_export_master_456',
+      parent_id: 'gen_export_123',
+      master_image_url: 'https://example.com/master_enhanced.png',
+      aspect_ratio: '2:3',
+      resolution: { width: 2160, height: 3240 },
+    };
 
-  it('allows toggling between PNG and JPEG format and adjusting quality', () => {
+    vi.spyOn(apiClient, 'prepareExport').mockResolvedValueOnce(mockPreparedResult);
+
     render(<ExportStudio generationResult={mockGenResult} />);
 
-    const jpegBtn = screen.getByRole('button', { name: /JPEG \(Compressed\)/i });
-    fireEvent.click(jpegBtn);
+    const prepareBtn = screen.getByRole('button', { name: /Prepare for Export/i });
+    fireEvent.click(prepareBtn);
 
-    expect(screen.getByText('JPEG Quality:')).toBeInTheDocument();
-    expect(screen.getByText('95%')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText(/AI Enhanced Master Ready/i)).toBeInTheDocument();
+    });
 
-    const slider = screen.getByLabelText(/JPEG Compression Quality/i);
-    fireEvent.change(slider, { target: { value: '80' } });
-    expect(screen.getByText('80%')).toBeInTheDocument();
+    const enhancedModeBtn = screen.getByRole('button', { name: /Enhanced/i });
+    fireEvent.click(enhancedModeBtn);
+    expect(enhancedModeBtn).toHaveClass('active');
+
+    const originalModeBtn = screen.getByRole('button', { name: /Original/i });
+    fireEvent.click(originalModeBtn);
+    expect(originalModeBtn).toHaveClass('active');
   });
 });
+

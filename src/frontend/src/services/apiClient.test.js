@@ -8,6 +8,7 @@ import {
   fetchLineage,
   restoreGeneration,
   exportBundle,
+  prepareExport,
   generateImage,
 } from './apiClient';
 
@@ -138,5 +139,27 @@ describe('apiClient', () => {
       body: JSON.stringify({ generation_id: 'gen_456' }),
     }));
     expect(res).toEqual(mockBlob);
+  });
+
+  it('prepareExport posts to /api/export/prepare and returns enhanced master data', async () => {
+    const mockResult = {
+      generation_id: 'gen_export_789',
+      parent_id: 'gen_456',
+      master_image_url: '/api/images/gen_export_789_master.png',
+      aspect_ratio: '2:3',
+      resolution: { width: 1080, height: 1620 },
+      created_at: '2026-08-26T00:00:00Z',
+    };
+    fetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => mockResult,
+    });
+
+    const res = await prepareExport('gen_456');
+    expect(fetch).toHaveBeenCalledWith('/api/export/prepare', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ generation_id: 'gen_456' }),
+    }));
+    expect(res).toEqual(mockResult);
   });
 });

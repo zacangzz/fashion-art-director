@@ -204,9 +204,9 @@ class DatabaseManager:
                 "negative_prompt": gen_data.get("negative_prompt", "") or "",
                 "seed": gen_data["seed"],
                 "master_image_path": gen_data["master_image_path"],
-                "aspect_ratio": gen_data.get("aspect_ratio", "2:3"),
-                "resolution_width": gen_data.get("resolution_width", 1440),
-                "resolution_height": gen_data.get("resolution_height", 1440),
+                "aspect_ratio": gen_data.get("aspect_ratio", "1:1"),
+                "resolution_width": gen_data.get("resolution_width", 3840),
+                "resolution_height": gen_data.get("resolution_height", 3840),
                 "conversation_id": gen_data.get("conversation_id"),
             }
 

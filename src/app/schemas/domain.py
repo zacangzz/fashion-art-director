@@ -120,6 +120,23 @@ class ExportBundleRequest(BaseModel):
     generation_id: str
 
 
+class PrepareExportRequest(BaseModel):
+    generation_id: str
+    prompt_override: Optional[str] = None
+
+
+class PrepareExportResponse(BaseModel):
+    generation_id: str
+    parent_id: Optional[str] = None
+    seed: Optional[int] = None
+    compiled_prompt: str
+    negative_prompt: str = ""
+    master_image_url: str
+    aspect_ratio: str = "2:3"
+    resolution: Optional[Dict[str, int]] = None
+    created_at: str
+
+
 class GenerationRecordResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
     id: str
@@ -134,9 +151,9 @@ class GenerationRecordResponse(BaseModel):
     master_image_url: str
     mask_image_url: Optional[str] = None
     inpaint_metadata: Optional[Dict[str, Any]] = None
-    aspect_ratio: str = "2:3"
-    resolution_width: int = 1440
-    resolution_height: int = 1440
+    aspect_ratio: str = "1:1"
+    resolution_width: int = 3840
+    resolution_height: int = 3840
 
 
 class InpaintResponse(BaseModel):

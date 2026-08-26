@@ -163,3 +163,99 @@ async def test_export_service_inpaint_bundle_with_mask(tmp_path):
         assert "inpaint_metadata" in metadata
         assert metadata["inpaint_metadata"]["mask_stats"]["coverage_percentage"] == 2.5
 
+
+class MockGenerationService:
+    def __init__(self, return_bytes: bytes):
+        self.return_bytes = return_bytes
+        self.called_with = None
+
+    async def _call_image_model(self, **kwargs):
+        self.called_with = kwargs
+        return self.return_bytes
+
+
+@pytest.mark.asyncio
+async def test_export_service_prepare_export_master(setup_test_db_and_image, tmp_path):
+    db, gen_data, master_path = setup_test_db_and_image
+
+    enhanced_img = Image.new("RGB", (2160, 2160), color=(200, 220, 255))
+    buf = io.BytesIO()
+    enhanced_img.save(buf, format="PNG")
+    mock_bytes = buf.getvalue()
+
+    mock_gen_service = MockGenerationService(mock_bytes)
+    export_service = ExportService(
+        db_manager=db,
+        generation_service=mock_gen_service,
+        storage_dir=str(tmp_path),
+    )
+
+    res = await export_service.prepare_export_master("gen_test123")
+    assert res["parent_id"] == "gen_test123"
+    assert res["generation_id"].startswith("gen_export_")
+    assert res["master_image_url"].endswith(".png")
+    assert res["resolution"]["width"] == 3840
+    assert res["resolution"]["height"] == 3840
+
+    # Verify Gemini was invoked with reference image bytes and upscale prompt
+    assert mock_gen_service.called_with is not None
+    assert "ultra-high-definition 4K master" in mock_gen_service.called_with["prompt"]
+    assert mock_gen_service.called_with["reference_image_bytes"] is not None
+
+    # Verify saved in DB as linked child generation
+    child_gen = await db.get_generation(res["generation_id"])
+    assert child_gen is not None
+    assert child_gen["parent_id"] == "gen_test123"
+    schema = child_gen["schema_json"] if isinstance(child_gen["schema_json"], dict) else json.loads(child_gen["schema_json"])
+    assert schema["is_export_master"] is True
+
+
+@pytest.mark.asyncio
+async def test_export_api_prepare_endpoint(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "test_api_prepare_export.db")
+    db = DatabaseManager(db_path)
+    await db.init_db()
+
+    img_dir = tmp_path / "generations"
+    img_dir.mkdir(parents=True, exist_ok=True)
+    master_path = str(img_dir / "gen_api_prep_master.png")
+    img = Image.new("RGB", (2560, 3840), color=(120, 100, 80))
+    img.save(master_path)
+
+    await db.create_generation({
+        "id": "gen_api_prep",
+        "prompt": "high fashion trench coat",
+        "negative_prompt": "",
+        "seed": 777,
+        "tags_snapshot": "[]",
+        "master_image_path": master_path,
+        "aspect_ratio": "2:3",
+        "resolution_width": 2560,
+        "resolution_height": 3840,
+    })
+
+    enhanced_img = Image.new("RGB", (2560, 3840), color=(120, 100, 80))
+    buf = io.BytesIO()
+    enhanced_img.save(buf, format="PNG")
+    mock_bytes = buf.getvalue()
+
+    mock_gen_service = MockGenerationService(mock_bytes)
+    test_export_service = ExportService(
+        db_manager=db,
+        generation_service=mock_gen_service,
+        storage_dir=str(tmp_path),
+    )
+
+    from app.api import export
+    monkeypatch.setattr(export, "export_service", test_export_service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        response = await ac.post("/api/export/prepare", json={"generation_id": "gen_api_prep"})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["parent_id"] == "gen_api_prep"
+        assert data["generation_id"].startswith("gen_export_")
+        assert data["aspect_ratio"] == "2:3"
+        assert data["resolution"] == {"width": 2560, "height": 3840}
+
+

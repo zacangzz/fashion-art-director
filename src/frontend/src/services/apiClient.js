@@ -191,6 +191,28 @@ export async function restoreGeneration(id) {
 }
 
 /**
+ * Prepares high-quality master export by running Gemini image restoration and upscaling.
+ * @param {string} generationId
+ * @param {string} [promptOverride]
+ * @returns {Promise<{generation_id: string, parent_id: string, master_image_url: string, aspect_ratio: string, resolution: Object, created_at: string, seed: number, compiled_prompt: string}>}
+ */
+export async function prepareExport(generationId, promptOverride = null) {
+  const payload = { generation_id: generationId };
+  if (promptOverride && typeof promptOverride === 'string' && promptOverride.trim()) {
+    payload.prompt_override = promptOverride.trim();
+  }
+  const response = await fetch('/api/export/prepare', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  return handleApiResponse(response, 'Failed to prepare export master');
+}
+
+/**
  * Requests ZIP bundle export for a given generation ID.
  * @param {string} generationId
  * @returns {Promise<Blob>}

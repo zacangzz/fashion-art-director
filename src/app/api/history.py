@@ -22,9 +22,9 @@ def _to_generation_response(r: dict) -> GenerationRecordResponse:
         negative_prompt=r.get("negative_prompt", "") or "",
         seed=r.get("seed", 0),
         master_image_url=f"/api/images/{r['id']}_master.png",
-        aspect_ratio=r.get("aspect_ratio", "2:3"),
-        resolution_width=r.get("resolution_width", 1440),
-        resolution_height=r.get("resolution_height", 1440),
+        aspect_ratio=r.get("aspect_ratio", "1:1"),
+        resolution_width=r.get("resolution_width", 3840),
+        resolution_height=r.get("resolution_height", 3840),
     )
 
 

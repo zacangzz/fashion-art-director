@@ -34,6 +34,7 @@ def test_generate_all_presets():
         preset_key = filename.replace(".png", "")
         expected_size = PRESETS[preset_key]
         assert img.size == expected_size
-        # Verify 300 DPI metadata in info
+        # Verify 600 DPI metadata in info
         if "dpi" in img.info:
-            assert round(img.info["dpi"][0]) == 300
+            assert round(img.info["dpi"][0]) == 600
+

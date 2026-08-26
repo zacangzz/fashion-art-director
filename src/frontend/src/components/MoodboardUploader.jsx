@@ -2,15 +2,17 @@ import React, { useRef, useState } from 'react';
 import { Upload, X, FileText, Sparkles, Loader2, MessageSquareText, Ratio, RectangleHorizontal, Square, RectangleVertical } from 'lucide-react';
 
 const ASPECT_RATIO_OPTIONS = [
-  { id: '1.8:1', label: '1.8:1', name: 'Cinematic (1.8:1)', icon: 'horizontal', desc: '1920×1080 Widescreen' },
-  { id: '16:9', label: '16:9', name: 'Widescreen (16:9)', icon: 'horizontal', desc: '1920×1080 Standard HD' },
-  { id: '1:1', label: '1:1', name: 'Square (1:1)', icon: 'square', desc: '1440×1440 Instagram Grid' },
-  { id: '4:5', label: '4:5', name: 'Social (4:5)', icon: 'vertical', desc: '1080×1350 Feed Portrait' },
-  { id: '2:3', label: '2:3', name: 'Fashion (2:3)', icon: 'vertical', desc: '1080×1620 Editorial Portrait' },
-  { id: '9:16', label: '9:16', name: 'Vertical (9:16)', icon: 'vertical', desc: '1080×1920 Story / Reel' },
-  { id: '4:3', label: '4:3', name: 'Standard (4:3)', icon: 'horizontal', desc: '1440×1080 Classic' },
-  { id: '3:2', label: '3:2', name: 'Photo (3:2)', icon: 'horizontal', desc: '1620×1080 35mm Format' },
-  { id: '21:9', label: '21:9', name: 'Cinema (21:9)', icon: 'horizontal', desc: '2560×1080 Ultrawide' },
+  { id: '1:1', label: '1:1', name: 'Square (1:1)', icon: 'square', desc: '3840×3840 4K Master Grid' },
+  { id: '16:9', label: '16:9', name: 'Widescreen (16:9)', icon: 'horizontal', desc: '3840×2160 4K UHD' },
+  { id: '9:16', label: '9:16', name: 'Vertical (9:16)', icon: 'vertical', desc: '2160×3840 4K Story / Reel' },
+  { id: '21:9', label: '21:9', name: 'Cinema (21:9)', icon: 'horizontal', desc: '3840×1645 4K Ultrawide' },
+  { id: '2:3', label: '2:3', name: 'Fashion (2:3)', icon: 'vertical', desc: '2560×3840 4K Editorial Portrait' },
+  { id: '3:2', label: '3:2', name: 'Photo (3:2)', icon: 'horizontal', desc: '3840×2560 4K Landscape' },
+  { id: '4:5', label: '4:5', name: 'Social (4:5)', icon: 'vertical', desc: '3072×3840 4K Social Portrait' },
+  { id: '5:4', label: '5:4', name: 'Large Format (5:4)', icon: 'horizontal', desc: '3840×3072 4K Print' },
+  { id: '3:4', label: '3:4', name: 'Portrait (3:4)', icon: 'vertical', desc: '2880×3840 4K Classic' },
+  { id: '4:3', label: '4:3', name: 'Standard (4:3)', icon: 'horizontal', desc: '3840×2880 4K Classic' },
+  { id: '1.8:1', label: '1.8:1', name: 'Cinematic (1.8:1)', icon: 'horizontal', desc: '3840×2133 4K Cinema' },
 ];
 
 export default function MoodboardUploader({

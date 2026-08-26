@@ -21,8 +21,8 @@
 5. **Phase 4 Capabilities**:
    - **Lineage History Drawer**: Chronological tree tracking root baselines and fine-tuned child iterations with 1-click studio state restore.
    - **Split-Slider Diff Modal**: Fullscreen comparison modal with interactive split-slider widget and JSON parameter diff table.
-   - **4K Multi-Ratio Bundle Exporter**: 1-click ZIP export generating 5 standard production ratios (`1080x1350`, `1080x1920`, `1440x780`, `1440x1440`, `1730x960`) via Pillow Lanczos resampling.
-   - **macOS Desktop Launcher**: Zero-setup double-click `launch.command` script.
+    - **AI-Powered 4K Master Export**: 1-click Gemini neural restoration and upscale workflow preserving garment weaves and facial anatomy with interactive split-slider inspector and raw 4K master file download.
+    - **macOS Desktop Launcher**: Zero-setup double-click `launch.command` script.
 
 ---
 

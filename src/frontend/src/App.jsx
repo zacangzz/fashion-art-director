@@ -448,7 +448,7 @@ export default function App() {
         master_image_url: parent.master_image_url || parent.image_url,
         seed: parent.seed,
         compiled_prompt: parent.compiled_prompt || parent.prompt,
-        resolution: { width: parent.resolution_width || 1440, height: parent.resolution_height || 1440 },
+        resolution: { width: parent.resolution_width || 3840, height: parent.resolution_height || 3840 },
       });
     } else {
       setPreviousGenerationResult(null);
@@ -459,7 +459,7 @@ export default function App() {
       master_image_url: record.master_image_url || record.image_url,
       seed: record.seed,
       compiled_prompt: record.compiled_prompt || record.prompt,
-      resolution: { width: record.resolution_width || 1440, height: record.resolution_height || 1440 },
+      resolution: { width: record.resolution_width || 3840, height: record.resolution_height || 3840 },
       schema_json: record.schema_json,
     };
     setGenerationResult(restoredGen);
@@ -767,10 +767,14 @@ export default function App() {
           <ExportStudio
             generationResult={generationResult}
             activeBaseline={activeBaseline}
-            onExportBundle={handleExportBundle}
-            isExporting={isExporting}
+            globalAspectRatio={aspectRatio}
+            onExportMasterPrepared={(result) => {
+              setGenerationResult(result);
+              loadHistoryList();
+            }}
           />
         )}
+
       </main>
 
       {/* Slide-out History Lineage Drawer */}
