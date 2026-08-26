@@ -34,7 +34,8 @@
 - Google AI Studio API Key (`GEMINI_API_KEY`)
 
 ### Quick Start (macOS Double-Click)
-Double-click `./launch.command` or run:
+1. If `launch.command` is not executable, double-click `Enable Launcher.app` (or run `osascript enable_execution.applescript`) to grant execute permissions.
+2. Double-click `./launch.command` or run:
 ```bash
 ./launch.command
 ```
