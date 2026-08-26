@@ -165,7 +165,57 @@ describe('CanvasViewport', () => {
     const renderedImg = screen.getByAltText('Master Rendered Artwork');
     expect(renderedImg).toHaveAttribute('src', '/api/images/gen_inpaint_123_mask.png');
   });
+
+  it('renders wardrobe pins and allows deletion and drag repositioning', () => {
+    const onRemovePin = vi.fn();
+    const onUpdatePin = vi.fn();
+
+    render(
+      <CanvasViewport
+        imageUrl="/api/images/model.png"
+        isWardrobeMode={true}
+        wardrobeAssignments={[
+          { pin_number: 1, item_label: 'Silk Blazer', drop_position: { x: 0.4, y: 0.3 } },
+        ]}
+        onRemovePin={onRemovePin}
+        onUpdatePinPosition={onUpdatePin}
+      />
+    );
+
+    expect(screen.getByText('Silk Blazer')).toBeInTheDocument();
+    expect(screen.getByText('1')).toBeInTheDocument();
+
+    // Click remove button on pin
+    const removeBtn = screen.getByRole('button', { name: /Remove pin 1/i });
+    fireEvent.click(removeBtn);
+    expect(onRemovePin).toHaveBeenCalledWith(1);
+  });
+
+  it('supports spacebar hand tool and fit view reset', () => {
+    render(
+      <CanvasViewport
+        imageUrl="/api/images/test.png"
+      />
+    );
+
+    const fitBtn = screen.getByTitle('Fit to Width / Reset View');
+    expect(fitBtn).toBeInTheDocument();
+
+    // Trigger Spacebar keydown
+    fireEvent.keyDown(window, { code: 'Space', key: ' ' });
+    const handBtn = screen.getByTitle('Hold [Spacebar] + Drag to Pan View');
+    expect(handBtn).toHaveClass('active');
+
+    // Trigger Spacebar keyup
+    fireEvent.keyUp(window, { code: 'Space', key: ' ' });
+    expect(handBtn).not.toHaveClass('active');
+
+    // Click Fit button
+    fireEvent.click(fitBtn);
+    expect(fitBtn).toHaveClass('active');
+  });
 });
+
 
 
 

@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.config import get_settings
 from app.db.database import DatabaseManager
-from app.api import moodboard, generation, history, export, inpaint
+from app.api import moodboard, generation, history, export, inpaint, refinement, wardrobe
 
 from app.utils.logger import setup_logging, get_logger
 
@@ -76,6 +76,9 @@ app.include_router(generation.router)
 app.include_router(history.router)
 app.include_router(export.router)
 app.include_router(inpaint.router)
+app.include_router(refinement.router)
+app.include_router(wardrobe.router)
+
 
 
 # Mount static images directory

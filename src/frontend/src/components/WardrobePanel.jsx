@@ -1,0 +1,422 @@
+import React, { useState, useRef, useEffect } from 'react';
+import {
+  Shirt,
+  Upload,
+  Sparkles,
+  Trash2,
+  X,
+  Plus,
+  Layers,
+  CheckCircle2,
+  AlertCircle,
+  Tag,
+  GripHorizontal,
+  ChevronRight,
+  RefreshCw,
+  HelpCircle,
+} from 'lucide-react';
+import { uploadWardrobeSheet, fetchWardrobeItems, deleteWardrobeItem, deleteAllWardrobeItems } from '../services/apiClient';
+
+const CATEGORY_COLORS = {
+  tops: '#38bdf8',
+  bottoms: '#fb923c',
+  outerwear: '#a78bfa',
+  footwear: '#34d399',
+  accessories: '#f472b6',
+  full_outfit: '#facc15',
+};
+
+export default function WardrobePanel({
+  isOpen = false,
+  onClose,
+  assignments = [],
+  onAddAssignment,
+  onRemoveAssignment,
+  onClearAssignments,
+  onCompose,
+  isComposing = false,
+  activeGenerationId = null,
+}) {
+  const [items, setItems] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState(null);
+  const [selectedCategory, setSelectedCategory] = useState('all');
+  const [customInstruction, setCustomInstruction] = useState('');
+  const fileInputRef = useRef(null);
+
+  // Load wardrobe library items on mount or when panel opens
+  useEffect(() => {
+    if (isOpen) {
+      loadItems();
+    }
+  }, [isOpen]);
+
+  const loadItems = async () => {
+    try {
+      setIsLoading(true);
+      setErrorMessage(null);
+      const res = await fetchWardrobeItems();
+      setItems(res.items || []);
+    } catch (err) {
+      setErrorMessage(err.message || 'Failed to load wardrobe library.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleFileUpload = async (e) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const file = files[0];
+    try {
+      setIsUploading(true);
+      setErrorMessage(null);
+      const res = await uploadWardrobeSheet(file);
+      if (res.items && res.items.length > 0) {
+        setItems((prev) => [...res.items, ...prev]);
+      }
+    } catch (err) {
+      setErrorMessage(err.message || 'Failed to segment wardrobe sheet.');
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleDeleteItem = async (e, id) => {
+    e.stopPropagation();
+    if (!window.confirm('Remove this garment from your wardrobe library?')) return;
+    try {
+      await deleteWardrobeItem(id);
+      setItems((prev) => prev.filter((item) => item.id !== id));
+      // Remove any active assignment using this item
+      assignments.forEach((asgn) => {
+        if (asgn.wardrobe_item_id === id) {
+          onRemoveAssignment?.(asgn.pin_number);
+        }
+      });
+    } catch (err) {
+      setErrorMessage(err.message || 'Failed to delete garment.');
+    }
+  };
+
+  const handleDeleteAll = async () => {
+    if (items.length === 0) return;
+    if (!window.confirm(`Delete all ${items.length} garments from your wardrobe library?`)) return;
+    try {
+      setIsLoading(true);
+      await deleteAllWardrobeItems();
+      setItems([]);
+      onClearAssignments?.();
+    } catch (err) {
+      setErrorMessage(err.message || 'Failed to delete all garments.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDragStart = (e, item) => {
+    e.dataTransfer.setData('application/json', JSON.stringify(item));
+    e.dataTransfer.effectAllowed = 'copy';
+  };
+
+  const handleQuickAdd = (item) => {
+    // Accessible fallback: clicking the garment or pressing Enter adds it with center coordinates
+    onAddAssignment?.(item, { x: 0.5, y: 0.5 });
+  };
+
+  const filteredItems = selectedCategory === 'all'
+    ? items
+    : items.filter((item) => (item.category || 'tops').toLowerCase() === selectedCategory);
+
+  if (!isOpen) return null;
+
+  return (
+    <aside className="wardrobe-panel-container" aria-label="Wardrobe Library Panel">
+      {/* Header */}
+      <div className="wardrobe-panel-header">
+        <div className="wardrobe-header-title-row">
+          <div className="wardrobe-title-badge">
+            <Shirt size={16} className="text-accent" />
+            <span>Wardrobe Studio</span>
+          </div>
+          <div className="wardrobe-header-actions">
+            <span className="wardrobe-count-badge">
+              {items.length} item{items.length !== 1 ? 's' : ''}
+            </span>
+            {items.length > 0 && (
+              <button
+                type="button"
+                className="btn-text-danger"
+                onClick={handleDeleteAll}
+                title="Delete all garments from wardrobe library"
+                aria-label="Delete all garments"
+              >
+                <Trash2 size={12} />
+                <span>Delete All</span>
+              </button>
+            )}
+            <button
+              type="button"
+              className="btn-icon-subtle"
+              onClick={onClose}
+              title="Close wardrobe panel"
+              aria-label="Close Wardrobe Studio"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        </div>
+        <p className="wardrobe-subtitle">
+          Upload multi-garment lookbooks. Drag items onto the subject in the viewport to swap clothing.
+        </p>
+      </div>
+
+      {/* Upload Zone */}
+      <div className="wardrobe-upload-section">
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          style={{ display: 'none' }}
+          onChange={handleFileUpload}
+          aria-label="Upload garment image or lookbook"
+        />
+        <div
+          className={`wardrobe-dropzone ${isUploading ? 'is-uploading' : ''}`}
+          onClick={() => !isUploading && fileInputRef.current?.click()}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              fileInputRef.current?.click();
+            }
+          }}
+          aria-label="Click to upload garment lookbook image"
+        >
+          {isUploading ? (
+            <div className="wardrobe-uploading-spinner-row" role="status" aria-live="polite">
+              <div className="generating-spinner" />
+              <div className="upload-text-group">
+                <span className="upload-main-text">Analyzing & Segmenting Sheet...</span>
+                <span className="upload-sub-text">Gemini vision is detecting garment bounding boxes</span>
+              </div>
+            </div>
+          ) : (
+            <div className="wardrobe-dropzone-inner">
+              <div className="dropzone-icon-circle">
+                <Upload size={16} />
+              </div>
+              <div className="upload-text-group">
+                <span className="upload-main-text">Upload Garment Sheet / Lookbook</span>
+                <span className="upload-sub-text">Auto-segments into individual items</span>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Error Message */}
+      {errorMessage && (
+        <div className="wardrobe-error-banner" role="alert">
+          <AlertCircle size={14} />
+          <span>{errorMessage}</span>
+          <button type="button" onClick={() => setErrorMessage(null)} aria-label="Dismiss error">
+            <X size={12} />
+          </button>
+        </div>
+      )}
+
+      {/* Category Pills */}
+      <div className="wardrobe-category-bar" role="tablist" aria-label="Garment categories">
+        {['all', 'outerwear', 'tops', 'bottoms', 'footwear', 'accessories'].map((cat) => (
+          <button
+            key={cat}
+            type="button"
+            className={`category-pill ${selectedCategory === cat ? 'active' : ''}`}
+            onClick={() => setSelectedCategory(cat)}
+            role="tab"
+            aria-selected={selectedCategory === cat}
+          >
+            {cat === 'all' ? 'All Items' : cat.charAt(0).toUpperCase() + cat.slice(1)}
+          </button>
+        ))}
+      </div>
+
+      {/* Garments Grid */}
+      <div className="wardrobe-items-scroll" tabIndex={0} role="region" aria-label="Garment Library Items">
+        {isLoading ? (
+          <div className="wardrobe-empty-state" role="status" aria-live="polite">
+            <RefreshCw size={24} className="animate-spin text-muted" />
+            <p>Loading wardrobe library...</p>
+          </div>
+        ) : filteredItems.length === 0 ? (
+          <div className="wardrobe-empty-state">
+            <Shirt size={32} className="text-muted" />
+            <p className="empty-title">No garments in this category</p>
+            <p className="empty-desc">
+              Upload a lookbook image containing outfits, shirts, jackets, or trousers.
+            </p>
+          </div>
+        ) : (
+          <div className="wardrobe-cards-grid">
+            {filteredItems.map((item) => {
+              const activePinCount = assignments.filter((a) => a.wardrobe_item_id === item.id).length;
+              const catColor = CATEGORY_COLORS[item.category] || CATEGORY_COLORS.tops;
+
+              return (
+                <div
+                  key={item.id}
+                  className={`garment-card ${activePinCount > 0 ? 'is-assigned' : ''}`}
+                  draggable={true}
+                  onDragStart={(e) => handleDragStart(e, item)}
+                  onClick={() => handleQuickAdd(item)}
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      handleQuickAdd(item);
+                    }
+                  }}
+                  title="Drag onto viewport or click to pin garment"
+                  aria-label={`${item.label}, Category: ${item.category || 'tops'}`}
+                >
+                  <div className="garment-thumb-wrap">
+                    <img
+                      src={item.image_url}
+                      alt={item.label}
+                      className="garment-thumb-img"
+                      loading="lazy"
+                    />
+                    <div className="garment-drag-overlay">
+                      <GripHorizontal size={14} />
+                      <span>Drag to Viewport</span>
+                    </div>
+                    {activePinCount > 0 && (
+                      <div className="garment-active-pin-badge">
+                        <span>Pinned ({activePinCount})</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="garment-info-row">
+                    <div className="garment-text-col">
+                      <span className="garment-title" title={item.label}>
+                        {item.label}
+                      </span>
+                      <span
+                        className="garment-cat-tag"
+                        style={{ color: catColor, borderColor: `${catColor}40` }}
+                      >
+                        {item.category || 'tops'}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className="garment-delete-btn"
+                      onClick={(e) => handleDeleteItem(e, item.id)}
+                      title="Delete garment"
+                      aria-label={`Delete ${item.label}`}
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Queued Assignments & Composition Bar */}
+      <div className="wardrobe-assignments-footer">
+        <div className="assignments-header-row">
+          <div className="assignments-title-group">
+            <Layers size={14} className="text-accent" />
+            <span className="assignments-title">Queued Swaps ({assignments.length})</span>
+          </div>
+          {assignments.length > 0 && (
+            <button
+              type="button"
+              className="btn-text-subtle"
+              onClick={onClearAssignments}
+              disabled={isComposing}
+              aria-label="Clear all pinned assignments"
+            >
+              Clear All
+            </button>
+          )}
+        </div>
+
+        {assignments.length === 0 ? (
+          <div className="assignments-empty-hint">
+            <HelpCircle size={13} className="text-muted" />
+            <span>Drag a garment card above and drop it directly onto the model in the viewport.</span>
+          </div>
+        ) : (
+          <div className="assignments-chips-list">
+            {assignments.map((asgn) => (
+              <div key={asgn.pin_number} className="assignment-chip">
+                <span className="assignment-pin-num">#{asgn.pin_number}</span>
+                <span className="assignment-item-label">{asgn.item_label || 'Garment'}</span>
+                <button
+                  type="button"
+                  className="assignment-remove-btn"
+                  onClick={() => onRemoveAssignment?.(asgn.pin_number)}
+                  title="Remove this pin"
+                  disabled={isComposing}
+                  aria-label={`Remove pin #${asgn.pin_number}`}
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Optional Custom Directive */}
+        {assignments.length > 0 && (
+          <div className="wardrobe-instruction-input-wrap">
+            <input
+              type="text"
+              className="wardrobe-instruction-input"
+              placeholder="Optional styling directive (e.g. 'Match sunlight reflections, untucked')..."
+              value={customInstruction}
+              onChange={(e) => setCustomInstruction(e.target.value)}
+              disabled={isComposing}
+              aria-label="Custom wardrobe styling directive"
+            />
+          </div>
+        )}
+
+        {/* Compose Button */}
+        <button
+          type="button"
+          className="btn-primary compose-btn"
+          disabled={assignments.length === 0 || isComposing || !activeGenerationId}
+          onClick={() => onCompose?.(customInstruction)}
+        >
+          {isComposing ? (
+            <>
+              <div className="btn-spinner" />
+              <span>Composing Multi-Garment Swap...</span>
+            </>
+          ) : (
+            <>
+              <Sparkles size={14} />
+              <span>
+                {assignments.length === 0
+                  ? 'Drag Garments to Viewport'
+                  : `Compose Swaps (${assignments.length} item${assignments.length !== 1 ? 's' : ''})`}
+              </span>
+            </>
+          )}
+        </button>
+      </div>
+    </aside>
+  );
+}

@@ -23,3 +23,9 @@ DEFAULT_NEGATIVE_PROMPT = load_json("defaults.json").get(
 )
 INPAINT_SYSTEM_PROMPT = load_prompt("inpaint_system.txt")
 INPAINT_SUFFIX = load_prompt("inpaint_suffix.txt")
+REFINEMENT_SYSTEM_PROMPT = load_prompt("refinement_system.txt")
+WARDROBE_SEGMENTATION_PROMPT = load_prompt("wardrobe_segmentation.txt")
+WARDROBE_COMPOSITION_SYSTEM_PROMPT = load_prompt("wardrobe_composition_system.txt")
+CLOTHING_REGION_DETECTION_PROMPT = load_prompt("clothing_region_detection.txt")
+SUBJECT_GROUNDING_PROMPT = load_prompt("subject_grounding_system.txt")
+

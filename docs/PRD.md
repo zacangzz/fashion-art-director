@@ -1,121 +1,188 @@
 # Product Requirements Document (PRD)
 ## Image Gen Pipeline Studio
 
-**Document Version**: 2.0  
-**Status**: Approved  
+**Document Version**: 4.0  
+**Status**: Active / 4-Step Sequential Studio Release  
+**Last Updated**: 2026-08-25  
 
 ---
 
-## 1. Product Overview & Purpose
+## 1. Product Overview & Vision
 
-**Image Gen Pipeline Studio** is a self-contained local web application that transforms reference moodboards into highly controllable, deterministic image generation workflows. Built on a structured **JSON Scene Schema foundation**, the studio enables creators to extract deep visual specifications, generate 4 baseline candidate images, visually inspect and fine-tune complex visual parameters via a **Hybrid Node/Block Canvas & Inspector**, and iteratively re-generate high-fidelity artwork using **Seed-Locking and Image-Reference Conditioning** with zero pixel degradation.
+**Image Gen Pipeline Studio** is a self-contained, local creative studio and pipeline that transforms moodboard imagery and creative intent into deterministic, reproducible, and fine-grain controllable image generation workflows.
 
-### 1.1 Problem Statement
-- **Iterative Edit Degradation**: Modifying images in standard chat interfaces re-encodes canvas previews, introducing blurriness and artifacts across multiple edit passes.
-- **Unstructured Prompt Drift**: Flat text prompts lack the depth and isolation needed to tweak specific scene attributes (e.g., changing key light angle or prop color without altering subject identity or composition).
-- **Workflow Fragmentation**: Creators waste time manually bridging moodboard analysis, prompt engineering, baseline iteration, and multi-ratio production delivery across disparate tools.
+The application implements a **4-Step Sequential Workflow**:
+1. **Art Direction (Step 1)**: Multimodal moodboard ingestion (1–5 files) + creative prompt, synthesized by AI Vision Director into an optimal Master Prompt and 4 exploratory baseline seeds.
+2. **Refinement (Step 2)**: Natural-language conversation-based prompting where each refinement conditions on the active output reference with seed-locking and thread history tracking.
+3. **Canvas Studio (Step 3)**: Surgical spatial inpainting using interactive brush masking (`#FFFFFF` / `#000000`), natural language edit instructions, and boundary-blending generative diffusion.
+4. **Export (Step 4)**: Dedicated export studio offering single-image lossless PNG / compressed JPEG downloads and 1-click 5-ratio production bundles (`4:5`, `9:16`, `1.85:1`, `1:1`, `1.8:1`) with JSON metadata.
 
-### 1.2 Core Value Proposition
-- **Sparse JSON Scene Schema**: Preserves the visual information that applies to each scene without requiring empty sections or fields.
-- **Automated 4-Baseline Inception**: Automatically converts the extracted JSON schema into 4 baseline image candidates across distinct seeds for immediate selection.
-- **Hybrid Visual Node/Block Canvas & Inspector**: Replaces raw JSON editing with an intuitive visual node graph and dedicated property inspector (sliders, color swatches, spatial frames, and relationship links).
-- **Non-Destructive Continuity (Seed + Image Reference)**: Locks the chosen baseline seed and passes the baseline image as reference conditioning alongside JSON parameter deltas to achieve pinpoint edits with zero generational loss.
-- **4K Multi-Ratio Production Delivery**: Generates 4K master artwork and exports a 1-click ZIP bundle formatted across 5 target production aspect ratios.
+```
+[Uploaded Moodboard (1–5)] + [User Creative Intent]
+                      │
+                      ▼
+   ┌──────────────────────────────────────────────┐
+   │ Step 1: Art Direction                        │
+   │ - Vision Director synthesizes Master Prompt  │
+   │ - Concurrently renders 4 Baseline Seeds      │
+   └──────────────────────────────────────────────┘
+                      │
+                      ▼
+   ┌──────────────────────────────────────────────┐
+   │ Step 2: Refinement (Conversation Studio)     │
+   │ - Conversational natural-language prompts    │
+   │ - Reference image conditioning + Seed lock   │
+   │ - Thread timeline with thumbnail history     │
+   └──────────────────────────────────────────────┘
+                      │
+                      ▼
+   ┌──────────────────────────────────────────────┐
+   │ Step 3: Canvas Studio (Micro Inpainting)     │
+   │ - Surgical brush masking on full canvas      │
+   │ - Natural language localized spot editing    │
+   │ - Seamless pixel boundary preservation       │
+   └──────────────────────────────────────────────┘
+                      │
+                      ▼
+   ┌──────────────────────────────────────────────┐
+   │ Step 4: Export Studio (Production Delivery)  │
+   │ - Single master PNG / JPEG download          │
+   │ - 1-Click 5-Ratio Production Bundle (.ZIP)   │
+   │ - Complete lineage history & audit logs      │
+   └──────────────────────────────────────────────┘
+```
 
 ---
 
-## 2. User Journey & Core 3-Step Workflow
+## 2. Problem Statement & Core Value Proposition
+
+### 2.1 Problem Statement
+- **Iterative Edit Degradation**: Repeatedly editing generated images in standard chat tools re-compresses and degrades visual assets across edit passes.
+- **Unstructured Prompt Drift**: Flat string prompts suffer from prompt entanglement—changing a lighting condition or wardrobe color unintentionally mutates character facial identity, background structure, or composition.
+- **Fragmented Editing Levels**: Creators need intuitive conversational prompting for macro scene adjustments, spatial canvas brush tools for surgical local touch-ups, and a dedicated export suite for production delivery.
+- **Workflow Fragmentation**: Navigating multiple disparate tools for moodboard analysis, prompt engineering, multi-seed exploration, localized inpainting, and multi-ratio production asset generation wastes immense creative time.
+
+### 2.2 Core Value Proposition
+- **4-Step Sequential Architecture**: Clean progression from Art Direction → Refinement → Canvas → Export.
+- **Conversation-Based Refinement**: Natural-language chat UI where each output is tracked as a conversation message and used as the reference anchor for subsequent iterations.
+- **Automated 4-Baseline Sweep**: Parallel dispatch of 4 unique seed candidates immediately after multimodal moodboard ingestion.
+- **Precision Masked Inpainting**: In-canvas brush editor with undo/redo, brush size control, mask clearing, and boundary-preserving diffusion inpainting.
+- **Dedicated Export Suite**: 1-click single-file and 5-ratio ZIP bundle export across standard industry formats (`4:5`, `9:16`, `1.85:1`, `1:1`, `1.8:1`) with metadata.
+- **Local Sovereignty & Audit Logging**: 100% local persistence in SQLite (`studio.db`) and file storage (`storage/`), with transparent JSONL audit trails (`vision_audit.jsonl` and `generation_audit.jsonl`).
+
+---
+
+## 3. End-to-End User Journey & Workflow
 
 ```mermaid
 flowchart TD
-    A[Step 1: Ingest Moodboard 1-5 Images] --> B[Gemini Multimodal Analyzer]
-    B --> C[Synthesize Master JSON Scene Schema]
-    C --> D[Concurrently Generate 4 Baseline Images Across Random Seeds]
-    D --> E[Step 2: User Selects 1 Baseline Image]
-    E --> F[Hybrid Visual Node/Block Canvas & Inspector]
-    F --> G[Fine-Tune Parameters: Sliders, Swatches, Poses, Lighting, Constraints]
-    G --> H[Step 3: Re-Generate via Seed-Lock + Image Reference Conditioning]
-    H --> I{Satisfied?}
-    I -- No --> F
-    I -- Yes --> J[1-Click 4K Multi-Ratio Bundle Export]
+    A[Step 1: Art Direction - Moodboard 1-5 Files + Prompt] --> B[Gemini Vision Director Synthesis]
+    B --> C[Synthesize Master Prompt & Decompose Levers]
+    C --> D[Concurrently Generate 4 Baseline Seeds]
+    D --> E[User Selects Preferred Baseline Anchor]
+    E --> F[Step 2: Refinement - Conversational Chat Studio]
+    F --> G[Iterative Reference-Conditioned Refinements]
+    G --> H[Step 3: Canvas Studio - Inpainting & Spot Edits]
+    H --> I[Paint Mask + Natural Language Edit Instructions]
+    I --> J[Step 4: Export Studio - Production Delivery]
+    J --> K1[Single Image PNG / JPEG]
+    J --> K2[1-Click 5-Ratio ZIP Production Bundle]
 ```
 
-### Step 1: Moodboard Ingestion & 4-Baseline Generation
-1. The user uploads 1 to 5 moodboard images via drag-and-drop.
-2. The system automatically analyzes the images, generates the master **JSON Scene Schema**, and concurrently renders **4 baseline candidate images** (using 4 unique random seeds).
+### Step 1: Art Direction (Moodboard Ingestion & 4-Baseline Generation)
+1. The user uploads 1 to 5 reference files (PNG, JPEG, WebP, PDF) and inputs their starting creative prompt.
+2. The AI Vision Director (`gemini-3.1-flash-lite`) analyzes the imagery, synthesizes the **Master Prompt**, extracts the **Scene Narrative**, and populates visual levers.
+3. The system executes 4 concurrent image generation requests across randomized seeds (`gemini-3.1-flash-lite-image`) and renders a 4-up selection grid.
 
-### Step 2: Baseline Selection & Parameter Fine-Tuning
-1. The user selects the preferred baseline candidate to enter the fine-tuning workspace.
-2. The interface visualizes the JSON schema as an interactive **Node/Block Graph** connected to a central Scene Node.
-3. The user selects any node to open its **Property Inspector** and fine-tunes visual parameters (lighting angles, focal length, color palettes, subject poses, materials, and constraints) with real-time feedback.
+### Step 2: Refinement (Conversational Prompting, Thread Timeline & Wardrobe Studio)
+1. The user selects their preferred baseline candidate to enter the Refinement Studio.
+2. The user types natural-language refinement instructions (e.g., *"Make lighting warmer with golden hour sunbeams"*, *"Change jacket to brown leather"*).
+3. The engine (`gemini-3.1-flash-lite-image`) uses the active image output as a reference anchor with seed-locking, returning a refined iteration.
+4. **Wardrobe Studio (Multi-Image Garment Swap)**:
+   - Users can open the collapsible Wardrobe side panel and upload multi-garment lookbook/sheet images.
+   - The system uses Gemini Vision to auto-detect and segment individual garments with normalized bounding boxes, cropping them into distinct cards with categories and tags.
+   - Users drag garment cards onto the master viewport, dropping numbered pins (①, ②, ③) on the target subject/body region.
+   - Users execute multi-image composition (`/api/wardrobe/compose`) which sends the master image and all garment references simultaneously in a single multi-part Gemini call.
+5. Each iteration (conversational refinement or wardrobe swap) is tracked in a scrollable conversation thread with thumbnails, seeds, pin details, and full viewport inspection.
 
-### Step 3: Non-Destructive Continuous Re-Generation
-1. The user triggers re-generation; the system locks the baseline seed and feeds the baseline image as visual reference conditioning alongside the sparse JSON specification.
-2. Iterations retain scene identity and spatial coherence without raster compression loss.
-3. The user exports the approved 4K artwork in 5 standard production ratios via a single click.
+### Step 3: Canvas (Micro Inpainting & Spot Editing)
+1. The user brushes a white mask (`#FFFFFF`) over target regions (e.g., face retouch, prop replacement, wardrobe detail).
+2. The user types a focused edit instruction (e.g., *"Replace handheld glass with a vintage leather journal"*).
+3. The inpainting engine (`gemini-3.1-flash-image`) edits only masked pixels while strictly preserving surrounding regions and harmonizing boundary lighting.
+
+### Step 4: Export (Dedicated Production Delivery)
+1. The user reviews the final master output with metadata inspection.
+2. Single-image export in lossless PNG or compressed JPEG with quality slider.
+3. 1-click download of the 5-ratio production ZIP bundle (`4:5`, `9:16`, `1.85:1`, `1:1`, `1.8:1`) containing high-res crops and schema metadata.
 
 ---
 
-## 3. Functional Requirements
+## 4. Functional Requirements
 
-### 3.1 Moodboard Vision Analyzer & JSON Schema Extraction
-- **FR-1.1 Multi-Image Upload**: Accept 1 to 5 reference images (PNG, JPEG, WebP) via drag-and-drop or file picker.
-- **FR-1.2 Sparse JSON Scene Schema Generation**: Automatically synthesize populated, relevant visual sections. `schema_version`, `metadata`, `canvas`, `creative_direction`, and `style` are required; inapplicable sections and fields are omitted.
-- **FR-1.3 Direct JSON Generation Input**: Send the cleaned sparse JSON schema directly to the image-generation model, with aspect ratio, seed, and negative-prompt suffixes.
+### 4.1 Step 1: Art Direction & Baseline Synthesis
+- **FR-1.1 Multi-File Upload**: Ingest 1 to 5 moodboard files (PNG, JPEG, WebP, PDF) with drag-and-drop support.
+- **FR-1.2 Master Prompt Synthesis**: Synthesize an evocative master prompt and concise 1–2 sentence scene logline.
+- **FR-1.3 Parallel 4-Baseline Dispatch**: Trigger 4 parallel generation tasks across distinct random seeds using `asyncio.gather`.
+- **FR-1.4 Baseline Selector Grid**: Display all 4 candidate baselines with seed tags, aspect ratio, compiled prompt preview, and single-click selection.
 
-### 3.2 Automated 4-Baseline Candidate Generation
-- **FR-2.1 Concurrent Baseline Generation**: Immediately trigger 4 parallel generation requests upon moodboard analysis using unique random seeds (`Seed_01` to `Seed_04`).
-- **FR-2.2 Baseline Selection Grid**: Present the 4 generated baselines side-by-side with seed metadata and a single-click "Select Baseline" action to proceed to fine-tuning.
+### 4.2 Step 2: Refinement Studio & Wardrobe Composition
+- **FR-2.1 Natural Language Refinements**: Accepts conversational editing instructions and sends reference image + instruction to `/api/refine`.
+- **FR-2.2 Reference Conditioning & Seed Locking**: Conditions generation on parent image bytes and locked seed to maintain identity and composition.
+- **FR-2.3 Thread Timeline & History**: Displays scrollable message thread with prompt text, output thumbnails, seed info, and click-to-load in viewport.
+- **FR-2.4 Relaxed Refinement Directive**: Uses a relaxed prompt wrapper giving the model creative freedom to adapt lighting, materials, and physics naturally.
+- **FR-2.5 Wardrobe Library Ingestion**: Upload multi-garment sheet images, auto-detect bounding boxes via Gemini Vision (`/api/wardrobe/upload`), and crop into categorized cards.
+- **FR-2.6 Interactive Pinning & Drag-and-Drop**: Drag garment cards directly onto the viewport to position numbered pins (①②③) on subjects.
+- **FR-2.7 Multi-Image Wardrobe Composition**: Dispatches parent image + all garment references simultaneously to `/api/wardrobe/compose` with structured multi-part vision prompts.
+- **FR-2.8 Persistent Wardrobe Storage**: Saves library items in SQLite (`wardrobe_items`, `composition_assignments`) with soft-delete capabilities.
 
-### 3.3 Interactive JSON Graph Canvas & Inspector Studio (JSON Crack Inspired)
-- **FR-3.1 Visual Graph Canvas**: Render an interactive, collapsible node-graph canvas (inspired by JSON Crack) where objects, arrays, and primitive fields appear as structured visual nodes with pan, zoom, hierarchy lines, and collapsible branches.
-- **FR-3.2 Hybrid Inline & Inspector Editing**:
-  - **Inline Micro-Controls**: Edit parameters directly within graph node cells (popover HEX color swatches, number sliders, enum dropdowns, and double-click text editing).
-  - **Dedicated Property Inspector**: Selecting any node opens a deep contextual property inspector for bulk adjustments, section locking, and relational link configurations.
-- **FR-3.3 Bidirectional Raw JSON Synchronizer**:
-  - Toggleable drawer allowing users to inspect and directly edit the underlying JSON schema.
-  - Changes in the visual inspector immediately update the JSON, and valid JSON edits instantly reflect in the visual canvas.
-- **FR-3.4 Canonical JSON Editing**: The graph and raw JSON editor both update the same sparse schema before re-generating.
 
-### 3.4 Baseline Fine-Tuning & Seed-Locked Continuity
-- **FR-4.1 Seed-Locking & Image-Reference Conditioning**: Re-generations lock the chosen baseline seed and supply the baseline image as reference conditioning alongside JSON parameter deltas.
-- **FR-4.2 Lossless Iteration**: Re-generation occurs directly from the generation engine without raster re-encoding degradation.
-- **FR-4.3 Quick Iteration Loop**: Keyboard shortcut (`Cmd/Ctrl + Enter`) for rapid re-generation with visual loading states.
+### 4.3 Step 3: Canvas Studio (Micro Inpainting)
+- **FR-3.1 Interactive Masking Canvas**: Full-bleed drawing canvas generating a binary mask (`#FFFFFF` edit region, `#000000` preserved region).
+- **FR-3.2 Canvas Tooling**: Adjustable brush size slider, dynamic brush cursor indicator, Undo/Redo history stack, and Clear Mask action.
+- **FR-3.3 Natural Language Inpaint Dispatch**: Accepts targeted edit prompts and dispatches source image + mask + prompt to `/api/inpaint`.
+- **FR-3.4 Boundary Preservation**: Generative model strictly preserves non-masked pixels and blends boundary lighting and shadows.
 
-### 3.5 4K Multi-Ratio Production Export
-- **FR-5.1 4K Master Render**: All approved artworks produced in 4K resolution.
-- **FR-5.2 5 Standard Production Presets**:
+### 4.4 Step 4: Export Studio (Production Delivery)
+- **FR-4.1 Single Image Export**: Direct download of current master image as lossless PNG or configurable JPEG (75%–100% quality).
+- **FR-4.2 Standard Production Presets**:
   - `1080 x 1350 px` (4:5 Social Feed)
   - `1080 x 1920 px` (9:16 Story / Mobile Fullscreen)
   - `1440 x 780 px` (~1.85:1 Wide Banner)
   - `1440 x 1440 px` (1:1 High-Res Square)
   - `1730 x 960 px` (~1.8:1 Landscape Display)
-- **FR-5.3 1-Click ZIP Export**: Download a ZIP archive containing all 5 formatted images plus schema metadata.
+- **FR-4.3 1-Click ZIP Archive**: Packages all 5 cropped/scaled production images and JSON metadata into a single downloadable ZIP bundle.
 
-### 3.6 History, Lineage & Version Comparison
-- **FR-6.1 State Persistence**: Automatically persist each iteration's generated image, complete JSON schema, parent baseline ID, locked seed, and timestamp.
-- **FR-6.2 Branching Version Tree**: Visual lineage tree displaying baseline roots and fine-tuned child iterations.
-- **FR-6.3 1-Click State Restore**: Instant restoration of any historical generation's schema and seed back into the workspace.
-- **FR-6.4 Side-by-Side Diff Viewer**: Split-slider image comparison with highlighted JSON parameter differences.
-
-### 3.7 Local Deployment & Zero-Setup Distribution
-- **FR-7.1 Double-Click macOS Launcher**: A `.command` desktop script that checks dependencies, starts backend/frontend services, and opens the default browser with zero manual setup.
-- **FR-7.2 Local SQLite & Storage**: All files and database entries stored locally in `storage/` and `studio.db`.
+### 4.5 Lineage History & State Restoration
+- **FR-5.1 Persistent Storage**: SQLite database (`studio.db`) tracks generations, conversations, parent baseline IDs, inpaint ancestry, seeds, prompts, and timestamps.
+- **FR-5.2 History Drawer**: Slide-out panel with chronological iterations, baseline badges, and direct restore actions.
+- **FR-5.3 Comparison Viewports**: Side-by-side split slider comparing baseline vs current or iteration A vs iteration B.
 
 ---
 
-## 4. Non-Functional Requirements
+## 5. Technical Stack & Architecture
 
-- **NFR-1 Determinism & Edit Isolation**: Parameter adjustments must modify only intended scene elements without unconstrained composition drift.
-- **NFR-2 Performance**: 4 baseline generation tasks run concurrently with clear visual progress feedback.
-- **NFR-3 Responsiveness**: Real-time updates across the Node Canvas, Inspector, and JSON Synchronizer with < 100ms UI latency.
-- **NFR-4 Security & Privacy**: API keys remain in local `.env`; all assets stored locally with zero external telemetry.
-- **NFR-5 Stack Standards**: Python FastAPI backend + Modern Web UI (dark-mode studio aesthetics).
+### 5.1 Backend Architecture
+- **Framework**: Python 3.12+ with FastAPI and Uvicorn.
+- **Package Management**: `uv` (strict requirement: no raw `pip`).
+- **Database**: SQLite with `aiosqlite` (`studio.db`) with tables: `moodboards`, `generations`, `conversations`.
+- **Image Processing**: Pillow (`PIL`) for mask handling, transformation, and multi-ratio bundle export.
+- **AI Models (Google GenAI SDK)**:
+  - **Vision Analysis & Extraction**: `gemini-3.1-flash-lite`
+  - **Image Generation & Refinement**: `gemini-3.1-flash-lite-image`
+  - **Canvas Spatial Inpainting**: `gemini-3.1-flash-image`
+
+### 5.2 Frontend Architecture
+- **Framework**: React 18+ with Vite.
+- **Styling**: Modern dark studio UI using Vanilla CSS variables (`index.css`), custom scrollbars, and glassmorphism.
+- **Icons & Typography**: Lucide React icons, Inter typography.
+- **State Management**: Centralized React state in `App.jsx` with API client (`src/frontend/src/services/apiClient.js`).
 
 ---
 
-## 5. Out of Scope (MVP)
+## 6. Non-Functional Requirements (NFRs)
 
-- Cloud multi-tenant authentication and team workspaces.
-- Real-time video generation and frame animation.
-- Cloud storage integration (S3 / Google Drive) — all operations are local disk and ZIP bundles.
+- **NFR-1 Deterministic Edit Isolation**: Refinements condition on reference image bytes and seed-locks to anchor core identity.
+- **NFR-2 Performance & Concurrency**: 4 baseline generation tasks run in parallel under < 15 seconds average latency.
+- **NFR-3 UI Responsiveness & Smoothness**: Real-time canvas brush interactions and chat scrolling operate at 60 FPS with zero input lag.
+- **NFR-4 Privacy & Data Sovereignty**: All moodboards, generation records, masks, and database logs reside strictly on the local machine with no external telemetry.
+- **NFR-5 Error Handling & Diagnostics**: Detailed HTTP error messages and model error parsing with fallback defaults.

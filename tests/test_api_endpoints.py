@@ -118,3 +118,36 @@ async def test_history_endpoints():
         assert "generations" in data
         assert isinstance(data["generations"], list)
 
+
+@pytest.mark.asyncio
+@patch("app.api.refinement.generation_service.refine_generation")
+async def test_refinement_api_endpoint(mock_refine):
+    mock_refine.return_value = {
+        "generation_id": "gen_refine_01",
+        "parent_id": "gen_base_01",
+        "seed": 4289102,
+        "compiled_prompt": "Refined warm lighting",
+        "negative_prompt": "blurry",
+        "image_url": "/api/images/gen_refine_01_master.png",
+        "created_at": "2026-08-25T00:00:00Z",
+        "resolution": {"width": 1080, "height": 1620},
+        "conversation_id": "conv_01",
+    }
+
+    payload = {
+        "parent_id": "gen_base_01",
+        "prompt": "Make the lighting warmer, sunset glow",
+        "seed_mode": "locked",
+        "seed": 4289102,
+        "conversation_id": "conv_01",
+    }
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/api/refine", json=payload)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["generation_id"] == "gen_refine_01"
+        assert data["parent_id"] == "gen_base_01"
+        assert data["conversation_id"] == "conv_01"
+        assert data["seed"] == 4289102
+

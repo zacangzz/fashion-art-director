@@ -6,82 +6,70 @@
 
 The core goal of this application is to generate highly reproducible, authentic, and easily controllable images based on a user's creative baseline and uploaded moodboards.
 
-To achieve this, the pipeline is architected around a **Hierarchical Synthesis & Dual-Level Studio Model**:
+To achieve this, the pipeline is architected around a **4-Step Sequential Studio Architecture**:
 
 ```
 [Uploaded Moodboard Files] + [User Creative Intent & Requirements]
                                 │
                                 ▼
          ┌──────────────────────────────────────────────┐
-         │ Phase 1: AI Vision Director Synthesis        │
+         │ Step 1: Art Direction (Vision & Baselines)   │
          │ - Synthesizes the OPTIMAL Master Prompt      │
-         │ - Decomposes scene into 9 Visual Levers      │
+         │ - Generates 4 initial exploratory seeds      │
          └──────────────────────────────────────────────┘
                                 │
                                 ▼
          ┌──────────────────────────────────────────────┐
-         │ Phase 2: Exploratory 4-Seed Baseline Sweep   │
-         │ - Generates 4 initial visual anchors         │
+         │ Step 2: Refinement (Conversation Studio)     │
+         │ - Conversational natural-language prompts    │
+         │ - Reference image conditioning + Seed lock   │
+         │ - Complete message thread timeline           │
          └──────────────────────────────────────────────┘
                                 │
-             ┌──────────────────┴──────────────────┐
-             ▼                                     ▼
-┌───────────────────────────────┐     ┌───────────────────────────────┐
-│ Phase 3: Macro Editing Studio │     │ Phase 4: Micro Editing Studio │
-│      (Tag Editing Studio)     │     │       (Canvas Studio)         │
-│ - High-level scene tuning     │     │ - Surgical localized edits    │
-│ - Global attribute levers     │     │ - Brush-masked inpainting     │
-│ - Weight emphasis & toggles   │     │ - Pixel-level boundary blend  │
-│ - Zero-drift Delta Prompting  │     │ - Preserves surrounding image │
-└───────────────────────────────┘     └───────────────────────────────┘
+                                ▼
+         ┌──────────────────────────────────────────────┐
+         │ Step 3: Canvas Studio (Micro Inpainting)     │
+         │ - Surgical brush-masked inpainting           │
+         │ - Pixel-level boundary blending              │
+         │ - Strict preservation of untouched pixels    │
+         └──────────────────────────────────────────────┘
+                                │
+                                ▼
+         ┌──────────────────────────────────────────────┐
+         │ Step 4: Export Studio (Production Delivery)  │
+         │ - Single Master PNG / JPEG downloads         │
+         │ - 1-Click 5-Ratio Production Bundle (.ZIP)   │
+         │ - Full lineage tracking & audit logging      │
+         └──────────────────────────────────────────────┘
 ```
 
 ---
 
-## 2. The Hierarchical Editing Hierarchy: Macro vs. Micro
+## 2. The Multi-Tier Editing Hierarchy: Macro Refinement vs. Micro Canvas
 
 The application provides two complementary levels of creative control:
 
-### 1. Macro Editing (The Tag Studio)
-* **Scope**: Global scene composition, atmosphere, character attributes, and stylistic direction.
-* **Mechanism**: The user tunes the 9 visual levers (enabling/disabling tags, adjusting weights from 0.5x to 2.0x, adding custom descriptors, locking categories, or editing the scene narrative).
-* **AI Execution**: Uses the **Delta Prompt Compiler** (`compile_delta_prompt`) with parent image reference bytes and seed locking to adjust only modified dimensions while preserving character identity and background integrity.
+### 1. Step 2: Refinement Studio (Conversational Prompting)
+* **Scope**: Natural language, holistic adjustments (lighting, color grade, mood, wardrobe changes, camera framing).
+* **Mechanism**: The user types free-text instructions (e.g. *"Change lighting to warm golden hour"* or *"Make the background a modern minimalist loft"*).
+* **AI Execution**: Uses **Reference-Conditioned Refinement** (`/api/refine` via `gemini-3.1-flash-lite-image`). The engine feeds the parent master image bytes along with the user's prompt wrapped in a relaxed refinement directive, preserving core character and composition anchors while naturally adjusting interconnected physics (shadows, reflections, specular highlights).
 
-### 2. Micro Editing (The Canvas Studio)
+### 2. Step 3: Canvas Studio (Micro Spatial Inpainting)
 * **Scope**: Surgical, localized spatial inpainting.
 * **Mechanism**: The user draws a brush mask (`#FFFFFF`) directly over a specific region of the image on the canvas (e.g. repainting hands, swapping an accessory, or replacing a prop).
-* **AI Execution**: Uses **Spatial Masked Inpainting** (`inpaint_region`) with strict pixel immutability rules for non-masked pixels and seamless boundary blending.
+* **AI Execution**: Uses **Spatial Masked Inpainting** (`inpaint_region` via `gemini-3.1-flash-image`) with strict pixel immutability rules for non-masked pixels (`#000000`) and seamless boundary blending.
 
 ---
 
-## 3. The 9-Category Visual Taxonomy (The Macro Levers)
+## 3. Step 1: AI Vision Director & Master Prompt Synthesis
 
-The visual levers extracted from the moodboard and user prompt are organized into 9 orthogonal categories:
-
-| Category Key | Category Display Label | UI Color | Description & Visual Descriptors |
-| :--- | :--- | :--- | :--- |
-| `subject_details` | **Subject & Character Details** | `#06b6d4` | Facial anatomy, expression, gaze, posture, age, ethnicity, build. |
-| `wardrobe_hair` | **Wardrobe & Hairstyle** | `#ec4899` | Garments, fabrics, textures, tailoring, hair style, hair color, finish. |
-| `objects_props` | **Objects & Key Props** | `#f97316` | Furniture, tools, accessories, handheld or foreground props. |
-| `environment` | **Environment & Setting** | `#84cc16` | Spatial architecture, backdrop, landscape, interior elements, greenery. |
-| `layout_framing` | **Layout & Framing** | `#10b981` | Cinematic shot type (medium-wide, close-up), rule-of-thirds, perspective. |
-| `lighting` | **Lighting & Atmosphere** | `#f59e0b` | Key/fill balance, directional sunlight, neon rim lighting, volumetrics. |
-| `color_profile` | **Color Profile & Palette** | `#e11d48` | Dominant hues, contrast levels, film stock emulation (e.g. Kodak Portra). |
-| `camera_optics` | **Camera & Optical Specs** | `#a855f7` | Lens focal length (e.g. 35mm prime), aperture (f/2.0), depth of field, grain. |
-| `mood_era` | **Mood, Vibe & Era** | `#3b82f6` | Period aesthetic (1970s luxury, retro commercial, modern high-fashion). |
-| `custom` | **Custom Tags** | `#64748b` | User-defined ad-hoc visual tags and modifiers. |
-
----
-
-## 4. Phase 1: AI Vision Director & Master Prompt Synthesis
-
-### 4.1. The Role of the Vision Model
-In Phase 1, Gemini 3.1 Flash Lite acts as an **Executive Visual Director & Prompt Architect**. It analyzes the moodboard imagery in combination with the user's creative prompt to:
+### 3.1. The Role of the Vision Model
+In Step 1, Gemini 3.1 Flash Lite acts as an **Executive Visual Director & Prompt Architect**. It analyzes the moodboard imagery in combination with the user's creative prompt to:
 1. Synthesize the **Optimal Master Prompt**: A definitive, high-fidelity prompt with natural phrasing, camera optics, physical materials, and lighting descriptors that best produces the moodboard look.
 2. Formulate the **Core Creative Narrative**: A concise 1-2 sentence scene logline.
-3. Extract the **9-Category Visual Levers**: 2–5 high-impact keyword descriptors per category with default weights (`1.0`) so the user can immediately refine the prompt at a macro level in the Tag Studio.
+3. Extract **Visual Levers**: Structured keyword descriptors across 9 visual taxonomy dimensions.
 
-### 4.2. Actual Prompt Files
+### 3.2. Extraction Prompt Templates
 
 #### A. Extraction System Prompt (`src/app/prompts/extraction_system.txt`)
 ```text
@@ -90,52 +78,10 @@ Your mission is to analyze the reference moodboard images and user creative requ
 
 You must return a single, valid JSON object with EXACTLY this structure:
 {
-  "master_prompt": "A complete, highly polished, evocative Master Generation Prompt designed to produce the definitive image matching the moodboard and requirements. Synthesize the scene, subject, wardrobe, environment, lighting, optics, color profile, and artistic aesthetic into a cohesive, cinematic description.",
-  "narrative": "A concise 1-2 sentence core creative scene logline capturing the primary subject, action, setting, and emotional tone.",
-  "categories": {
-    "subject_details": [
-      {"label": "e.g. young boy with copper ginger hair", "weight": 1.0},
-      {"label": "e.g. seated with right hand raised to mouth", "weight": 1.0}
-    ],
-    "objects_props": [
-      {"label": "e.g. terracotta mid-century outdoor sofa", "weight": 1.0},
-      {"label": "e.g. woven slate blue cushions", "weight": 1.0}
-    ],
-    "wardrobe_hair": [
-      {"label": "e.g. wind-tousled wavy ginger hair", "weight": 1.0},
-      {"label": "e.g. cream ribbed cotton knit sweater", "weight": 1.0}
-    ],
-    "environment": [
-      {"label": "e.g. sunlit modernist terrace patio", "weight": 1.0},
-      {"label": "e.g. lush Mediterranean pine trees in background", "weight": 1.0}
-    ],
-    "layout_framing": [
-      {"label": "e.g. medium-wide cinematic composition", "weight": 1.0},
-      {"label": "e.g. rule-of-thirds asymmetric balance", "weight": 1.0}
-    ],
-    "lighting": [
-      {"label": "e.g. warm direct late-afternoon golden sunlight", "weight": 1.0},
-      {"label": "e.g. soft diffused ambient fill with gentle shadows", "weight": 1.0}
-    ],
-    "color_profile": [
-      {"label": "e.g. warm terracotta, slate blue, and olive green palette", "weight": 1.0},
-      {"label": "e.g. natural Kodak Portra film color grade", "weight": 1.0}
-    ],
-    "camera_optics": [
-      {"label": "e.g. shot on 35mm prime lens", "weight": 1.0},
-      {"label": "e.g. shallow depth of field f/2.0 with subtle organic grain", "weight": 1.0}
-    ],
-    "mood_era": [
-      {"label": "e.g. 1970s retro luxury editorial vibe", "weight": 1.0},
-      {"label": "e.g. playful, candid high-end commercial aesthetic", "weight": 1.0}
-    ]
-  }
+  "master_prompt": "A complete, highly polished, evocative Master Generation Prompt...",
+  "narrative": "A concise 1-2 sentence core creative scene logline...",
+  "categories": { ... }
 }
-
-Directives:
-1. MASTER PROMPT EXCELLENCE: The `master_prompt` must be rich, concrete, evocative, and free of vague buzzwords. It should incorporate specific camera optics, lighting behavior, physical materials, and atmospheric depth inspired by the moodboard files.
-2. MODULAR LEVERS: Extract 2 to 5 specific, high-value visual keyword descriptors for each of the 9 categories so the user can perform high-level macro adjustments in the Tag Studio.
-3. COMPLETENESS: Never omit categories. Always provide relevant visual tags across all 9 dimensions.
 ```
 
 #### B. User Baseline Template (`src/app/prompts/user_baseline_template.txt`)
@@ -150,86 +96,45 @@ Analyze the moodboard images in conjunction with the user's creative requirement
 
 ---
 
-## 5. Phase 2: Exploratory 4-Seed Baseline Sweep (Approach A: 1:1 Tag Compilation)
+## 4. Step 2: Conversation-Based Refinement Architecture
 
-### 5.1. Overview & Data Flow
-Under **Approach A**, the initial baseline prompt is **deterministically compiled directly from the 9-category visual levers and scene narrative** (`compile_prompt(narrative, categories)`). This ensures 100% lockstep alignment between the rendered baseline images and the Tag Studio chips.
-
-```mermaid
-flowchart TD
-    A[Extracted 9-Category Visual Levers + Narrative] --> B[compile_prompt: Assemble natural language clauses]
-    B --> C[Append Aspect Ratio, Seed & Negative Suffix]
-    C --> D1[Seed 819201 -> Task 1]
-    C --> D2[Seed 349102 -> Task 2]
-    C --> D3[Seed 981244 -> Task 3]
-    C --> D4[Seed 512093 -> Task 4]
-    D1 & D2 & D3 & D4 --> E[asyncio.gather 4 Parallel Model Calls]
-    E --> F[Save 4 Master PNGs to storage/generations/]
-    F --> G[Display 4-Up Baseline Selector in UI]
-```
-
-### 5.2. Image Generation Suffix & Defaults
-* **Suffix File** (`src/app/prompts/image_generation_suffix.txt`):
-  ```text
-  Aspect ratio: {ASPECT_RATIO}. Seed: {SEED}. Do not include: {NEGATIVE_PROMPT}.
-  ```
-* **Default Negative Prompt** (`src/app/prompts/defaults.json`):
-  ```json
-  {
-    "negative_prompt": "blurry, low quality, distorted anatomy"
-  }
-  ```
-
----
-
-## 6. Phase 3: Macro Editing (Tag Studio & Delta Prompting)
-
-### 6.1. Macro Scene Refinement
-In the Tag Studio, the user can adjust global scene levers without re-synthesizing the entire prompt from scratch:
-* **Toggle Tags**: Enable or disable specific descriptors.
-* **Weight Scrubbing**: Increase or decrease chip emphasis (weights $> 1.25$ format as `(tag:weight)`).
-* **Add Custom Tags**: Insert ad-hoc keywords.
-* **Lock Categories**: Prevent specific dimensions from drifting.
-
-### 6.2. The Delta Prompt Compiler (`compile_delta_prompt`)
-When generating an iteration, the backend compares the baseline state against the modified state:
+### 4.1. Overview & Data Flow
 
 ```mermaid
 flowchart TD
-    A[Baseline State: Parent Schema] & B[Current State: Edited Schema] --> C[get_modified_categories: Compute Diff]
-    C --> D{Any Changes Detected?}
-    D -- No Changes --> E[Emit Visual Continuity Directive]
-    D -- Changes Found --> F[Build Delta Prompt]
-    F --> G1[Part 1: Visual Reference Foundation Directive]
-    F --> G2[Part 2: Requested Modifications with Organic Downstream Adaptation]
-    F --> G3[Part 3: Consistent Anchors for User-Locked Levers]
-    G1 & G2 & G3 --> H[Compiled Delta Prompt String]
-    I[Parent Master Image PNG Bytes] --> J[Multimodal Generator]
-    H --> J
-    K[Locked Seed #] --> J
-    J --> L[Child Generation Image Output]
+    A[Active Generation Image in Viewport] --> B[User Types Refinement Instruction]
+    B --> C[Wrap with Refinement System Prompt]
+    C --> D[Load Parent Master PNG Bytes from Disk]
+    D --> E[Gemini 3.1 Flash Lite Image Model Call]
+    F[Locked Seed #] --> E
+    E --> G[Save Refined PNG to storage/generations/]
+    G --> H[Append Message to Conversation Thread in DB]
+    H --> I[Update Refinement Chat Timeline & Master Viewport]
 ```
 
-#### Delta Prompt Structure Example (when Subject & Environment are locked):
+### 4.2. Refinement System Prompt (`src/app/prompts/refinement_system.txt`)
 ```text
-Visual Reference Foundation: Use the reference image as the structural, character, and stylistic anchor. Apply the requested modifications below seamlessly, allowing all naturally interconnected visual elements—including lighting falloff, cast shadows, color bounce, material reactions, and environmental reflections—to adjust organically for realistic visual cohesion.
+You are an image refinement assistant. You will receive a reference image and an edit instruction.
 
-Requested Modifications: Wardrobe & Hairstyle: wearing ivory cashmere roll-neck sweater. Lighting: illuminated with soft diffused overcast ambient daylight.
+Use the reference image as a starting point. Apply the user's requested modifications naturally, allowing interconnected visual elements — lighting, shadows, colors, materials, reflections — to adapt organically for realistic cohesion.
 
-Consistent Anchors: Maintain the core design, identity, and styling of Subject & Character Details, Environment & Setting, while allowing them to interact realistically with the updated scene conditions. Aspect ratio: 2:3. Seed: 4289102. Do not include: blurry, low quality, distorted anatomy.
+EDIT INSTRUCTION:
+<edit>
+{USER_PROMPT}
+</edit>
 ```
 
 ---
 
-## 7. Phase 4: Micro Editing (Canvas Studio & Spatial Inpainting)
+## 5. Step 3: Micro Editing (Canvas Studio & Spatial Inpainting)
 
-### 7.1. Precision Localized Editing
+### 5.1. Precision Localized Editing
 For surgical changes that should not affect the rest of the image:
 1. The user paints a white mask (`#FFFFFF`) over the target region on the Canvas Studio.
 2. The user types a specific inpainting task instruction (e.g. *"Replace handheld glass with a vintage leather notebook"*).
 3. The system dispatches the Source Image + Binary Mask Image + Spatial Prompt.
 
-### 7.2. Inpaint System Prompt (`src/app/prompts/inpaint_system.txt`)
+### 5.2. Inpaint System Prompt (`src/app/prompts/inpaint_system.txt`)
 ```text
 You are a precision image editor. You will receive two images and an edit instruction.
 
@@ -241,24 +146,30 @@ EDIT INSTRUCTION:
 <edit>
 {USER_PROMPT}
 </edit>
-
-Rules:
-1. Apply the edit ONLY inside the white mask region.
-2. Blend the edited region seamlessly with the surrounding untouched area (match lighting, shadow direction, color temperature, and texture scale at the mask boundary).
-3. Preserve the exact composition, camera angle, depth of field, and aspect ratio.
-4. Output a single image at the same resolution as the source image.
-5. Do not add, remove, or reposition any element outside the white mask region.
 ```
 
 ---
 
-## 8. Summary Comparison: Macro vs. Micro Workflow
+## 6. Step 4: Export Studio & Multi-Ratio Delivery
 
-| Feature | Macro Editing (Tag Studio) | Micro Editing (Canvas Studio) |
-| :--- | :--- | :--- |
-| **Editing Level** | High-level (Global scene & parameters) | Low-level (Surgical spatial region) |
-| **User Input** | Visual keyword tags, weights, narrative | Brush mask on canvas + localized edit text |
-| **AI Prompting** | 3-Part Delta Prompt (Preservation + Adjustments) | Spatial Binary Masking + Boundary Blending Prompt |
-| **Multimodal Inputs** | Parent Master Image Bytes + Delta Text Prompt | Source Image + Binary Mask Image + Task Prompt |
-| **Preservation Target**| Character identity, overall pose, aesthetic tone | Exact pixels outside mask (`#000000` read-only) |
-| **Primary Use Cases** | Swapping wardrobe color, altering lighting, tuning mood | Fixing hands, swapping props, retouching hair/face |
+### 6.1. Standard Production Ratios
+All master generations can be packaged into 5 standard production ratios using PIL image transformations:
+
+| Preset | Target Resolution | Aspect Ratio | Use Case |
+| :--- | :--- | :--- | :--- |
+| **Social Feed** | `1080 x 1350 px` | `4:5` | Instagram Portrait & Feed Posts |
+| **Story / Fullscreen** | `1080 x 1920 px` | `9:16` | Reels, TikTok & Mobile Stories |
+| **Wide Banner** | `1440 x 780 px` | `~1.85:1` | Hero banners & web landscape |
+| **High-Res Square** | `1440 x 1440 px` | `1:1` | Standard high-res square formats |
+| **Landscape Display** | `1730 x 960 px` | `~1.8:1` | Desktop wallpaper & display cards |
+
+---
+
+## 7. Summary Comparison: Workflow Steps
+
+| Step | Studio Step | User Action | AI Model | Key Output |
+| :--- | :--- | :--- | :--- | :--- |
+| **Step 1** | **Art Direction** | Upload 1–5 moodboards + starting prompt | `gemini-3.1-flash-lite` + `gemini-3.1-flash-lite-image` | Master Prompt + 4 Baseline candidates |
+| **Step 2** | **Refinement** | Conversational free-text editing | `gemini-3.1-flash-lite-image` | Iterative generations linked in thread |
+| **Step 3** | **Canvas** | Draw brush mask + localized edit instruction | `gemini-3.1-flash-image` | Seamless spatial inpainting edit |
+| **Step 4** | **Export** | Choose single PNG/JPEG or 5-Ratio ZIP | Local Pillow (PIL) | Downloadable asset files & metadata |

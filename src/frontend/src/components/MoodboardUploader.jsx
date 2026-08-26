@@ -1,5 +1,17 @@
 import React, { useRef, useState } from 'react';
-import { Upload, X, FileText, Sparkles, Loader2, MessageSquareText } from 'lucide-react';
+import { Upload, X, FileText, Sparkles, Loader2, MessageSquareText, Ratio, RectangleHorizontal, Square, RectangleVertical } from 'lucide-react';
+
+const ASPECT_RATIO_OPTIONS = [
+  { id: '1.8:1', label: '1.8:1', name: 'Cinematic (1.8:1)', icon: 'horizontal', desc: '1920×1080 Widescreen' },
+  { id: '16:9', label: '16:9', name: 'Widescreen (16:9)', icon: 'horizontal', desc: '1920×1080 Standard HD' },
+  { id: '1:1', label: '1:1', name: 'Square (1:1)', icon: 'square', desc: '1440×1440 Instagram Grid' },
+  { id: '4:5', label: '4:5', name: 'Social (4:5)', icon: 'vertical', desc: '1080×1350 Feed Portrait' },
+  { id: '2:3', label: '2:3', name: 'Fashion (2:3)', icon: 'vertical', desc: '1080×1620 Editorial Portrait' },
+  { id: '9:16', label: '9:16', name: 'Vertical (9:16)', icon: 'vertical', desc: '1080×1920 Story / Reel' },
+  { id: '4:3', label: '4:3', name: 'Standard (4:3)', icon: 'horizontal', desc: '1440×1080 Classic' },
+  { id: '3:2', label: '3:2', name: 'Photo (3:2)', icon: 'horizontal', desc: '1620×1080 35mm Format' },
+  { id: '21:9', label: '21:9', name: 'Cinema (21:9)', icon: 'horizontal', desc: '2560×1080 Ultrawide' },
+];
 
 export default function MoodboardUploader({
   files = [],
@@ -8,6 +20,8 @@ export default function MoodboardUploader({
   onPromptChange,
   onAnalyze,
   isAnalyzing = false,
+  aspectRatio = '1.8:1',
+  onAspectRatioChange = null,
 }) {
   const fileInputRef = useRef(null);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -61,6 +75,41 @@ export default function MoodboardUploader({
 
   return (
     <div className="moodboard-uploader-card">
+      {/* Workflow Global Aspect Ratio Selection */}
+      <div className="aspect-ratio-selector-card">
+        <div className="aspect-ratio-header">
+          <div className="aspect-ratio-title-group">
+            <Ratio size={15} className="text-accent" />
+            <span className="aspect-ratio-title">Workflow Aspect Ratio</span>
+            <span className="aspect-ratio-tag">Global Default</span>
+          </div>
+          <span className="aspect-ratio-current-badge">{aspectRatio}</span>
+        </div>
+        <div className="aspect-ratio-options-grid" role="radiogroup" aria-label="Aspect Ratio Selection">
+          {ASPECT_RATIO_OPTIONS.map((opt) => {
+            const isSelected = aspectRatio === opt.id;
+            return (
+              <button
+                key={opt.id}
+                type="button"
+                className={`aspect-ratio-btn ${isSelected ? 'active' : ''}`}
+                onClick={() => onAspectRatioChange?.(opt.id)}
+                title={`${opt.name} — ${opt.desc}`}
+                aria-checked={isSelected}
+                role="radio"
+              >
+                <div className="aspect-ratio-icon-box">
+                  {opt.icon === 'horizontal' && <RectangleHorizontal size={14} />}
+                  {opt.icon === 'square' && <Square size={13} />}
+                  {opt.icon === 'vertical' && <RectangleVertical size={14} />}
+                </div>
+                <span className="aspect-ratio-label">{opt.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       <div className="card-header">
         <div className="card-title-group">
           <Upload size={16} className="text-accent" />

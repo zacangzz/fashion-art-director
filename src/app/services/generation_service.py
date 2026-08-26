@@ -21,19 +21,24 @@ from app.utils.prompt_loader import (
     IMAGE_GENERATION_SUFFIX,
     INPAINT_SYSTEM_PROMPT,
     INPAINT_SUFFIX,
+    REFINEMENT_SYSTEM_PROMPT,
+    WARDROBE_COMPOSITION_SYSTEM_PROMPT,
 )
 
 
 logger = get_logger("generation_service")
 
 ASPECT_RATIO_RESOLUTIONS = {
-    "1:1": (1440, 1440),
-    "2:3": (1080, 1620),
-    "3:2": (1620, 1080),
-    "3:4": (1080, 1440),
-    "4:3": (1440, 1080),
-    "9:16": (1080, 1920),
+    "1.8:1": (1920, 1080),
     "16:9": (1920, 1080),
+    "1:1": (1440, 1440),
+    "4:5": (1080, 1350),
+    "2:3": (1080, 1620),
+    "9:16": (1080, 1920),
+    "3:2": (1620, 1080),
+    "4:3": (1440, 1080),
+    "3:4": (1080, 1440),
+    "21:9": (2560, 1080),
 }
 
 
@@ -242,7 +247,8 @@ def compile_delta_prompt(
 
     sections = [
         "Visual Reference Foundation: Use the reference image as the structural, character, and stylistic anchor. "
-        "Apply the requested modifications below seamlessly, allowing all naturally interconnected visual elements—including lighting falloff, cast shadows, color bounce, material reactions, and environmental reflections—to adjust organically for realistic visual cohesion."
+        "Maintain 1:1 original source sharpness and high-fidelity texture rendering (skin pores, crisp focus, natural micro-contrast). "
+        "Apply the requested modifications below seamlessly, allowing all naturally interconnected visual elements—including lighting falloff, cast shadows, color bounce, material reactions, and environmental reflections—to adjust organically for realistic visual cohesion without waxy smoothing or compression degradation."
     ]
 
     adjustments = []
@@ -421,6 +427,7 @@ class GenerationService:
         model_name: str = "gemini-3.1-flash-lite-image",
         inpaint_model_name: str = "imagen-3.0-capability-001",
         audit_path: Optional[Path] = None,
+        wardrobe_service: Optional[Any] = None,
     ):
         self.db = db_manager
         self.api_key = api_key
@@ -429,6 +436,18 @@ class GenerationService:
         self.inpaint_model_name = inpaint_model_name
         self.client = genai.Client(api_key=self.api_key)
         self.audit_path = Path(audit_path or os.path.join(storage_dir, "logs", "generation_audit.jsonl"))
+        self._wardrobe_service = wardrobe_service
+
+    @property
+    def wardrobe_service(self):
+        if self._wardrobe_service is None:
+            from app.services.wardrobe_service import WardrobeService
+            self._wardrobe_service = WardrobeService(
+                db_manager=self.db,
+                api_key=self.api_key,
+                storage_dir=self.storage_dir,
+            )
+        return self._wardrobe_service
 
     def _audit(self, event: str, request_id: str, **details: Any) -> None:
         try:
@@ -537,6 +556,53 @@ class GenerationService:
                                 output={"sha256": hashlib.sha256(part.inline_data.data).hexdigest(), "bytes": len(part.inline_data.data)},
                                 duration_ms=round((time.perf_counter() - started) * 1000, 1))
                         return part.inline_data.data
+
+        raise RuntimeError(f"No image bytes returned from Google GenAI API for model {self.model_name}.")
+
+    async def _call_multi_image_model(
+        self,
+        contents: List[Any],
+        seed: Optional[int] = None,
+        aspect_ratio: str = "2:3",
+        negative_prompt: str = "",
+        audit_request_id: Optional[str] = None,
+    ) -> bytes:
+        """
+        Invokes Gemini multimodal generation with multiple image parts + structured text.
+        """
+        logger.info(f"Calling multi-image model '{self.model_name}' (seed={seed}, aspect={aspect_ratio}, parts_count={len(contents)})")
+        started = time.perf_counter()
+
+        suffix = IMAGE_GENERATION_SUFFIX.format(
+            ASPECT_RATIO=aspect_ratio or "unspecified",
+            SEED=seed if seed is not None else "unspecified",
+            NEGATIVE_PROMPT=negative_prompt or DEFAULT_NEGATIVE_PROMPT,
+        )
+        contents.append(suffix.strip())
+
+        if audit_request_id:
+            self._audit("multi_image_model_request", audit_request_id,
+                parts_count=len(contents),
+                config={"model": self.model_name, "seed": seed, "aspect_ratio": aspect_ratio,
+                        "negative_prompt": negative_prompt})
+
+        try:
+            response = self.client.models.generate_content(model=self.model_name, contents=contents)
+        except Exception as model_err:
+            if audit_request_id:
+                self._audit("multi_image_model_error", audit_request_id, error=repr(model_err))
+            raise
+
+        if response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
+            for part in response.candidates[0].content.parts:
+                if getattr(part, "inline_data", None) and part.inline_data.data:
+                    logger.info(f"Received inline image bytes from Gemini multi-image model ({len(part.inline_data.data)} bytes)")
+                    if audit_request_id:
+                        self._audit("multi_image_model_response", audit_request_id,
+                            response_metadata=response.model_dump() if callable(getattr(response, "model_dump", None)) else None,
+                            output={"sha256": hashlib.sha256(part.inline_data.data).hexdigest(), "bytes": len(part.inline_data.data)},
+                            duration_ms=round((time.perf_counter() - started) * 1000, 1))
+                    return part.inline_data.data
 
         raise RuntimeError(f"No image bytes returned from Google GenAI API for model {self.model_name}.")
 
@@ -771,6 +837,344 @@ class GenerationService:
             "image_url": f"/api/images/{filename}",
             "created_at": created_at,
             "resolution": {"width": width, "height": height},
+        }
+
+    async def refine_generation(
+        self,
+        parent_id: str,
+        prompt: str,
+        seed: int = 4289102,
+        aspect_ratio: str = "2:3",
+        negative_prompt: Optional[str] = None,
+        conversation_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Conversation-based refinement: sends reference image + free-text instruction
+        to the image model with seed locking. Each result is linked to a conversation thread.
+        """
+        logger.info(f"Refinement generation from parent '{parent_id}' with seed #{seed} (conversation={conversation_id})")
+
+        parent_record = await self.db.get_generation(parent_id) if parent_id else None
+        moodboard_id = parent_record.get("moodboard_id") if parent_record else None
+
+        # Wrap user prompt with refinement system prompt
+        compiled_prompt = REFINEMENT_SYSTEM_PROMPT.replace("{USER_PROMPT}", prompt.strip())
+
+        final_neg_prompt = negative_prompt if negative_prompt is not None else DEFAULT_NEGATIVE_PROMPT
+        request_id = f"refine_{uuid.uuid4().hex}"
+        self._audit("refinement_request", request_id,
+            parent_id=parent_id, user_prompt=prompt, compiled_prompt=compiled_prompt,
+            seed=seed, aspect_ratio=aspect_ratio, negative_prompt=final_neg_prompt,
+            conversation_id=conversation_id, model=self.model_name)
+
+        # Load parent image for reference conditioning
+        parent_bytes = None
+        if parent_record and parent_record.get("master_image_path"):
+            img_path = parent_record["master_image_path"]
+            if os.path.exists(img_path):
+                logger.info(f"Loading reference image from: {img_path}")
+                with open(img_path, "rb") as f:
+                    parent_bytes = f.read()
+            else:
+                logger.warning(f"Reference image '{img_path}' not found on disk.")
+
+        child_id = f"gen_refine_{uuid.uuid4().hex[:8]}"
+        created_at = datetime.now(timezone.utc).isoformat()
+
+        image_bytes = await self._call_image_model(
+            prompt=compiled_prompt,
+            negative_prompt=final_neg_prompt,
+            seed=seed,
+            aspect_ratio=aspect_ratio,
+            reference_image_bytes=parent_bytes,
+            audit_request_id=request_id,
+            reference_image_path=parent_record.get("master_image_path") if parent_bytes and parent_record else None,
+        )
+
+        gen_dir = os.path.join(self.storage_dir, "generations")
+        os.makedirs(gen_dir, exist_ok=True)
+        filename = f"{child_id}_master.png"
+        filepath = os.path.join(gen_dir, filename)
+
+        with open(filepath, "wb") as f:
+            f.write(image_bytes)
+
+        width, height = ASPECT_RATIO_RESOLUTIONS.get(aspect_ratio, (1080, 1620))
+
+        record = {
+            "id": child_id,
+            "parent_id": parent_id,
+            "moodboard_id": moodboard_id,
+            "is_baseline": False,
+            "created_at": created_at,
+            "schema_json": {"refinement_prompt": prompt, "conversation_id": conversation_id},
+            "compiled_prompt": compiled_prompt,
+            "negative_prompt": final_neg_prompt,
+            "seed": seed,
+            "master_image_path": filepath,
+            "aspect_ratio": aspect_ratio,
+            "resolution_width": width,
+            "resolution_height": height,
+            "conversation_id": conversation_id,
+        }
+        await self.db.create_generation(record)
+        self._audit("refinement_response", request_id,
+            generation_id=child_id, parent_id=parent_id,
+            output_path=filepath, compiled_prompt=compiled_prompt,
+            seed=seed, aspect_ratio=aspect_ratio, conversation_id=conversation_id)
+        logger.info(f"Refinement {child_id} created successfully.")
+
+        return {
+            "generation_id": child_id,
+            "parent_id": parent_id,
+            "seed": seed,
+            "compiled_prompt": compiled_prompt,
+            "negative_prompt": final_neg_prompt,
+            "image_url": f"/api/images/{filename}",
+            "created_at": created_at,
+            "resolution": {"width": width, "height": height},
+            "conversation_id": conversation_id,
+        }
+
+    async def compose_wardrobe(
+        self,
+        parent_id: str,
+        assignments: List[Dict[str, Any]],
+        seed: int = 4289102,
+        aspect_ratio: str = "2:3",
+        negative_prompt: Optional[str] = None,
+        conversation_id: Optional[str] = None,
+        custom_instruction: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Multi-image wardrobe composition: sends base reference image + 1 or more garment reference images
+        with numbered pin directives to Gemini.
+        """
+        logger.info(f"Composing wardrobe from parent '{parent_id}' with {len(assignments)} garment assignments (seed={seed}, conv={conversation_id})")
+
+        parent_record = await self.db.get_generation(parent_id) if parent_id else None
+        moodboard_id = parent_record.get("moodboard_id") if parent_record else None
+
+        if not parent_record or not parent_record.get("master_image_path") or not os.path.exists(parent_record["master_image_path"]):
+            raise ValueError(f"Parent generation '{parent_id}' or its master image file does not exist.")
+
+        # Load parent image
+        parent_img_path = parent_record["master_image_path"]
+        with open(parent_img_path, "rb") as f:
+            parent_bytes = f.read()
+
+        parent_mime = "image/png"
+        if parent_bytes.startswith(b"\xff\xd8"):
+            parent_mime = "image/jpeg"
+        elif parent_bytes.startswith(b"RIFF") and b"WEBP" in parent_bytes[:16]:
+            parent_mime = "image/webp"
+
+        contents: List[Any] = [
+            types.Part.from_bytes(data=parent_bytes, mime_type=parent_mime),
+            "Primary Base Scene Image above (showing the current model/subject)."
+        ]
+
+        # 1. Gather all garment items and prepared metadata
+        assignments_for_grounding = []
+        loaded_items_temp = []
+
+        for asgn_raw in assignments:
+            assignment = asgn_raw.model_dump() if hasattr(asgn_raw, "model_dump") else (asgn_raw if isinstance(asgn_raw, dict) else {})
+            item_id = assignment.get("wardrobe_item_id")
+            pin_num = assignment.get("pin_number", 1)
+            drop_pos = assignment.get("drop_position") or {}
+            target_desc = assignment.get("target_description") or ""
+
+            wardrobe_item = await self.db.get_wardrobe_item(item_id)
+            if not wardrobe_item:
+                logger.warning(f"Wardrobe item '{item_id}' not found in DB.")
+                continue
+
+            crop_path = wardrobe_item.get("cropped_image_path")
+            if not crop_path or not os.path.exists(crop_path):
+                logger.warning(f"Cropped image '{crop_path}' not found on disk.")
+                continue
+
+            with open(crop_path, "rb") as f:
+                garment_bytes = f.read()
+
+            g_mime = "image/png"
+            if garment_bytes.startswith(b"\xff\xd8"):
+                g_mime = "image/jpeg"
+            elif garment_bytes.startswith(b"RIFF") and b"WEBP" in garment_bytes[:16]:
+                g_mime = "image/webp"
+
+            label = wardrobe_item.get("label", f"Garment {pin_num}")
+            category = wardrobe_item.get("category", "tops")
+
+            loaded_items_temp.append({
+                "pin_number": pin_num,
+                "item_id": item_id,
+                "label": label,
+                "category": category,
+                "drop_pos": drop_pos,
+                "target_desc": target_desc,
+                "garment_bytes": garment_bytes,
+                "g_mime": g_mime,
+                "region_bbox": assignment.get("region_bbox"),
+            })
+            assignments_for_grounding.append({
+                "pin_number": pin_num,
+                "item_label": label,
+                "category": category,
+                "drop_position": drop_pos,
+                "target_description": target_desc,
+            })
+
+        # 2. Execute Vision-Assisted Subject Grounding (Pre-pass)
+        grounding_data = await self.wardrobe_service.ground_wardrobe_pins(
+            image_bytes=parent_bytes,
+            assignments=assignments_for_grounding,
+        )
+        grounded_by_pin = {
+            g.get("pin_number"): g for g in grounding_data.get("grounded_pins", []) if isinstance(g, dict)
+        }
+
+        # 3. Build replacement instructions with grounded subject descriptions
+        instruction_lines = []
+        loaded_assignments = []
+
+        for item in loaded_items_temp:
+            pin_num = item["pin_number"]
+            g_info = grounded_by_pin.get(pin_num, {})
+            target_subject = g_info.get("target_subject") or "The target subject at this location"
+            body_loc = g_info.get("body_location") or "the corresponding body area"
+            spatial_anchor = g_info.get("spatial_anchor") or f"drop pin (x: {round(float(item['drop_pos'].get('x', 0.5))*100)}%, y: {round(float(item['drop_pos'].get('y', 0.5))*100)}%)"
+            current_attire = g_info.get("current_attire") or "the existing clothing"
+
+            instruction_lines.append(
+                f"- [Garment Pin #{pin_num}] \"{item['label']}\" ({item['category']}):\n"
+                f"  * Target Subject: {target_subject} at {body_loc} [{spatial_anchor}].\n"
+                f"  * Replacement Action: Replace {current_attire} with the garment in Reference Garment #{pin_num}.\n"
+                f"  * Tailoring & Fit: Harmonize naturally with this exact subject's body geometry, pose, and ambient scene lighting."
+            )
+
+            contents.append(f"Reference Garment #{pin_num} (Label: {item['label']}):")
+            contents.append(types.Part.from_bytes(data=item["garment_bytes"], mime_type=item["g_mime"]))
+
+            loaded_assignments.append({
+                "id": f"asgn_{uuid.uuid4().hex[:8]}",
+                "wardrobe_item_id": item["item_id"],
+                "pin_number": pin_num,
+                "drop_position": item["drop_pos"],
+                "target_description": item["target_desc"],
+                "region_bbox": item["region_bbox"],
+                "grounded_subject": target_subject,
+                "grounded_location": body_loc,
+            })
+
+        guardrail = grounding_data.get("unmodified_subjects_guardrail")
+        if guardrail:
+            instruction_lines.append(f"\nMULTI-SUBJECT INVARIANCE GUARDRAIL:\n- {guardrail.strip()}")
+
+        if custom_instruction and custom_instruction.strip():
+            instruction_lines.append(f"\nADDITIONAL STYLING DIRECTIVE:\n- {custom_instruction.strip()}")
+
+        instructions_block = "\n".join(instruction_lines) if instruction_lines else "Swap outfit with provided reference garments."
+        compiled_prompt = WARDROBE_COMPOSITION_SYSTEM_PROMPT.replace(
+            "{COMPOSITION_INSTRUCTIONS}",
+            instructions_block
+        )
+        contents.append(compiled_prompt)
+
+        final_neg_prompt = negative_prompt if negative_prompt is not None else DEFAULT_NEGATIVE_PROMPT
+        request_id = f"compose_{uuid.uuid4().hex}"
+        self._audit(
+            "wardrobe_compose_request",
+            request_id,
+            parent_id=parent_id,
+            assignments_count=len(loaded_assignments),
+            grounded_subjects=[a.get("grounded_subject") for a in loaded_assignments],
+            seed=seed,
+            aspect_ratio=aspect_ratio,
+            negative_prompt=final_neg_prompt,
+            conversation_id=conversation_id,
+        )
+
+        child_id = f"gen_wardrobe_{uuid.uuid4().hex[:8]}"
+        created_at = datetime.now(timezone.utc).isoformat()
+
+        image_bytes = await self._call_multi_image_model(
+            contents=contents,
+            seed=seed,
+            aspect_ratio=aspect_ratio,
+            negative_prompt=final_neg_prompt,
+            audit_request_id=request_id,
+        )
+
+        gen_dir = os.path.join(self.storage_dir, "generations")
+        os.makedirs(gen_dir, exist_ok=True)
+        filename = f"{child_id}_master.png"
+        filepath = os.path.join(gen_dir, filename)
+
+        with open(filepath, "wb") as f:
+            f.write(image_bytes)
+
+        width, height = ASPECT_RATIO_RESOLUTIONS.get(aspect_ratio, (1080, 1620))
+
+        record = {
+            "id": child_id,
+            "parent_id": parent_id,
+            "moodboard_id": moodboard_id,
+            "is_baseline": False,
+            "created_at": created_at,
+            "schema_json": {
+                "wardrobe_composition": True,
+                "refinement_prompt": f"Wardrobe swap ({len(loaded_assignments)} item{'s' if len(loaded_assignments) != 1 else ''}): " + ", ".join([f"Pin #{a['pin_number']}" for a in loaded_assignments]),
+                "conversation_id": conversation_id,
+                "assignments": loaded_assignments,
+            },
+            "compiled_prompt": compiled_prompt,
+            "negative_prompt": final_neg_prompt,
+            "seed": seed,
+            "master_image_path": filepath,
+            "aspect_ratio": aspect_ratio,
+            "resolution_width": width,
+            "resolution_height": height,
+            "conversation_id": conversation_id,
+        }
+        await self.db.create_generation(record)
+
+        # Save individual assignments to DB
+        for asgn in loaded_assignments:
+            await self.db.create_composition_assignment({
+                "id": asgn["id"],
+                "generation_id": child_id,
+                "wardrobe_item_id": asgn["wardrobe_item_id"],
+                "pin_number": asgn["pin_number"],
+                "drop_position": asgn["drop_position"],
+                "target_description": asgn["target_description"],
+                "region_bbox": asgn.get("region_bbox"),
+            })
+
+        self._audit(
+            "wardrobe_compose_response",
+            request_id,
+            generation_id=child_id,
+            parent_id=parent_id,
+            output_path=filepath,
+            seed=seed,
+            aspect_ratio=aspect_ratio,
+            conversation_id=conversation_id,
+        )
+        logger.info(f"Wardrobe composition {child_id} created successfully.")
+
+        return {
+            "generation_id": child_id,
+            "parent_id": parent_id,
+            "seed": seed,
+            "compiled_prompt": compiled_prompt,
+            "negative_prompt": final_neg_prompt,
+            "image_url": f"/api/images/{filename}",
+            "created_at": created_at,
+            "resolution": {"width": width, "height": height},
+            "conversation_id": conversation_id,
+            "assignments": loaded_assignments,
         }
 
     async def inpaint_region(

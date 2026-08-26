@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Paintbrush,
   Eraser,
@@ -13,6 +13,9 @@ import {
   CheckCircle2,
   Eye,
   EyeOff,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw,
 } from 'lucide-react';
 import { inpaintRegion } from '../services/apiClient';
 
@@ -28,6 +31,7 @@ export default function CanvasStudio({
 }) {
   const [activeTool, setActiveTool] = useState('brush'); // 'brush' | 'eraser'
   const [brushSize, setBrushSize] = useState(25);
+  const [zoom, setZoom] = useState(1);
   const [prompt, setPrompt] = useState('');
   const [errorMessage, setErrorMessage] = useState(null);
   const [showTips, setShowTips] = useState(false);
@@ -35,11 +39,10 @@ export default function CanvasStudio({
   const [isMaskVisible, setIsMaskVisible] = useState(true);
 
   const containerRef = useRef(null);
-  const bgCanvasRef = useRef(null);
   const maskCanvasRef = useRef(null);
   const isDrawingRef = useRef(false);
   const lastPointRef = useRef(null);
-  const imageObjRef = useRef(null);
+  const imageElemRef = useRef(null);
 
   // Load and render background image onto canvas
   useEffect(() => {
@@ -48,22 +51,13 @@ export default function CanvasStudio({
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
-      imageObjRef.current = img;
       const width = img.naturalWidth || 1080;
       const height = img.naturalHeight || 1620;
 
-      const bgCanvas = bgCanvasRef.current;
       const maskCanvas = maskCanvasRef.current;
-
-      if (bgCanvas && maskCanvas) {
-        bgCanvas.width = width;
-        bgCanvas.height = height;
+      if (maskCanvas) {
         maskCanvas.width = width;
         maskCanvas.height = height;
-
-        const bgCtx = bgCanvas.getContext('2d');
-        bgCtx.clearRect(0, 0, width, height);
-        bgCtx.drawImage(img, 0, 0, width, height);
 
         // Reset mask when base image changes
         const maskCtx = maskCanvas.getContext('2d');
@@ -85,6 +79,19 @@ export default function CanvasStudio({
       x: (e.clientX - rect.left) * scaleX,
       y: (e.clientY - rect.top) * scaleY,
     };
+  };
+
+  // Zoom handlers
+  const handleZoomIn = () => setZoom((z) => Math.min(Number((z + 0.25).toFixed(2)), 3));
+  const handleZoomOut = () => setZoom((z) => Math.max(Number((z - 0.25).toFixed(2)), 0.5));
+  const handleResetZoom = () => setZoom(1);
+
+  const handleWheel = (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey) {
+      e.preventDefault();
+      const delta = e.deltaY < 0 ? 0.15 : -0.15;
+      setZoom((z) => Math.max(0.5, Math.min(3, Number((z + delta).toFixed(2)))));
+    }
   };
 
   // Drawing routines
@@ -194,7 +201,6 @@ export default function CanvasStudio({
     });
   };
 
-
   // Get source image as Blob
   const getSourceImageBlob = async () => {
     if (!imageUrl) return null;
@@ -249,7 +255,7 @@ export default function CanvasStudio({
   };
 
   return (
-    <div className="canvas-studio-panel">
+    <div className="canvas-studio-panel" role="region" aria-label="Micro Studio Inpainting Canvas">
       {/* Header bar */}
       <div className="canvas-studio-header">
         <div className="canvas-studio-title-group">
@@ -265,9 +271,10 @@ export default function CanvasStudio({
               className="btn-secondary btn-sm"
               onClick={onSwitchToGraph}
               title="Return to Studio Workflow Selector"
+              aria-label="Return to Studio Workflow Selector"
             >
               <ArrowLeft size={14} />
-              <span>Switch to Tag Studio</span>
+              <span>Back to Workflow</span>
             </button>
           )}
 
@@ -277,6 +284,7 @@ export default function CanvasStudio({
               className="btn-secondary btn-sm"
               onClick={onOpenHistory}
               title="View Generation History & Step Back"
+              aria-label="View Lineage History"
             >
               <History size={14} />
               <span>Lineage History</span>
@@ -288,15 +296,16 @@ export default function CanvasStudio({
       {/* Main Interactive Canvas Section */}
       <div className="canvas-studio-workspace">
         {/* Floating Toolbar above canvas */}
-        <div className="canvas-studio-toolbar">
-          <div className="tool-group">
+        <div className="canvas-studio-toolbar" role="toolbar" aria-label="Inpainting Tools">
+          <div className="tool-group" role="group" aria-label="Drawing Tools">
             <button
               type="button"
               className={`tool-btn ${activeTool === 'brush' ? 'active' : ''}`}
               onClick={() => setActiveTool('brush')}
               title="Brush Tool (Draw Mask)"
+              aria-pressed={activeTool === 'brush'}
             >
-              <Paintbrush size={16} />
+              <Paintbrush size={15} />
               <span>Brush</span>
             </button>
             <button
@@ -304,32 +313,69 @@ export default function CanvasStudio({
               className={`tool-btn ${activeTool === 'eraser' ? 'active' : ''}`}
               onClick={() => setActiveTool('eraser')}
               title="Eraser Tool (Remove Mask)"
+              aria-pressed={activeTool === 'eraser'}
             >
-              <Eraser size={16} />
+              <Eraser size={15} />
               <span>Eraser</span>
             </button>
           </div>
 
-          <div className="slider-group">
-            <Sliders size={14} className="text-muted" />
-            <span className="slider-label">Size:</span>
+          <div className="slider-group" role="group" aria-label="Brush Size Control">
+            <Sliders size={13} className="text-muted" />
+            <label htmlFor="brush-size-input" className="slider-label">Size:</label>
             <input
+              id="brush-size-input"
               type="range"
               min="5"
               max="80"
               value={brushSize}
               onChange={(e) => setBrushSize(Number(e.target.value))}
               className="brush-size-slider"
+              aria-label="Brush stroke size"
             />
             <span className="slider-value">{brushSize}px</span>
           </div>
 
-          <div className="tool-group-right">
+          {/* Zoom In / Zoom Out Controls */}
+          <div className="zoom-controls-group" role="group" aria-label="Zoom Controls">
+            <button
+              type="button"
+              className="tool-btn-icon"
+              onClick={handleZoomOut}
+              disabled={zoom <= 0.5}
+              title="Zoom Out (Ctrl + Scroll Down)"
+              aria-label="Zoom Out"
+            >
+              <ZoomOut size={14} />
+            </button>
+            <button
+              type="button"
+              className="zoom-reset-btn"
+              onClick={handleResetZoom}
+              title="Reset Zoom to 100%"
+              aria-label="Reset Zoom"
+            >
+              {Math.round(zoom * 100)}%
+            </button>
+            <button
+              type="button"
+              className="tool-btn-icon"
+              onClick={handleZoomIn}
+              disabled={zoom >= 3}
+              title="Zoom In (Ctrl + Scroll Up)"
+              aria-label="Zoom In"
+            >
+              <ZoomIn size={14} />
+            </button>
+          </div>
+
+          <div className="tool-group-right" role="group" aria-label="Mask Visibility and Actions">
             <button
               type="button"
               className={`tool-btn-secondary ${!isMaskVisible ? 'active' : ''}`}
               onClick={() => setIsMaskVisible(!isMaskVisible)}
               title={isMaskVisible ? 'Hide Mask Overlay' : 'Show Mask Overlay'}
+              aria-pressed={!isMaskVisible}
             >
               {isMaskVisible ? <Eye size={14} /> : <EyeOff size={14} />}
               <span>{isMaskVisible ? 'Mask On' : 'Mask Off'}</span>
@@ -341,6 +387,7 @@ export default function CanvasStudio({
               onClick={handleClearMask}
               disabled={!hasMaskDrawn || isInpainting}
               title="Clear all painted mask strokes"
+              aria-label="Clear Mask"
             >
               <Trash2 size={14} />
               <span>Clear Mask</span>
@@ -349,10 +396,40 @@ export default function CanvasStudio({
         </div>
 
         {/* Dual Stacked Canvases */}
-        <div className="canvas-stage-wrapper" ref={containerRef}>
+        <div
+          className="canvas-stage-wrapper"
+          ref={containerRef}
+          onWheel={handleWheel}
+          tabIndex={0}
+          role="region"
+          aria-label="Canvas Drawing Stage"
+        >
           {imageUrl ? (
-            <div className="canvas-stack-container">
-              <canvas ref={bgCanvasRef} className="canvas-layer canvas-layer-bg" />
+            <div
+              className="canvas-stack-container"
+              style={{
+                transform: `scale(${zoom})`,
+                transformOrigin: 'center center',
+                transition: 'transform 0.15s ease-out',
+              }}
+            >
+              <img
+                ref={imageElemRef}
+                src={imageUrl}
+                alt="Studio inpaint reference background"
+                className="canvas-layer canvas-layer-bg"
+                crossOrigin="anonymous"
+                onLoad={(e) => {
+                  const img = e.currentTarget;
+                  const width = img.naturalWidth || 1080;
+                  const height = img.naturalHeight || 1620;
+                  const maskCanvas = maskCanvasRef.current;
+                  if (maskCanvas) {
+                    maskCanvas.width = width;
+                    maskCanvas.height = height;
+                  }
+                }}
+              />
               <canvas
                 ref={maskCanvasRef}
                 className="canvas-layer canvas-layer-mask"
@@ -361,6 +438,8 @@ export default function CanvasStudio({
                 onMouseMove={handleMouseMove}
                 onMouseUp={handleMouseUp}
                 onMouseLeave={handleMouseUp}
+                role="img"
+                aria-label="Inpaint mask canvas layer"
               />
             </div>
           ) : (
@@ -372,7 +451,7 @@ export default function CanvasStudio({
 
           {/* Inpainting Loading Indicator */}
           {isInpainting && (
-            <div className="canvas-inpaint-overlay">
+            <div className="canvas-inpaint-overlay" role="status" aria-live="polite">
               <Loader2 className="spin-animation" size={40} />
               <div className="loading-title">Applying Precision Inpaint Edit...</div>
               <div className="loading-subtitle">
@@ -395,6 +474,7 @@ export default function CanvasStudio({
                 type="button"
                 className="btn-link"
                 onClick={() => setShowTips(!showTips)}
+                aria-expanded={showTips}
               >
                 <Info size={13} />
                 <span>{showTips ? 'Hide Tips' : 'Prompt Tips'}</span>
@@ -403,7 +483,7 @@ export default function CanvasStudio({
           </div>
 
           {showTips && (
-            <div className="prompt-tips-callout">
+            <div className="prompt-tips-callout" role="note">
               <strong>Tips for best results:</strong>
               <ul>
                 <li>Focus strictly on the selected area (e.g. <em>"change the leather jacket to dark forest green suede"</em>).</li>
@@ -427,7 +507,7 @@ export default function CanvasStudio({
           </div>
 
           {errorMessage && (
-            <div className="canvas-error-alert">
+            <div className="canvas-error-alert" role="alert">
               <span>{errorMessage}</span>
             </div>
           )}

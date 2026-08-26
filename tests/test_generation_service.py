@@ -4,7 +4,7 @@ import os
 import json
 import hashlib
 from PIL import Image
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, AsyncMock, patch
 from app.services.generation_service import (
     GenerationService,
     compile_prompt,
@@ -416,4 +416,108 @@ async def test_inpaint_region_audit_and_mask_tracking(tmp_path):
         assert resp_event["generation_id"] == child_id
         assert resp_event["mask_artifact"]["filename"] == f"{child_id}_mask.png"
         assert resp_event["mask_artifact"]["coverage_percentage"] == 4.0
+
+
+@pytest.mark.asyncio
+async def test_compose_wardrobe_with_subject_grounding(tmp_path):
+    db_file = str(tmp_path / "test_wardrobe_gen.db")
+    db_mgr = DatabaseManager(db_file)
+    await db_mgr.init_db()
+
+    storage_dir = str(tmp_path / "storage")
+    gen_dir = os.path.join(storage_dir, "generations")
+    wd_dir = os.path.join(storage_dir, "wardrobe", "items")
+    os.makedirs(gen_dir, exist_ok=True)
+    os.makedirs(wd_dir, exist_ok=True)
+
+    # 1. Create base generation record + master image file
+    parent_img = Image.new("RGB", (100, 100), color=(100, 150, 200))
+    parent_path = os.path.join(gen_dir, "gen_base_1_master.png")
+    parent_img.save(parent_path, format="PNG")
+
+    parent_record = {
+        "id": "gen_base_1",
+        "parent_id": None,
+        "moodboard_id": "mb_123",
+        "is_baseline": True,
+        "created_at": "2026-08-25T10:00:00Z",
+        "schema_json": {"narrative": "A boy and girl sitting together."},
+        "compiled_prompt": "A boy and girl sitting together.",
+        "negative_prompt": "blurry",
+        "seed": 4289102,
+        "master_image_path": parent_path,
+        "aspect_ratio": "2:3",
+        "resolution_width": 1080,
+        "resolution_height": 1620,
+    }
+    await db_mgr.create_generation(parent_record)
+
+    # 2. Create wardrobe item
+    garment_img = Image.new("RGB", (50, 50), color=(200, 50, 50))
+    garment_path = os.path.join(wd_dir, "wd_cap_1.png")
+    garment_img.save(garment_path, format="PNG")
+
+    await db_mgr.create_wardrobe_item({
+        "id": "wd_cap_1",
+        "source_image_path": garment_path,
+        "label": "Red Baseball Cap",
+        "category": "accessories",
+        "cropped_image_path": garment_path,
+        "bbox_json": [0.1, 0.1, 0.3, 0.3],
+        "created_at": "2026-08-25T10:00:00Z",
+    })
+
+    # 3. Mock Gemini Image client and WardrobeService
+    mock_client = MagicMock()
+    mock_gen_response = MagicMock()
+    mock_part = MagicMock()
+    mock_part.inline_data.data = b"\x89PNG_wardrobe_result"
+    mock_candidate = MagicMock()
+    mock_candidate.content.parts = [mock_part]
+    mock_gen_response.candidates = [mock_candidate]
+    mock_client.models.generate_content.return_value = mock_gen_response
+
+    mock_wardrobe_service = MagicMock()
+    mock_wardrobe_service.ground_wardrobe_pins = AsyncMock(return_value={
+        "grounded_pins": [
+            {
+                "pin_number": 1,
+                "target_subject": "The young boy on the left side of the frame",
+                "body_location": "head and hair region",
+                "spatial_anchor": "upper-left (x: 30%, y: 20%)",
+                "current_attire": "bare-headed with dark hair",
+            }
+        ],
+        "unmodified_subjects_guardrail": "The young girl on the right side MUST remain completely untouched.",
+    })
+
+    with patch("app.services.generation_service.genai.Client", return_value=mock_client):
+        service = GenerationService(
+            db_manager=db_mgr,
+            api_key="fake_key",
+            storage_dir=storage_dir,
+            wardrobe_service=mock_wardrobe_service,
+        )
+
+        res = await service.compose_wardrobe(
+            parent_id="gen_base_1",
+            assignments=[
+                {
+                    "wardrobe_item_id": "wd_cap_1",
+                    "pin_number": 1,
+                    "drop_position": {"x": 0.3, "y": 0.2},
+                    "target_description": "hat",
+                }
+            ],
+            seed=4289102,
+        )
+
+        assert res["generation_id"].startswith("gen_wardrobe_")
+        assert res["parent_id"] == "gen_base_1"
+        assert res["seed"] == 4289102
+        assert "The young boy on the left side of the frame" in res["compiled_prompt"]
+        assert "The young girl on the right side MUST remain completely untouched" in res["compiled_prompt"]
+        assert "MULTI-SUBJECT INVARIANCE GUARDRAIL" in res["compiled_prompt"]
+        assert len(res["assignments"]) == 1
+        assert res["assignments"][0]["grounded_subject"] == "The young boy on the left side of the frame"
 

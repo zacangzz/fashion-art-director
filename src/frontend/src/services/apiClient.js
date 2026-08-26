@@ -56,7 +56,7 @@ async function handleApiResponse(response, defaultMessage) {
  * @param {Object} [existingSchema]
  * @returns {Promise<{moodboard_id: string, schema: Object, baselines: Array}>}
  */
-export async function analyzeAndGenerateBaselines(files, prompt = '', lockedSections = null, existingSchema = null) {
+export async function analyzeAndGenerateBaselines(files, prompt = '', lockedSections = null, existingSchema = null, aspectRatio = '1.8:1') {
   const formData = new FormData();
   files.forEach((file) => {
     formData.append('files', file);
@@ -69,6 +69,9 @@ export async function analyzeAndGenerateBaselines(files, prompt = '', lockedSect
   }
   if (existingSchema && typeof existingSchema === 'object') {
     formData.append('existing_schema', JSON.stringify(existingSchema));
+  }
+  if (aspectRatio && typeof aspectRatio === 'string') {
+    formData.append('aspect_ratio', aspectRatio);
   }
 
   const response = await fetch('/api/moodboard/analyze-and-baselines', {
@@ -117,6 +120,33 @@ export async function fineTuneGeneration(payload) {
   });
 
   return handleApiResponse(response, 'Fine-tune generation failed');
+}
+
+/**
+ * Sends conversation-based refinement request with reference image & seed locking.
+ * @param {Object} payload { parent_id, prompt, seed, seed_mode, aspect_ratio, negative_prompt, conversation_id }
+ * @returns {Promise<{generation_id: string, parent_id: string, seed: number, compiled_prompt: string, image_url: string, created_at: string, resolution: Object, conversation_id: string}>}
+ */
+export async function refineGeneration(payload) {
+  const response = await fetch('/api/refine', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  return handleApiResponse(response, 'Refinement generation failed');
+}
+
+/**
+ * Fetches conversation history thread by ID.
+ * @param {string} conversationId
+ * @returns {Promise<{conversation_id: string, baseline_generation_id: string, messages: Array}>}
+ */
+export async function fetchConversation(conversationId) {
+  const response = await fetch(`/api/conversations/${conversationId}`);
+  return handleApiResponse(response, 'Failed to fetch conversation history');
 }
 
 /**
@@ -216,11 +246,6 @@ export async function inpaintRegion({ generationId, imageBlob, maskBlob, prompt,
   return handleApiResponse(response, 'Canvas Studio inpainting failed');
 }
 
-/**
- * Legacy generation helper.
- * @param {Object} payload
- * @returns {Promise<Object>}
- */
 export async function generateImage(payload) {
   const response = await fetch('/api/generate', {
     method: 'POST',
@@ -232,4 +257,91 @@ export async function generateImage(payload) {
 
   return handleApiResponse(response, 'Generation failed');
 }
+
+/**
+ * Uploads a multi-garment lookbook sheet and auto-segments it into cards.
+ * @param {File} file
+ * @returns {Promise<{items: Array}>}
+ */
+export async function uploadWardrobeSheet(file) {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const response = await fetch('/api/wardrobe/upload', {
+    method: 'POST',
+    body: formData,
+  });
+
+  return handleApiResponse(response, 'Wardrobe sheet segmentation failed');
+}
+
+/**
+ * Fetches all saved wardrobe items.
+ * @returns {Promise<{items: Array}>}
+ */
+export async function fetchWardrobeItems() {
+  const response = await fetch('/api/wardrobe/items');
+  return handleApiResponse(response, 'Failed to fetch wardrobe items');
+}
+
+/**
+ * Deletes a wardrobe item by ID.
+ * @param {string} id
+ * @returns {Promise<{status: string, id: string}>}
+ */
+export async function deleteWardrobeItem(id) {
+  const response = await fetch(`/api/wardrobe/items/${id}`, {
+    method: 'DELETE',
+  });
+
+  return handleApiResponse(response, 'Failed to delete wardrobe item');
+}
+
+/**
+ * Deletes all wardrobe items in the library.
+ * @returns {Promise<{status: string, count: number}>}
+ */
+export async function deleteAllWardrobeItems() {
+  const response = await fetch('/api/wardrobe/items', {
+    method: 'DELETE',
+  });
+
+  return handleApiResponse(response, 'Failed to delete all wardrobe items');
+}
+
+
+/**
+ * Detects clothing regions on the active generated image.
+ * @param {string} generationId
+ * @returns {Promise<{regions: Array}>}
+ */
+export async function detectClothingRegions(generationId) {
+  const response = await fetch('/api/wardrobe/detect-regions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ generation_id: generationId }),
+  });
+
+  return handleApiResponse(response, 'Failed to detect clothing regions');
+}
+
+/**
+ * Sends a multi-image wardrobe composition request.
+ * @param {Object} payload { parent_id, assignments, seed, seed_mode, aspect_ratio, negative_prompt, conversation_id, custom_instruction }
+ * @returns {Promise<Object>}
+ */
+export async function composeWardrobe(payload) {
+  const response = await fetch('/api/wardrobe/compose', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  return handleApiResponse(response, 'Wardrobe composition failed');
+}
+
 

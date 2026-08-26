@@ -80,6 +80,7 @@ async def analyze_and_baselines(
     existing_schema: Optional[str] = Form(None),
     existing_categories: Optional[str] = Form(None),
     existing_narrative: Optional[str] = Form(None),
+    aspect_ratio: Optional[str] = Form("1.8:1"),
 ):
     """
     Step 1: Analyzes 1-5 moodboard files + optional creative prompt baseline ->
@@ -120,11 +121,12 @@ async def analyze_and_baselines(
         parse_and_raise_http_error(exc, model_name=settings.VISION_MODEL, context="Vision Tag & Narrative Extraction")
 
     # 2. Concurrently Generate 4 Baselines
+    eff_aspect_ratio = aspect_ratio or "1.8:1"
     try:
         baselines_raw = await generation_service.generate_4_baselines(
             moodboard_id=moodboard_id,
             state=tag_state,
-            aspect_ratio="2:3",
+            aspect_ratio=eff_aspect_ratio,
         )
         baselines = [
             BaselineSummary(
@@ -132,7 +134,7 @@ async def analyze_and_baselines(
                 seed=b["seed"],
                 image_url=b["image_url"],
                 created_at=b["created_at"],
-                aspect_ratio=b.get("aspect_ratio", "2:3"),
+                aspect_ratio=b.get("aspect_ratio", eff_aspect_ratio),
                 resolution=b.get("resolution"),
                 compiled_prompt=b.get("compiled_prompt"),
             )

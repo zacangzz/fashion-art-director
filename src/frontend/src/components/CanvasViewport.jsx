@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Eye,
   Wand2,
@@ -21,6 +21,11 @@ import {
   ChevronDown,
   ChevronUp,
   Terminal,
+  Shirt,
+  X,
+  Hand,
+  Move,
+  Maximize,
 } from 'lucide-react';
 
 export default function CanvasViewport({
@@ -41,8 +46,16 @@ export default function CanvasViewport({
   canGenerate = true,
   isInpaintMode = false,
   mode = 'tag',
+  wardrobeAssignments = [],
+  onDropGarment = null,
+  onRemovePin = null,
+  onUpdatePinPosition = null,
+  isWardrobeMode = false,
 }) {
   const [zoom, setZoom] = useState(1);
+  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+  const [isSpacePressed, setIsSpacePressed] = useState(false);
+  const [isPanning, setIsPanning] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [sliderPos, setSliderPos] = useState(50);
   const [viewMode, setViewMode] = useState('split'); // 'split', 'side_by_side', 'after', 'before'
@@ -51,6 +64,18 @@ export default function CanvasViewport({
   const [copiedPrompt, setCopiedPrompt] = useState(false);
   const [compareSource, setCompareSource] = useState('previous'); // 'previous' | 'baseline'
   const [showMaskOverlay, setShowMaskOverlay] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [selectedPinNumber, setSelectedPinNumber] = useState(null);
+  const [draggingPinNumber, setDraggingPinNumber] = useState(null);
+
+  const imageContainerRef = useRef(null);
+  const viewportBoxRef = useRef(null);
+  const panStartRef = useRef({ x: 0, y: 0 });
+  const isPanningRef = useRef(false);
+  const isSpacePressedRef = useRef(false);
+  const zoomRef = useRef(1);
+  zoomRef.current = zoom;
+
 
   const inpaintMeta = generationResult?.inpaint_metadata || generationResult?.schema_json?.inpaint_metadata;
   const maskUrl = generationResult?.mask_url || generationResult?.mask_image_url || inpaintMeta?.mask_url;
@@ -126,8 +151,142 @@ export default function CanvasViewport({
     document.body.removeChild(link);
   };
 
+  const handleDragOver = (e) => {
+    if (!isWardrobeMode) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    setIsDragOver(true);
+  };
+
+  const handleDragLeave = (e) => {
+    if (!isWardrobeMode) return;
+    if (e.currentTarget.contains(e.relatedTarget)) return;
+    setIsDragOver(false);
+  };
+
+  const handleDrop = (e) => {
+    if (!isWardrobeMode) return;
+    e.preventDefault();
+    setIsDragOver(false);
+    const dataStr = e.dataTransfer.getData('application/json');
+    if (!dataStr) return;
+    try {
+      const item = JSON.parse(dataStr);
+      const imgElem = imageContainerRef.current;
+      if (!imgElem) return;
+      const rect = imgElem.getBoundingClientRect();
+      const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+      onDropGarment?.(item, { x, y });
+    } catch (err) {
+      console.error('Failed to parse dropped garment', err);
+    }
+  };
+
+  const clampPan = useCallback((x, y, currentZoom = zoom) => {
+    if (!viewportBoxRef.current) return { x, y };
+    const viewportRect = viewportBoxRef.current.getBoundingClientRect();
+    const maxPanX = Math.max(80, (viewportRect.width * Math.max(0, currentZoom - 0.7)) / 2 + 120);
+    const maxPanY = Math.max(80, (viewportRect.height * Math.max(0, currentZoom - 0.7)) / 2 + 120);
+    return {
+      x: Math.max(-maxPanX, Math.min(maxPanX, x)),
+      y: Math.max(-maxPanY, Math.min(maxPanY, y)),
+    };
+  }, [zoom]);
+
+  // Spacebar Hand Tool & Keyboard Deletion Listeners
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      const tag = e.target?.tagName?.toLowerCase();
+      const isTyping = tag === 'input' || tag === 'textarea' || e.target?.isContentEditable;
+      if (isTyping) return;
+
+      if (e.code === 'Space' || e.key === ' ') {
+        e.preventDefault();
+        setIsSpacePressed(true);
+        isSpacePressedRef.current = true;
+      }
+
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedPinNumber !== null) {
+        e.preventDefault();
+        onRemovePin?.(selectedPinNumber);
+        setSelectedPinNumber(null);
+      }
+    };
+
+    const handleKeyUp = (e) => {
+      if (e.code === 'Space' || e.key === ' ') {
+        setIsSpacePressed(false);
+        isSpacePressedRef.current = false;
+        setIsPanning(false);
+        isPanningRef.current = false;
+      }
+    };
+
+    const handleWindowBlur = () => {
+      setIsSpacePressed(false);
+      isSpacePressedRef.current = false;
+      setIsPanning(false);
+      isPanningRef.current = false;
+      setDraggingPinNumber(null);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', handleWindowBlur);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('blur', handleWindowBlur);
+    };
+  }, [selectedPinNumber, onRemovePin]);
+
+  const handleViewportMouseDown = (e) => {
+    if (isSpacePressedRef.current || e.button === 1) {
+      e.preventDefault();
+      setIsPanning(true);
+      isPanningRef.current = true;
+      panStartRef.current = {
+        x: e.clientX - panOffset.x,
+        y: e.clientY - panOffset.y,
+      };
+    }
+  };
+
+  const handleViewportMouseMove = (e) => {
+    if (isPanningRef.current) {
+      e.preventDefault();
+      const rawX = e.clientX - panStartRef.current.x;
+      const rawY = e.clientY - panStartRef.current.y;
+      const clamped = clampPan(rawX, rawY, zoomRef.current);
+      setPanOffset(clamped);
+    } else if (draggingPinNumber !== null && imageContainerRef.current) {
+      e.preventDefault();
+      const rect = imageContainerRef.current.getBoundingClientRect();
+      const x = Math.max(0.02, Math.min(0.98, (e.clientX - rect.left) / rect.width));
+      const y = Math.max(0.02, Math.min(0.98, (e.clientY - rect.top) / rect.height));
+      onUpdatePinPosition?.(draggingPinNumber, { x, y });
+    }
+  };
+
+  const handleViewportMouseUp = () => {
+    if (isPanningRef.current) {
+      setIsPanning(false);
+      isPanningRef.current = false;
+    }
+    if (draggingPinNumber !== null) {
+      setDraggingPinNumber(null);
+    }
+  };
+
+  const handleResetFit = () => {
+    setZoom(1);
+    setPanOffset({ x: 0, y: 0 });
+  };
+
   return (
     <div className="canvas-viewport-panel">
+
       {/* Viewport Header */}
       <div className="viewport-header">
         <div className="viewport-title-group">
@@ -251,12 +410,25 @@ export default function CanvasViewport({
       </div>
 
       {/* Main Image Rendering Area */}
-      <div className={`viewport-image-box ${isFullscreen ? 'viewport-fullscreen' : ''}`}>
+      <div
+        ref={viewportBoxRef}
+        className={`viewport-image-box ${isFullscreen ? 'viewport-fullscreen' : ''} ${isSpacePressed ? 'hand-cursor-active' : ''} ${isPanning ? 'is-panning-active' : ''}`}
+        onMouseDown={handleViewportMouseDown}
+        onMouseMove={handleViewportMouseMove}
+        onMouseUp={handleViewportMouseUp}
+        onMouseLeave={handleViewportMouseUp}
+      >
         {hasComparison && viewMode === 'split' && !isPeeking ? (
           /* Split Slider Viewport */
           <div
             className="split-slider-viewport image-zoom-container"
-            style={{ width: '100%', height: '100%', transform: `scale(${zoom})` }}
+            style={{
+              width: '100%',
+              height: '100%',
+              transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoom})`,
+              transformOrigin: 'center center',
+              transition: isPanning ? 'none' : 'transform 0.15s ease-out',
+            }}
           >
             {/* Version A Background: Before / Baseline */}
             <img src={effectiveBeforeUrl} alt={`Before: ${effectiveBeforeLabel}`} className="split-image-layer layer-a" />
@@ -293,7 +465,14 @@ export default function CanvasViewport({
           </div>
         ) : hasComparison && viewMode === 'side_by_side' && !isPeeking ? (
           /* Side-by-Side Dual Viewport */
-          <div className="side-by-side-grid" style={{ transform: `scale(${zoom})` }}>
+          <div
+            className="side-by-side-grid"
+            style={{
+              transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoom})`,
+              transformOrigin: 'center center',
+              transition: isPanning ? 'none' : 'transform 0.15s ease-out',
+            }}
+          >
             <div className="side-by-side-panel">
               <span className="comparison-badge badge-before">BEFORE ({effectiveBeforeLabel})</span>
               <img src={effectiveBeforeUrl} alt={`Before: ${effectiveBeforeLabel}`} className="side-by-side-image" />
@@ -305,7 +484,19 @@ export default function CanvasViewport({
           </div>
         ) : activeDisplayUrl ? (
           /* Single Image View (or Peek Before active) */
-          <div className="image-zoom-container" style={{ transform: `scale(${zoom})` }}>
+          <div
+            ref={imageContainerRef}
+            className={`image-zoom-container ${isWardrobeMode ? 'is-wardrobe-drop-target' : ''} ${isDragOver ? 'is-drag-active' : ''}`}
+            style={{
+              transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoom})`,
+              transformOrigin: 'center center',
+              transition: isPanning || draggingPinNumber !== null ? 'none' : 'transform 0.15s ease-out',
+              position: 'relative',
+            }}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+          >
             {isPeeking && (
               <span className="comparison-badge badge-peek">PEEKING {effectiveBeforeLabel.toUpperCase()}</span>
             )}
@@ -320,6 +511,73 @@ export default function CanvasViewport({
               alt={isPeeking ? 'Reference Photo' : 'Master Rendered Artwork'}
               className="rendered-canvas-image"
             />
+
+            {/* Wardrobe Drop Hint Overlay */}
+            {isWardrobeMode && isDragOver && (
+              <div className="wardrobe-drop-hint-overlay">
+                <Shirt size={28} className="animate-bounce text-accent" />
+                <span className="drop-hint-title">Drop to Pin Garment</span>
+                <span className="drop-hint-subtitle">Pin will assign this garment to this body location</span>
+              </div>
+            )}
+
+            {/* Wardrobe Numbered Pins Overlay with Drag & Delete */}
+            {isWardrobeMode && wardrobeAssignments.map((asgn) => {
+              const posX = (asgn.drop_position?.x ?? 0.5) * 100;
+              const posY = (asgn.drop_position?.y ?? 0.5) * 100;
+              const isSelected = selectedPinNumber === asgn.pin_number;
+              const isDragging = draggingPinNumber === asgn.pin_number;
+
+              return (
+                <div
+                  key={asgn.pin_number}
+                  className={`wardrobe-pin-marker ${isSelected ? 'selected' : ''} ${isDragging ? 'is-dragging' : ''}`}
+                  style={{ left: `${posX}%`, top: `${posY}%` }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedPinNumber(asgn.pin_number);
+                  }}
+                  onMouseDown={(e) => {
+                    // Left click to start dragging
+                    if (e.button === 0) {
+                      e.stopPropagation();
+                      setSelectedPinNumber(asgn.pin_number);
+                      setDraggingPinNumber(asgn.pin_number);
+                    }
+                  }}
+                  title={`Pin #${asgn.pin_number}: ${asgn.item_label || 'Garment'} (Drag to move, click X or press Backspace to remove)`}
+                  role="button"
+                  tabIndex={0}
+                >
+                  <div className="pin-pulse-ring" />
+                  <div className="pin-circle-badge">
+                    <Move size={9} className="pin-drag-handle-icon" />
+                    <span>{asgn.pin_number}</span>
+                  </div>
+                  <div className="pin-tooltip-popover">
+                    <div className="pin-info-row">
+                      <span className="pin-tooltip-label">{asgn.item_label || 'Garment'}</span>
+                      <span className="pin-coords-badge">{Math.round(posX)}%, {Math.round(posY)}%</span>
+                    </div>
+                    <button
+                      type="button"
+                      className="pin-remove-btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onRemovePin?.(asgn.pin_number);
+                        if (selectedPinNumber === asgn.pin_number) {
+                          setSelectedPinNumber(null);
+                        }
+                      }}
+                      title="Remove pin"
+                      aria-label={`Remove pin ${asgn.pin_number}`}
+                    >
+                      <X size={11} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         ) : (
           <div className="viewport-empty-placeholder">
@@ -351,8 +609,17 @@ export default function CanvasViewport({
           <div className="viewport-overlay-controls">
             <button
               type="button"
+              className={`viewport-control-btn ${zoom === 1 && panOffset.x === 0 && panOffset.y === 0 ? 'active' : ''}`}
+              onClick={handleResetFit}
+              title="Fit to Width / Reset View"
+            >
+              <RotateCcw size={13} />
+              <span className="viewport-fit-label">Fit</span>
+            </button>
+            <button
+              type="button"
               className="viewport-control-btn"
-              onClick={() => setZoom((z) => Math.min(z + 0.25, 3))}
+              onClick={() => setZoom((z) => Math.min(Number((z + 0.25).toFixed(2)), 3))}
               title="Zoom In"
             >
               <ZoomIn size={15} />
@@ -361,10 +628,21 @@ export default function CanvasViewport({
             <button
               type="button"
               className="viewport-control-btn"
-              onClick={() => setZoom((z) => Math.max(z - 0.25, 0.5))}
+              onClick={() => setZoom((z) => Math.max(Number((z - 0.25).toFixed(2)), 0.5))}
               title="Zoom Out"
             >
               <ZoomOut size={15} />
+            </button>
+            <button
+              type="button"
+              className={`viewport-control-btn ${isSpacePressed ? 'active' : ''}`}
+              onClick={() => {
+                setIsSpacePressed(!isSpacePressed);
+                isSpacePressedRef.current = !isSpacePressed;
+              }}
+              title="Hold [Spacebar] + Drag to Pan View"
+            >
+              <Hand size={15} />
             </button>
             <button
               type="button"
@@ -474,6 +752,7 @@ export default function CanvasViewport({
             <span>Seed: #{activeSeed} ({seedMode})</span>
           </div>
           {mode === 'tag' && <span className="shortcut-hint">Shortcut: ⌘ + Enter</span>}
+          {mode === 'refinement' && <span className="shortcut-hint">Prompt in Refinement Thread</span>}
           {mode === 'canvas' && <span className="shortcut-hint">Live Inpaint Preview</span>}
         </div>
 

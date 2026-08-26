@@ -163,6 +163,47 @@ class LineageResponse(BaseModel):
     descendants: List[GenerationRecordResponse] = Field(default_factory=list)
 
 
+# ==============================================================================
+# Conversation-Based Refinement Models
+# ==============================================================================
+
+class RefinementRequest(BaseModel):
+    parent_id: str
+    prompt: str
+    seed_mode: str = "locked"
+    seed: int = 4289102
+    aspect_ratio: Optional[str] = "2:3"
+    negative_prompt: Optional[str] = None
+    conversation_id: Optional[str] = None
+
+
+class RefinementResponse(BaseModel):
+    generation_id: str
+    parent_id: Optional[str] = None
+    seed: int
+    compiled_prompt: str
+    negative_prompt: str
+    image_url: str
+    created_at: str
+    resolution: Optional[Dict[str, int]] = None
+    conversation_id: Optional[str] = None
+
+
+class ConversationMessage(BaseModel):
+    role: str  # "baseline" | "user"
+    prompt: Optional[str] = None
+    generation_id: str
+    image_url: str
+    seed: int
+    created_at: str
+
+
+class ConversationResponse(BaseModel):
+    conversation_id: str
+    baseline_generation_id: str
+    messages: List[ConversationMessage] = Field(default_factory=list)
+
+
 # Legacy Request / Response Models
 class MoodboardAnalysisSchema(BaseModel):
     model_config = ConfigDict(extra="allow")
@@ -198,3 +239,73 @@ class GenerationResponse(BaseModel):
     seed: int
     master_image_url: str
     resolution: Resolution
+
+
+# ==============================================================================
+# Wardrobe Composition Models
+# ==============================================================================
+
+class GarmentCard(BaseModel):
+    id: str
+    label: str
+    category: Optional[str] = "tops"
+    image_url: str
+    source_image_url: Optional[str] = None
+    bbox: Optional[List[float]] = None
+    created_at: Optional[str] = None
+
+
+class WardrobeUploadResponse(BaseModel):
+    items: List[GarmentCard] = Field(default_factory=list)
+
+
+class WardrobeListResponse(BaseModel):
+    items: List[GarmentCard] = Field(default_factory=list)
+
+
+class ClothingRegion(BaseModel):
+    id: str
+    label: str
+    category: Optional[str] = None
+    bbox: List[float] = Field(default_factory=list)
+
+
+class DetectRegionsRequest(BaseModel):
+    generation_id: Optional[str] = None
+
+
+class DetectRegionsResponse(BaseModel):
+    regions: List[ClothingRegion] = Field(default_factory=list)
+
+
+class CompositionPinAssignment(BaseModel):
+    wardrobe_item_id: str
+    pin_number: int
+    drop_position: Optional[Dict[str, float]] = None
+    target_description: Optional[str] = None
+    region_bbox: Optional[List[float]] = None
+
+
+class WardrobeComposeRequest(BaseModel):
+    parent_id: str
+    assignments: List[CompositionPinAssignment] = Field(default_factory=list)
+    seed_mode: str = "locked"
+    seed: int = 4289102
+    aspect_ratio: Optional[str] = "2:3"
+    negative_prompt: Optional[str] = None
+    conversation_id: Optional[str] = None
+    custom_instruction: Optional[str] = None
+
+
+class WardrobeComposeResponse(BaseModel):
+    generation_id: str
+    parent_id: Optional[str] = None
+    seed: int
+    compiled_prompt: str
+    negative_prompt: str
+    image_url: str
+    created_at: str
+    resolution: Optional[Dict[str, int]] = None
+    conversation_id: Optional[str] = None
+    assignments: List[CompositionPinAssignment] = Field(default_factory=list)
+
