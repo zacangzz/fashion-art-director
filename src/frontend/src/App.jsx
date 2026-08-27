@@ -696,6 +696,8 @@ export default function App() {
                 selectedBaselineId={activeBaseline?.id}
                 onSelectBaseline={handleSelectBaseline}
                 onProceedToStudio={handleProceedToStudio}
+                tagState={tagState}
+                aspectRatio={aspectRatio}
               />
             ) : (
               <div className="baseline-selector-container">

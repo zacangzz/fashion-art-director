@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   CheckCircle2,
   ArrowRight,
@@ -11,17 +11,96 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
+  Layers,
+  Palette,
+  FileText,
+  LayoutGrid,
+  Columns4,
+  Maximize2,
+  Scan,
+  Ratio,
 } from 'lucide-react';
+import { CATEGORIES } from '../utils/defaultTags';
+
+/**
+ * Parses aspect ratio strings (e.g., '9:16', '16:9', '1:1', '2:3', '1.8:1')
+ * and returns CSS aspect-ratio value, numeric ratio, orientation, and formatted label.
+ */
+export function parseAspectRatio(aspectRatioStr) {
+  if (!aspectRatioStr) {
+    return {
+      cssRatio: '2 / 3',
+      ratioValue: 2 / 3,
+      orientation: 'vertical',
+      label: '2:3',
+    };
+  }
+
+  let ratioValue = 2 / 3;
+  let cssRatio = '2 / 3';
+  const label = aspectRatioStr;
+
+  if (aspectRatioStr.includes(':')) {
+    const [wStr, hStr] = aspectRatioStr.split(':');
+    const w = parseFloat(wStr);
+    const h = parseFloat(hStr);
+    if (!isNaN(w) && !isNaN(h) && h > 0) {
+      ratioValue = w / h;
+      cssRatio = `${w} / ${h}`;
+    }
+  } else {
+    const val = parseFloat(aspectRatioStr);
+    if (!isNaN(val) && val > 0) {
+      ratioValue = val;
+      cssRatio = `${val} / 1`;
+    }
+  }
+
+  let orientation = 'vertical';
+  if (ratioValue >= 0.95 && ratioValue <= 1.05) {
+    orientation = 'square';
+  } else if (ratioValue > 1.05) {
+    orientation = 'horizontal';
+  } else {
+    orientation = 'vertical';
+  }
+
+  return {
+    cssRatio,
+    ratioValue,
+    orientation,
+    label,
+  };
+}
 
 export default function BaselineSelector({
   baselines = [],
   selectedBaselineId,
   onSelectBaseline,
   onProceedToStudio,
+  tagState = null,
+  aspectRatio = null,
 }) {
   const [zoomedImage, setZoomedImage] = useState(null);
   const [copiedPrompt, setCopiedPrompt] = useState(false);
   const [isPromptExpanded, setIsPromptExpanded] = useState(false);
+  const [copiedMoodboard, setCopiedMoodboard] = useState(false);
+  const [isMoodboardExpanded, setIsMoodboardExpanded] = useState(true);
+
+  // View settings: fitMode ('contain' | 'cover'), layoutMode ('auto' | '4' | '2')
+  const [fitMode, setFitMode] = useState('contain');
+  const [layoutMode, setLayoutMode] = useState('auto');
+
+  // Close zoomed modal on Escape key
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && zoomedImage) {
+        setZoomedImage(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [zoomedImage]);
 
   if (!baselines || baselines.length === 0) {
     return null;
@@ -29,6 +108,22 @@ export default function BaselineSelector({
 
   const activeBaseline = baselines.find((b) => b.id === selectedBaselineId) || baselines[0];
   const activeBaselinePrompt = activeBaseline?.compiled_prompt || activeBaseline?.prompt || '';
+
+  // Determine current active aspect ratio
+  const activeRatioStr =
+    activeBaseline?.aspect_ratio ||
+    baselines.find((b) => b.aspect_ratio)?.aspect_ratio ||
+    aspectRatio ||
+    '2:3';
+  const currentRatioInfo = parseAspectRatio(activeRatioStr);
+
+  // Compute effective columns: if auto, 9:16/vertical uses 4 columns so all 4 fit on screen side-by-side
+  const effectiveColumns =
+    layoutMode === 'auto'
+      ? currentRatioInfo.orientation === 'vertical' && baselines.length === 4
+        ? 4
+        : 2
+      : parseInt(layoutMode, 10) || 2;
 
   const handleCopyPrompt = async () => {
     if (!activeBaselinePrompt) return;
@@ -41,6 +136,54 @@ export default function BaselineSelector({
     }
   };
 
+  const handleCopyMoodboardInfo = async () => {
+    if (!tagState) return;
+    try {
+      let text = '';
+      if (tagState.narrative) {
+        text += `[Scene Narrative]\n${tagState.narrative}\n\n`;
+      }
+      if (tagState.master_prompt && tagState.master_prompt !== tagState.narrative) {
+        text += `[Master Prompt]\n${tagState.master_prompt}\n\n`;
+      }
+      if (tagState.categories) {
+        text += `[Extracted Visual Levers (9 Categories)]\n`;
+        for (const cat of CATEGORIES) {
+          const list = tagState.categories[cat.key] || [];
+          if (list.length > 0) {
+            const tagStrs = list.map((t) => {
+              if (typeof t === 'string') return t;
+              return `${t.label}${t.weight && t.weight !== 1.0 ? ` (${t.weight.toFixed(1)}x)` : ''}`;
+            });
+            text += `• ${cat.label}: ${tagStrs.join(', ')}\n`;
+          }
+        }
+      }
+      await navigator.clipboard.writeText(text.trim());
+      setCopiedMoodboard(true);
+      setTimeout(() => setCopiedMoodboard(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy moodboard info to clipboard', err);
+    }
+  };
+
+  // Calculate stats for moodboard info
+  const hasMoodboardInfo = Boolean(
+    tagState &&
+      (tagState.narrative ||
+        tagState.master_prompt ||
+        (tagState.categories && Object.keys(tagState.categories).length > 0))
+  );
+
+  const categoriesWithTags = CATEGORIES.filter((cat) => {
+    const list = tagState?.categories?.[cat.key];
+    return Array.isArray(list) && list.length > 0;
+  });
+
+  const totalTagsCount = categoriesWithTags.reduce((acc, cat) => {
+    return acc + (tagState.categories[cat.key]?.length || 0);
+  }, 0);
+
   return (
     <div className="baseline-selector-container">
       <div className="baseline-header">
@@ -51,7 +194,7 @@ export default function BaselineSelector({
           </div>
           <h2 className="baseline-title">Select Foundation Baseline Candidate</h2>
           <p className="baseline-subtitle">
-            Choose 1 of the 4 rendered candidate seeds to lock as your visual foundation for fine-tuning.
+            Choose 1 of the {baselines.length} rendered candidate seeds to lock as your visual foundation for fine-tuning.
           </p>
         </div>
 
@@ -66,10 +209,73 @@ export default function BaselineSelector({
         </button>
       </div>
 
-      {/* 4-Quadrant Grid */}
-      <div className="baseline-grid">
+      {/* Grid Controls: View Layout, Fit/Fill Toggle & Dynamic Aspect Ratio Badge */}
+      <div className="baseline-controls-bar">
+        <div className="baseline-controls-left">
+          <div className="baseline-aspect-indicator" title={`Current aspect ratio: ${currentRatioInfo.label}`}>
+            <Ratio size={14} className="text-accent" />
+            <span className="baseline-aspect-text">
+              Canvas: <strong>{currentRatioInfo.label}</strong> ({currentRatioInfo.orientation})
+            </span>
+          </div>
+        </div>
+
+        <div className="baseline-controls-right">
+          {/* Fit vs Fill Frame Mode Toggle */}
+          <div className="baseline-toggle-group" role="group" aria-label="Image Fit Mode">
+            <button
+              type="button"
+              className={`baseline-toggle-btn ${fitMode === 'contain' ? 'active' : ''}`}
+              onClick={() => setFitMode('contain')}
+              title="Fit to Canvas (Full uncropped image)"
+            >
+              <Scan size={13} />
+              <span>Fit (Full)</span>
+            </button>
+            <button
+              type="button"
+              className={`baseline-toggle-btn ${fitMode === 'cover' ? 'active' : ''}`}
+              onClick={() => setFitMode('cover')}
+              title="Fill Frame (Cover)"
+            >
+              <Maximize2 size={13} />
+              <span>Fill</span>
+            </button>
+          </div>
+
+          {/* 4-Columns vs 2x2 Layout Switcher */}
+          {baselines.length > 2 && (
+            <div className="baseline-toggle-group" role="group" aria-label="Grid Layout">
+              <button
+                type="button"
+                className={`baseline-toggle-btn ${effectiveColumns === 4 ? 'active' : ''}`}
+                onClick={() => setLayoutMode('4')}
+                title="4-Column Side-by-Side View (Best for 9:16 vertical)"
+              >
+                <Columns4 size={13} />
+                <span>4 Cols</span>
+              </button>
+              <button
+                type="button"
+                className={`baseline-toggle-btn ${effectiveColumns === 2 ? 'active' : ''}`}
+                onClick={() => setLayoutMode('2')}
+                title="2x2 Quadrant Grid View"
+              >
+                <LayoutGrid size={13} />
+                <span>2×2 Grid</span>
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Dynamic Candidate Grid */}
+      <div
+        className={`baseline-grid baseline-grid-${effectiveColumns} ratio-${currentRatioInfo.orientation}`}
+      >
         {baselines.map((baseline, index) => {
           const isSelected = baseline.id === (selectedBaselineId || activeBaseline?.id);
+          const itemRatio = parseAspectRatio(baseline.aspect_ratio || activeRatioStr);
 
           return (
             <div
@@ -77,11 +283,15 @@ export default function BaselineSelector({
               className={`baseline-card ${isSelected ? 'baseline-card-selected' : ''}`}
               onClick={() => onSelectBaseline && onSelectBaseline(baseline)}
             >
-              <div className="baseline-image-wrapper">
+              <div
+                className="baseline-image-wrapper"
+                style={{ aspectRatio: itemRatio.cssRatio }}
+              >
                 <img
                   src={baseline.image_url}
                   alt={`Baseline candidate #${index + 1}`}
                   className="baseline-image"
+                  style={{ objectFit: fitMode }}
                   loading="lazy"
                 />
 
@@ -91,9 +301,15 @@ export default function BaselineSelector({
                     className="baseline-preview-btn"
                     onClick={(e) => {
                       e.stopPropagation();
-                      setZoomedImage(baseline.image_url);
+                      setZoomedImage({
+                        url: baseline.image_url,
+                        seed: baseline.seed,
+                        index: index + 1,
+                        aspectRatio: itemRatio.label,
+                        prompt: baseline.compiled_prompt || baseline.prompt,
+                      });
                     }}
-                    title="Zoom Preview"
+                    title="Zoom Preview (Uncropped 100%)"
                   >
                     <Eye size={16} />
                   </button>
@@ -121,6 +337,7 @@ export default function BaselineSelector({
           );
         })}
       </div>
+
       {/* Baseline Full Prompt Submitted to API Inspector */}
       {activeBaselinePrompt && (
         <div className="baseline-prompt-panel">
@@ -180,18 +397,178 @@ export default function BaselineSelector({
         </div>
       )}
 
-      {/* Zoom Modal */}
+      {/* Generated Info from Moodboard Inspector */}
+      {hasMoodboardInfo && (
+        <div className="baseline-moodboard-panel">
+          <div className="baseline-moodboard-header">
+            <div className="baseline-moodboard-title-group">
+              <Sparkles size={14} className="text-accent" />
+              <span className="baseline-moodboard-title">Generated Info from Moodboard (Vision Synthesis & Visual Levers)</span>
+              {totalTagsCount > 0 && (
+                <span className="baseline-moodboard-tag">
+                  {totalTagsCount} tags • {categoriesWithTags.length} categories
+                </span>
+              )}
+            </div>
+
+            <div className="baseline-prompt-actions">
+              <button
+                type="button"
+                className="btn-prompt-action"
+                onClick={handleCopyMoodboardInfo}
+                title="Copy Moodboard Analysis Info"
+              >
+                {copiedMoodboard ? (
+                  <>
+                    <Check size={12} className="text-success" />
+                    <span className="text-success">Copied</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy size={12} />
+                    <span>Copy Info</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                className="btn-prompt-action"
+                onClick={() => setIsMoodboardExpanded(!isMoodboardExpanded)}
+                title={isMoodboardExpanded ? "Collapse" : "Expand"}
+              >
+                {isMoodboardExpanded ? (
+                  <>
+                    <ChevronUp size={12} />
+                    <span>Collapse</span>
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown size={12} />
+                    <span>Expand</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          <div className={`baseline-moodboard-content ${isMoodboardExpanded ? 'expanded' : 'collapsed'}`}>
+            {/* Core Scene Narrative */}
+            {tagState.narrative && (
+              <div className="baseline-moodboard-narrative-box">
+                <div className="baseline-moodboard-subheading">
+                  <FileText size={12} />
+                  <span>Scene Narrative & Core Logline</span>
+                </div>
+                <div className="baseline-moodboard-narrative-text">
+                  {tagState.narrative}
+                </div>
+              </div>
+            )}
+
+            {/* Master Generation Prompt (if distinct from narrative) */}
+            {tagState.master_prompt && tagState.master_prompt !== tagState.narrative && (
+              <div className="baseline-moodboard-narrative-box">
+                <div className="baseline-moodboard-subheading">
+                  <Palette size={12} />
+                  <span>Vision Director Master Prompt</span>
+                </div>
+                <div className="baseline-moodboard-narrative-text">
+                  {tagState.master_prompt}
+                </div>
+              </div>
+            )}
+
+            {/* 9-Category Extracted Visual Levers Grid */}
+            {categoriesWithTags.length > 0 && (
+              <div className="baseline-moodboard-categories-section">
+                <div className="baseline-moodboard-subheading">
+                  <Layers size={12} />
+                  <span>Extracted 9-Category Visual Levers</span>
+                </div>
+                <div className="baseline-moodboard-categories-grid">
+                  {categoriesWithTags.map((cat) => {
+                    const tagList = tagState.categories[cat.key] || [];
+                    return (
+                      <div key={cat.key} className="baseline-moodboard-category-card">
+                        <div className="baseline-moodboard-cat-header">
+                          <span
+                            className="baseline-moodboard-cat-dot"
+                            style={{ backgroundColor: cat.color }}
+                          />
+                          <span className="baseline-moodboard-cat-name">{cat.label}</span>
+                        </div>
+                        <div className="baseline-moodboard-chips-list">
+                          {tagList.map((tag, idx) => {
+                            const label = typeof tag === 'string' ? tag : tag.label;
+                            const weight = typeof tag === 'object' && tag.weight ? tag.weight : 1.0;
+                            return (
+                              <span
+                                key={`${cat.key}-${idx}-${label}`}
+                                className="baseline-moodboard-chip"
+                                style={{
+                                  borderColor: `${cat.color}40`,
+                                  backgroundColor: `${cat.color}15`,
+                                }}
+                              >
+                                <span>{label}</span>
+                                {weight !== 1.0 && (
+                                  <span className="baseline-moodboard-chip-weight">
+                                    {weight.toFixed(1)}x
+                                  </span>
+                                )}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Zoom Modal - Uncropped High-Res Preview */}
       {zoomedImage && (
-        <div className="modal-backdrop" onClick={() => setZoomedImage(null)}>
+        <div
+          className="modal-backdrop"
+          onClick={() => setZoomedImage(null)}
+          role="dialog"
+          aria-modal="true"
+        >
           <div className="modal-content-zoom" onClick={(e) => e.stopPropagation()}>
-            <img src={zoomedImage} alt="Zoomed baseline preview" className="zoomed-image" />
-            <button
-              type="button"
-              className="modal-close-btn"
-              onClick={() => setZoomedImage(null)}
-            >
-              ×
-            </button>
+            <div className="modal-zoom-header">
+              <div className="modal-zoom-meta">
+                <span className="modal-zoom-badge">
+                  Candidate {zoomedImage.index ? `#${zoomedImage.index}` : ''} • Seed #{zoomedImage.seed || 'N/A'}
+                </span>
+                {zoomedImage.aspectRatio && (
+                  <span className="modal-zoom-ratio-pill">
+                    {zoomedImage.aspectRatio}
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                className="modal-close-btn"
+                onClick={() => setZoomedImage(null)}
+                title="Close (Esc)"
+                aria-label="Close (Esc)"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="modal-zoom-body">
+              <img
+                src={zoomedImage.url || zoomedImage}
+                alt="Zoomed baseline preview"
+                className="zoomed-image"
+              />
+            </div>
           </div>
         </div>
       )}
