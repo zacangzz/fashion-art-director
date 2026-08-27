@@ -17,6 +17,7 @@ export default function ExportStudio({
   generationResult,
   activeBaseline,
   globalAspectRatio = '1.8:1',
+  history = [],
   onExportMasterPrepared,
 }) {
   const originalRatio =
@@ -25,38 +26,53 @@ export default function ExportStudio({
     globalAspectRatio ||
     '1.8:1';
 
-  const originalImage =
-    generationResult?.master_image_url ||
-    activeBaseline?.image_url ||
-    null;
-
-  const activeGenId =
-    generationResult?.generation_id ||
-    activeBaseline?.id ||
-    null;
-
-  const seed = generationResult?.seed ?? activeBaseline?.seed ?? '—';
-  const prompt =
-    generationResult?.compiled_prompt ||
-    activeBaseline?.compiled_prompt ||
-    '—';
-
   // Check if current generation result is already a prepared master
   const isAlreadyMaster = Boolean(
     generationResult?.schema_json?.is_export_master ||
-    generationResult?.schema_dict?.is_export_master
+    generationResult?.schema_dict?.is_export_master ||
+    (generationResult?.id || generationResult?.generation_id || '').startsWith('gen_export_')
   );
+
+  // If already master, look up parent in history to retrieve original generated image
+  const parentFromHistory = isAlreadyMaster && generationResult?.parent_id
+    ? history.find((h) => h.id === generationResult.parent_id)
+    : null;
+
+  const originalImage =
+    (isAlreadyMaster && parentFromHistory
+      ? parentFromHistory.master_image_url || parentFromHistory.image_url
+      : null) ||
+    (!isAlreadyMaster ? generationResult?.master_image_url : null) ||
+    activeBaseline?.image_url ||
+    generationResult?.master_image_url ||
+    null;
+
+  const originalGenId =
+    (isAlreadyMaster && parentFromHistory
+      ? parentFromHistory.id
+      : null) ||
+    (!isAlreadyMaster ? generationResult?.generation_id || generationResult?.id : null) ||
+    activeBaseline?.id ||
+    generationResult?.generation_id ||
+    'original';
 
   const [preparedMaster, setPreparedMaster] = useState(
     isAlreadyMaster ? generationResult : null
   );
   const [isPreparing, setIsPreparing] = useState(false);
   const [errorMessage, setErrorMessage] = useState(null);
-  const [isDownloading, setIsDownloading] = useState(false);
+  const [isDownloadingOriginal, setIsDownloadingOriginal] = useState(false);
+  const [isDownloadingUpscaled, setIsDownloadingUpscaled] = useState(false);
   const [compareMode, setCompareMode] = useState('split'); // 'split' | 'enhanced' | 'original'
   const [sliderPos, setSliderPos] = useState(50);
   const [isDragging, setIsDragging] = useState(false);
   const containerRef = useRef(null);
+
+  const seed = generationResult?.seed ?? activeBaseline?.seed ?? '—';
+  const prompt =
+    generationResult?.compiled_prompt ||
+    activeBaseline?.compiled_prompt ||
+    '—';
 
   const finalImageUrl = preparedMaster?.master_image_url || originalImage;
   const isReady = Boolean(preparedMaster?.master_image_url);
@@ -71,13 +87,34 @@ export default function ExportStudio({
     return '1 / 1';
   })();
 
+  // Resolutions metadata
+  const originalWidth =
+    parentFromHistory?.resolution_width ||
+    (!isAlreadyMaster && (generationResult?.resolution?.width || generationResult?.resolution_width)) ||
+    1080;
+  const originalHeight =
+    parentFromHistory?.resolution_height ||
+    (!isAlreadyMaster && (generationResult?.resolution?.height || generationResult?.resolution_height)) ||
+    1620;
+  const originalResolutionText = `${originalWidth} × ${originalHeight} px`;
+
+  const upscaledWidth =
+    preparedMaster?.resolution?.width ||
+    preparedMaster?.resolution_width ||
+    3840;
+  const upscaledHeight =
+    preparedMaster?.resolution?.height ||
+    preparedMaster?.resolution_height ||
+    3840;
+  const upscaledResolutionText = `${upscaledWidth} × ${upscaledHeight} px`;
+
   const handlePrepareExport = async () => {
-    if (!activeGenId) return;
+    if (!originalGenId) return;
     setIsPreparing(true);
     setErrorMessage(null);
 
     try {
-      const result = await prepareExport(activeGenId);
+      const result = await prepareExport(originalGenId);
       setPreparedMaster(result);
       setCompareMode('split');
       onExportMasterPrepared?.(result);
@@ -89,26 +126,50 @@ export default function ExportStudio({
     }
   };
 
-  const handleDownloadMaster = async () => {
-    if (!finalImageUrl) return;
-    setIsDownloading(true);
+  const handleDownloadOriginal = async () => {
+    if (!originalImage) return;
+    setIsDownloadingOriginal(true);
     try {
-      const response = await fetch(finalImageUrl);
+      const response = await fetch(originalImage);
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      const fileGenId = preparedMaster?.generation_id || activeGenId || 'master';
-      a.download = `master_export_${fileGenId}_${originalRatio.replace(/[:.]/g, '_')}.png`;
+      const fileGenId = originalGenId || 'original';
+      a.download = `original_export_${fileGenId}_${originalRatio.replace(/[:.]/g, '_')}.png`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     } catch (err) {
-      console.error('Failed to download master image:', err);
-      setErrorMessage('Failed to download master image file.');
+      console.error('Failed to download original image:', err);
+      setErrorMessage('Failed to download original image file.');
     } finally {
-      setIsDownloading(false);
+      setIsDownloadingOriginal(false);
+    }
+  };
+
+  const handleDownloadUpscaled = async () => {
+    const upscaledUrl = preparedMaster?.master_image_url;
+    if (!upscaledUrl) return;
+    setIsDownloadingUpscaled(true);
+    try {
+      const response = await fetch(upscaledUrl);
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const fileGenId = preparedMaster?.generation_id || originalGenId || 'upscaled';
+      a.download = `upscaled_master_${fileGenId}_${originalRatio.replace(/[:.]/g, '_')}.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Failed to download upscaled master image:', err);
+      setErrorMessage('Failed to download upscaled master image file.');
+    } finally {
+      setIsDownloadingUpscaled(false);
     }
   };
 
@@ -150,7 +211,7 @@ export default function ExportStudio({
 
         <div className="export-header-summary-badge">
           <span className="badge-meta">Format: {originalRatio}</span>
-          <span className="badge-meta">Generation: #{activeGenId || 'none'}</span>
+          <span className="badge-meta">Generation: #{originalGenId || 'none'}</span>
           <span className="badge-seed">Seed: #{seed}</span>
         </div>
       </div>
@@ -291,9 +352,9 @@ export default function ExportStudio({
               <div className="metadata-row">
                 <span className="meta-label">Master Resolution:</span>
                 <span className="meta-value">
-                  {preparedMaster?.resolution
-                    ? `${preparedMaster.resolution.width} × ${preparedMaster.resolution.height} px (4K Raw Master)`
-                    : `${generationResult?.resolution_width || 3840} × ${generationResult?.resolution_height || 3840} px (4K Base)`}
+                  {isReady
+                    ? `${upscaledResolutionText} (4K Raw Master)`
+                    : `${originalResolutionText} (Standard Base)`}
                 </span>
               </div>
               <div className="metadata-row">
@@ -310,7 +371,7 @@ export default function ExportStudio({
 
         {/* Right Column: Workflow Control & Download Action */}
         <div className="export-actions-column">
-          {/* Card: Prepare for Export */}
+          {/* Card 1: Prepare for Export */}
           <div className="export-card">
             <div className="export-card-header">
               <div className="card-title-group">
@@ -331,7 +392,7 @@ export default function ExportStudio({
                   )}
                 </div>
                 <div className="thumbnail-details">
-                  <span className="thumbnail-title">Chosen Generation #{activeGenId || '—'}</span>
+                  <span className="thumbnail-title">Generation #{originalGenId || '—'}</span>
                   <span className="thumbnail-meta">Format: {originalRatio}</span>
                   <span className="thumbnail-meta">Seed: #{seed}</span>
                 </div>
@@ -362,51 +423,120 @@ export default function ExportStudio({
             </div>
           </div>
 
-          {/* Card: Master File Download */}
+          {/* Card 2: Download Options (Original vs Upscaled) */}
           <div className="export-card">
             <div className="export-card-header">
               <div className="card-title-group">
                 <ShieldCheck size={16} className="text-accent" />
-                <span className="card-title">2. Download Master File</span>
+                <span className="card-title">2. Download Options</span>
               </div>
-              <span className="badge-pill">Raw Lossless PNG</span>
+              <span className="badge-pill">Master Files</span>
             </div>
 
             <div className="export-options-body">
               <p className="bundle-description">
-                Download the raw uncompressed master artwork in full fidelity ({originalRatio}) directly to your device.
+                Download the original un-upscaled generation or the high-resolution AI-upscaled master directly to your device.
               </p>
 
-              <div className="export-format-badge-box">
-                <div className="format-info-item">
-                  <span className="format-info-label">Format</span>
-                  <span className="format-info-val">Lossless PNG</span>
+              <div className="export-download-options-list">
+                {/* Option A: Original Generated Image */}
+                <div className="export-download-item-card">
+                  <div className="export-download-item-header">
+                    <div className="download-item-title-group">
+                      <FileImage size={16} className="text-muted" />
+                      <span className="download-item-title">Original Generated Image</span>
+                    </div>
+                    <span className="badge-meta">Base Render</span>
+                  </div>
+
+                  <div className="download-item-specs-grid">
+                    <div className="download-spec-item">
+                      <span className="download-spec-label">Format</span>
+                      <span className="download-spec-val">PNG</span>
+                    </div>
+                    <div className="download-spec-item">
+                      <span className="download-spec-label">Aspect Ratio</span>
+                      <span className="download-spec-val">{originalRatio}</span>
+                    </div>
+                    <div className="download-spec-item">
+                      <span className="download-spec-label">Resolution</span>
+                      <span className="download-spec-val">{originalResolutionText}</span>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    className="btn-secondary export-action-btn download-original-btn"
+                    onClick={handleDownloadOriginal}
+                    disabled={!originalImage || isDownloadingOriginal}
+                  >
+                    <Download size={15} />
+                    <span>
+                      {isDownloadingOriginal
+                        ? 'Downloading Original...'
+                        : 'Download Original Image (.png)'}
+                    </span>
+                  </button>
                 </div>
-                <div className="format-info-item">
-                  <span className="format-info-label">Aspect Ratio</span>
-                  <span className="format-info-val">{originalRatio}</span>
-                </div>
-                <div className="format-info-item">
-                  <span className="format-info-label">Fidelity</span>
-                  <span className="format-info-val">{isReady ? 'AI Enhanced Master' : 'Original Raw'}</span>
+
+                {/* Option B: AI-Upscaled 4K Master */}
+                <div className={`export-download-item-card ${isReady ? 'ready' : ''}`}>
+                  <div className="export-download-item-header">
+                    <div className="download-item-title-group">
+                      <Sparkles size={16} className={isReady ? 'text-accent' : 'text-muted'} />
+                      <span className="download-item-title">AI-Upscaled Master</span>
+                    </div>
+                    {isReady ? (
+                      <span className="export-status-pill ready">
+                        <CheckCircle2 size={11} /> 4K Ready
+                      </span>
+                    ) : (
+                      <span className="export-status-pill pending">
+                        Pending Step 1
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="download-item-specs-grid">
+                    <div className="download-spec-item">
+                      <span className="download-spec-label">Format</span>
+                      <span className="download-spec-val">Lossless PNG</span>
+                    </div>
+                    <div className="download-spec-item">
+                      <span className="download-spec-label">Aspect Ratio</span>
+                      <span className="download-spec-val">{originalRatio}</span>
+                    </div>
+                    <div className="download-spec-item">
+                      <span className="download-spec-label">Resolution</span>
+                      <span className="download-spec-val">
+                        {isReady ? `${upscaledResolutionText} (4K)` : '4K (Upscale)'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    className="btn-accent export-action-btn download-upscaled-btn"
+                    onClick={handleDownloadUpscaled}
+                    disabled={!isReady || isDownloadingUpscaled}
+                  >
+                    {isReady ? <Download size={15} /> : <Sparkles size={15} />}
+                    <span>
+                      {isDownloadingUpscaled
+                        ? 'Downloading Master...'
+                        : isReady
+                        ? 'Download Upscaled Master (.png)'
+                        : 'Prepare in Step 1 to Download'}
+                    </span>
+                  </button>
+
+                  {!isReady && (
+                    <span className="download-hint-text">
+                      Click <strong>Prepare for Export</strong> in Step 1 above to generate the 4K AI-upscaled master.
+                    </span>
+                  )}
                 </div>
               </div>
-
-              <button
-                type="button"
-                className="btn-accent export-action-btn download-master-btn"
-                onClick={handleDownloadMaster}
-                disabled={!finalImageUrl || isDownloading}
-              >
-                <Download size={16} />
-                <span>
-                  {isDownloading
-                    ? 'Downloading Master...'
-                    : isReady
-                    ? 'Download High Quality Master (.png)'
-                    : 'Download Original Master (.png)'}
-                </span>
-              </button>
             </div>
           </div>
         </div>
@@ -414,3 +544,4 @@ export default function ExportStudio({
     </div>
   );
 }
+

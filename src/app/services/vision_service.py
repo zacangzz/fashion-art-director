@@ -64,7 +64,7 @@ class VisionService:
     def __init__(
         self,
         api_key: str,
-        model_name: str = "gemini-3.1-flash-lite",
+        model_name: str = "gemini-3.5-flash-lite",
         audit_path: Optional[Path] = None,
         client: Optional[genai.Client] = None,
     ):

@@ -33,7 +33,7 @@ class WardrobeService:
         db_manager: DatabaseManager,
         api_key: str,
         storage_dir: str,
-        vision_model: str = "gemini-3.1-flash-lite",
+        vision_model: str = "gemini-3.5-flash-lite",
         audit_path: Optional[str] = None,
         client: Optional[genai.Client] = None,
     ):

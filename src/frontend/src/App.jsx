@@ -556,6 +556,9 @@ export default function App() {
     }
 
     setIsHistoryOpen(false);
+    if (currentStep === 1 || currentStep === 4) {
+      setCurrentStep(2);
+    }
   };
 
   // Compare toggles
@@ -828,6 +831,7 @@ export default function App() {
             generationResult={generationResult}
             activeBaseline={activeBaseline}
             globalAspectRatio={aspectRatio}
+            history={history}
             onExportMasterPrepared={(result) => {
               setGenerationResult(result);
               loadHistoryList();

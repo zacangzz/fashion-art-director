@@ -1,24 +1,38 @@
 import os
 from functools import lru_cache
-from pydantic import field_validator
+from typing import Any
+from pydantic import ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
-    GEMINI_API_KEY: str
+    GEMINI_API_KEY: str = ""
     PORT: int = 7860
     HOST: str = "127.0.0.1"
     DEBUG: bool = True
     DATABASE_URL: str = "sqlite:///./storage/studio.db"
     STORAGE_DIR: str = "./storage"
-    VISION_MODEL: str = "gemini-3.1-flash-lite"
-    IMAGEN_MODEL: str = "gemini-3.1-flash-lite-image"
-    INPAINT_MODEL: str = "gemini-3.1-flash-image"
+    VISION_MODEL: str = "gemini-3.5-flash-lite"
+    IMAGEN_MODEL: str = "gemini-3-pro-image"
+    INPAINT_MODEL: str = "gemini-3-pro-image"
 
-    @field_validator("GEMINI_API_KEY", "VISION_MODEL", "IMAGEN_MODEL", "INPAINT_MODEL", "DATABASE_URL", mode="before")
+    @field_validator("VISION_MODEL", "IMAGEN_MODEL", "INPAINT_MODEL", mode="before")
     @classmethod
-    def sanitize_env_string(cls, v: str) -> str:
+    def sanitize_model_name(cls, v: Any, info: ValidationInfo) -> str:
+        defaults = {
+            "VISION_MODEL": "gemini-3.5-flash-lite",
+            "IMAGEN_MODEL": "gemini-3-pro-image",
+            "INPAINT_MODEL": "gemini-3-pro-image",
+        }
         if isinstance(v, str):
-            # Strip inline comments (e.g. "model_name #comment" -> "model_name")
+            v = v.split("#")[0].strip()
+        if not v:
+            return defaults.get(info.field_name, "")
+        return v
+
+    @field_validator("GEMINI_API_KEY", "DATABASE_URL", mode="before")
+    @classmethod
+    def sanitize_env_string(cls, v: Any) -> Any:
+        if isinstance(v, str):
             v = v.split("#")[0].strip()
         return v
 

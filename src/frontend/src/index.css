@@ -4187,6 +4187,123 @@ body {
   transform: none;
 }
 
+/* Download Options: Original vs AI-Upscaled */
+.export-download-options-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.export-download-item-card {
+  background: var(--bg-dark);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: all 0.2s ease;
+}
+
+.export-download-item-card.ready {
+  border-color: rgba(16, 185, 129, 0.35);
+  background: linear-gradient(180deg, rgba(16, 185, 129, 0.05) 0%, var(--bg-dark) 100%);
+}
+
+.export-download-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.download-item-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.download-item-title {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.download-item-specs-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-xs);
+  padding: 8px;
+}
+
+.download-spec-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: center;
+}
+
+.download-spec-label {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.download-spec-val {
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.download-original-btn {
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+}
+
+.download-original-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.25);
+  transform: translateY(-1px);
+}
+
+.download-original-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.download-upscaled-btn {
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: #fff;
+  border: none;
+  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.25);
+}
+
+.download-upscaled-btn:hover:not(:disabled) {
+  box-shadow: 0 6px 18px rgba(16, 185, 129, 0.4);
+  transform: translateY(-1px);
+}
+
+.download-upscaled-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.download-hint-text {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  line-height: 1.35;
+  text-align: center;
+}
+
 .bullet-pill {
   font-family: var(--font-mono);
   font-size: 0.7rem;

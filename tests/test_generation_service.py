@@ -521,3 +521,40 @@ async def test_compose_wardrobe_with_subject_grounding(tmp_path):
         assert len(res["assignments"]) == 1
         assert res["assignments"][0]["grounded_subject"] == "The young boy on the left side of the frame"
 
+
+@pytest.mark.asyncio
+async def test_register_uploaded_photo(tmp_path):
+    db_file = tmp_path / "test_studio.db"
+    db_mgr = DatabaseManager(f"sqlite:///{db_file}")
+    await db_mgr.init_db()
+
+    storage_dir = str(tmp_path / "storage")
+    service = GenerationService(
+        db_manager=db_mgr,
+        api_key="fake-key",
+        storage_dir=storage_dir,
+    )
+
+    img = Image.new("RGB", (300, 450), color=(100, 150, 200))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    raw_bytes = buf.getvalue()
+
+    result = await service.register_uploaded_photo(
+        image_bytes=raw_bytes,
+        filename="lookbook_photo.png",
+        custom_aspect_ratio="2:3",
+    )
+
+    assert result["generation_id"].startswith("gen_upload_")
+    assert result["aspect_ratio"] == "2:3"
+    assert result["resolution"] == {"width": 300, "height": 450}
+    assert "/api/images/" in result["image_url"]
+
+    # Verify stored in DB
+    rec = await db_mgr.get_generation(result["generation_id"])
+    assert rec is not None
+    assert rec["is_baseline"] == 1
+    assert os.path.exists(rec["master_image_path"])
+
+
