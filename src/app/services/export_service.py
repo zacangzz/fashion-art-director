@@ -17,10 +17,10 @@ from app.utils.telemetry import TelemetryLogger
 logger = get_logger("export_service")
 
 DEFAULT_UPSCALE_PROMPT = (
-    "Restore, de-noise, and enhance the provided reference image into an ultra-high-definition 4K master. "
-    "Maximize optical resolution, sharpness, and clarity while strictly preserving original facial structures, "
-    "natural skin texture and pores, lighting ambiance, and overall composition. "
-    "Focus on ensuring that all clothing, garments, fabric weaves, seams, and material textures are clear, crisp, and richly detailed."
+    "Restore, de-noise, and enhance the provided reference image as an authentic raw photo. "
+    "Maximize optical resolution, fine film grain, and crisp focus while strictly preserving original facial structures, "
+    "visible skin pores, natural skin texture, stray hairs, minor skin blemishes, natural light, and overall composition. "
+    "Focus on ensuring that all clothing, garments, fabric weaves, seams, and material textures are clear, tactile, and richly detailed."
 )
 
 

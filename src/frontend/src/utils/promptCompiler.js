@@ -175,7 +175,7 @@ export function compileDeltaPrompt({
 
   // 1. Visual Reference Foundation Directive
   sections.push(
-    `Visual Reference Foundation: Use the reference image as the structural, character, and stylistic anchor. Apply the requested modifications below seamlessly, allowing all naturally interconnected visual elements—including lighting falloff, cast shadows, color bounce, material reactions, and environmental reflections—to adjust organically for realistic visual cohesion.`
+    `Visual Reference Foundation: Use the reference image as the structural, character, and stylistic anchor. Maintain raw photo fidelity, 1:1 original source sharpness, visible skin pores, natural skin texture, stray hairs, minor skin blemishes, fine film grain, natural light, and natural micro-contrast. Apply the requested modifications below seamlessly, allowing all naturally interconnected visual elements—including lighting falloff, cast shadows, color bounce, material reactions, and environmental reflections—to adjust organically for realistic visual cohesion without waxy smoothing, artificial plastic finish, or compression degradation.`
   );
 
   // 2. Requested Modifications Section

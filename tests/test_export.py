@@ -199,7 +199,7 @@ async def test_export_service_prepare_export_master(setup_test_db_and_image, tmp
 
     # Verify Gemini was invoked with reference image bytes and upscale prompt
     assert mock_gen_service.called_with is not None
-    assert "ultra-high-definition 4K master" in mock_gen_service.called_with["prompt"]
+    assert "authentic raw photo" in mock_gen_service.called_with["prompt"]
     assert mock_gen_service.called_with["reference_image_bytes"] is not None
 
     # Verify saved in DB as linked child generation

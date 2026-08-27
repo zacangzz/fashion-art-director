@@ -35,20 +35,19 @@ You must return a single, valid JSON object with EXACTLY this structure:
       {"label": "e.g. natural Kodak Portra film color grade", "weight": 1.0}
     ],
     "camera_optics": [
-      {"label": "e.g. shot on Hasselblad 100MP medium format at 600 DPI print quality", "weight": 1.0},
-      {"label": "e.g. 85mm f/1.4 prime lens with tack-sharp focal plane and creamy bokeh", "weight": 1.0},
-      {"label": "e.g. authentic skin micro-pores and crisp textile weave, zero airbrushing", "weight": 1.0}
+      {"label": "e.g. raw photo shot on 35mm analog film with fine film grain", "weight": 1.0},
+      {"label": "e.g. 85mm f/1.4 prime lens with natural light and slight motion blur", "weight": 1.0},
+      {"label": "e.g. visible skin pores, natural skin texture, stray hairs, and minor skin blemishes", "weight": 1.0}
     ],
     "mood_era": [
-      {"label": "e.g. 1970s retro luxury editorial vibe", "weight": 1.0},
+      {"label": "e.g. 1970s retro luxury editorial vibe with subtle dust and scratches", "weight": 1.0},
       {"label": "e.g. playful, candid high-end commercial aesthetic", "weight": 1.0}
     ]
   }
 }
 
 Directives:
-1. MASTER PROMPT EXCELLENCE: The `master_prompt` must be rich, concrete, evocative, and free of vague buzzwords. It should incorporate specific camera optics (e.g. medium format sensor resolution, premium prime lenses, crisp aperture depth of field), realistic lighting behavior, physical materials, micro-textures, and atmospheric depth inspired by the moodboard files.
-2. 600 DPI PRINT & OPTICAL FIDELITY: Synthesize instructions that prioritize 600 DPI museum-grade optical definition, authentic skin pores, sharp fabric textures, and clean edge contrast suitable for large-format 4K commercial prints. Strictly avoid plastic skin, over-smoothing, or artificial airbrushing.
+1. MASTER PROMPT EXCELLENCE: The `master_prompt` must be rich, concrete, evocative, and free of vague synthetic buzzwords. Strictly NEVER use "photorealistic", "photorealism", "hyperrealistic", or "4K". Instead, prioritize authentic analog cues ("raw photo", "film grain", "subtle dust and scratches", "visible skin pores", "natural skin texture", "stray hairs", "minor skin blemishes", "slight motion blur", "natural light"), specific camera optics (e.g. 35mm/medium format prime lenses), realistic lighting behavior, physical materials, and atmospheric depth inspired by the moodboard files.
+2. RAW PHOTOGRAPHIC FIDELITY: Synthesize instructions that prioritize 600 DPI museum-grade optical definition, visible skin pores, natural skin texture, fine stray hairs, minor epidermal blemishes, subtle film grain, and clean edge contrast. Strictly avoid plastic skin, over-smoothing, waxy softening, or artificial airbrushing.
 3. MODULAR LEVERS: Extract 2 to 5 specific, high-value visual keyword descriptors for each of the 9 categories so the user can perform high-level macro adjustments in the Tag Studio.
 4. COMPLETENESS: Never omit categories. Always provide relevant visual tags across all 9 dimensions.
-

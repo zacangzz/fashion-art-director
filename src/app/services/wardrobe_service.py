@@ -8,8 +8,13 @@ from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 from PIL import Image
 from google import genai
+from google.genai import types
 
 from app.db.database import DatabaseManager
+from app.schemas.domain import (
+    WardrobeSegmentationResult,
+    ClothingRegionDetectionResult,
+)
 from app.utils.logger import get_logger
 from app.utils.telemetry import TelemetryLogger
 from app.utils.prompt_loader import (
@@ -143,8 +148,8 @@ class WardrobeService:
         ymax = max(0.0, min(1.0, ymax))
         xmax = max(0.0, min(1.0, xmax))
 
-        # Check minimal dimension (at least 2% in both axes)
-        if (ymax - ymin) < 0.02 or (xmax - xmin) < 0.02:
+        # Check minimal dimension (at least 0.8% in both axes)
+        if (ymax - ymin) < 0.008 or (xmax - xmin) < 0.008:
             return None
 
         return [round(ymin, 4), round(xmin, 4), round(ymax, 4), round(xmax, 4)]
@@ -172,6 +177,11 @@ class WardrobeService:
         # Call Gemini Vision to detect items and bounding boxes
         image_part = to_image_part(image_bytes)
         contents = [image_part, WARDROBE_SEGMENTATION_PROMPT]
+        config = types.GenerateContentConfig(
+            temperature=0.0,
+            response_mime_type="application/json",
+            response_schema=WardrobeSegmentationResult,
+        )
 
         self._audit(
             "wardrobe_segmentation_request",
@@ -182,23 +192,23 @@ class WardrobeService:
         )
 
         try:
-            response = await self._generate_content_async(contents)
+            response = await self._generate_content_async(contents, config=config)
             raw_text = getattr(response, "text", "") or ""
             logger.info(f"Gemini vision response received for sheet {sheet_id}: {raw_text[:200]}...")
         except Exception as exc:
             logger.error(f"Gemini vision segmentation error: {exc}", exc_info=True)
             self._audit("wardrobe_segmentation_error", request_id, error=str(exc))
-            raw_text = "[]"
+            raw_text = "{}"
 
         # Parse detected items
         cleaned = self._clean_json_text(raw_text)
         detected_items = []
         try:
             parsed = json.loads(cleaned)
-            if isinstance(parsed, list):
-                detected_items = parsed
-            elif isinstance(parsed, dict) and "items" in parsed:
+            if isinstance(parsed, dict) and "items" in parsed:
                 detected_items = parsed["items"]
+            elif isinstance(parsed, list):
+                detected_items = parsed
         except Exception as parse_err:
             logger.warning(f"Could not parse vision JSON response: {parse_err}. Raw: {cleaned}")
 
@@ -296,16 +306,21 @@ class WardrobeService:
         logger.info("Detecting clothing regions for auto-mask preview...")
         image_part = to_image_part(image_bytes)
         contents = [image_part, CLOTHING_REGION_DETECTION_PROMPT]
+        config = types.GenerateContentConfig(
+            temperature=0.0,
+            response_mime_type="application/json",
+            response_schema=ClothingRegionDetectionResult,
+        )
 
         base_img = Image.open(io.BytesIO(image_bytes))
         img_w, img_h = base_img.size
 
         try:
-            response = await self._generate_content_async(contents)
+            response = await self._generate_content_async(contents, config=config)
             raw_text = getattr(response, "text", "") or ""
             cleaned = self._clean_json_text(raw_text)
             parsed = json.loads(cleaned)
-            regions_raw = parsed if isinstance(parsed, list) else parsed.get("regions", [])
+            regions_raw = parsed.get("regions", []) if isinstance(parsed, dict) else (parsed if isinstance(parsed, list) else [])
         except Exception as exc:
             logger.warning(f"Failed to detect clothing regions: {exc}")
             regions_raw = []

@@ -81,5 +81,22 @@ describe('MoodboardUploader', () => {
     fireEvent.click(squareBtn);
     expect(onRatioChange).toHaveBeenCalledWith('1:1');
   });
+
+  it('renders direct photo ingestion card and handles direct photo selection', async () => {
+    const onDirectUpload = vi.fn();
+    render(
+      <MoodboardUploader
+        files={[]}
+        onFilesChange={() => {}}
+        onAnalyze={() => {}}
+        onDirectPhotoUpload={onDirectUpload}
+      />
+    );
+
+    expect(screen.getByText(/Direct Photo Ingestion/i)).toBeInTheDocument();
+    expect(screen.getByText(/Skip Art Direction/i)).toBeInTheDocument();
+    expect(screen.getByText(/Drop 1 photo here, or/i)).toBeInTheDocument();
+  });
 });
+
 

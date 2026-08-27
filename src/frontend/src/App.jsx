@@ -26,6 +26,7 @@ import { DEFAULT_TAG_STATE } from './utils/defaultTags';
 import { compileModularPrompt } from './utils/promptCompiler';
 import {
   analyzeAndGenerateBaselines,
+  uploadDirectPhoto,
   refineGeneration,
   composeWardrobe,
   fetchConversation,
@@ -80,6 +81,7 @@ export default function App() {
 
   // Error alert state
   const [errorMessage, setErrorMessage] = useState(null);
+  const [isDirectUploading, setIsDirectUploading] = useState(false);
 
   // Load history on mount
   useEffect(() => {
@@ -94,6 +96,62 @@ export default function App() {
       }
     } catch (err) {
       console.error('Failed to load history:', err);
+    }
+  };
+
+  // Step 1: Skip Art Direction via Direct Photo Ingestion
+  const handleDirectPhotoUpload = async (file, detectedRatio) => {
+    if (!file) return;
+    setIsDirectUploading(true);
+    setErrorMessage(null);
+
+    try {
+      const response = await uploadDirectPhoto(file, detectedRatio || aspectRatio);
+
+      const baselineObj = {
+        id: response.generation_id,
+        seed: response.seed,
+        image_url: response.image_url,
+        created_at: response.created_at,
+        aspect_ratio: response.aspect_ratio,
+        resolution: response.resolution,
+        compiled_prompt: response.compiled_prompt,
+      };
+
+      setActiveBaseline(baselineObj);
+      setActiveSeed(response.seed);
+      if (response.aspect_ratio) {
+        setAspectRatio(response.aspect_ratio);
+      }
+      setPreviousGenerationResult(null);
+
+      const initialGen = {
+        generation_id: response.generation_id,
+        master_image_url: response.image_url,
+        seed: response.seed,
+        compiled_prompt: response.compiled_prompt,
+        resolution: response.resolution || { width: 1080, height: 1620 },
+      };
+      setGenerationResult(initialGen);
+
+      // Initialize conversation messages with uploaded image baseline
+      const baseMsg = {
+        role: 'baseline',
+        prompt: response.compiled_prompt,
+        generation_id: response.generation_id,
+        image_url: response.image_url,
+        seed: response.seed,
+        created_at: response.created_at || new Date().toISOString(),
+      };
+      setConversationMessages([baseMsg]);
+      setConversationId(`conv_${response.generation_id}`);
+
+      await loadHistoryList();
+      setCurrentStep(2);
+    } catch (err) {
+      setErrorMessage(err.message || 'Direct photo upload failed.');
+    } finally {
+      setIsDirectUploading(false);
     }
   };
 
@@ -625,6 +683,8 @@ export default function App() {
               isAnalyzing={isAnalyzing}
               aspectRatio={aspectRatio}
               onAspectRatioChange={setAspectRatio}
+              onDirectPhotoUpload={handleDirectPhotoUpload}
+              isDirectUploading={isDirectUploading}
             />
 
             {baselines.length > 0 ? (

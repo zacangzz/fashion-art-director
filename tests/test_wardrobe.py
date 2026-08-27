@@ -284,3 +284,86 @@ async def test_wardrobe_service_subject_grounding_fallback(test_db, dummy_image_
     assert "Strictly preserve" in result["unmodified_subjects_guardrail"]
 
 
+@pytest.mark.asyncio
+async def test_wardrobe_service_structured_schema_and_decomposition(test_db, dummy_image_bytes, tmp_path):
+    storage_dir = str(tmp_path / "storage")
+    service = WardrobeService(
+        db_manager=test_db,
+        api_key="fake-key",
+        storage_dir=storage_dir,
+    )
+
+    mock_response = MagicMock()
+    mock_response.text = json.dumps({
+        "items": [
+            {
+                "label": "Camel Wool Overcoat",
+                "category": "outerwear",
+                "box_2d": [100, 150, 600, 450],
+            },
+            {
+                "label": "White Oxford Shirt",
+                "category": "tops",
+                "box_2d": [200, 200, 400, 400],
+            },
+            {
+                "label": "Charcoal Tailored Trousers",
+                "category": "bottoms",
+                "box_2d": [550, 200, 900, 400],
+            },
+            {
+                "label": "Black Leather Chelsea Boots",
+                "category": "footwear",
+                "box_2d": [900, 220, 980, 380],
+            },
+        ]
+    })
+    service.client.models.generate_content = MagicMock(return_value=mock_response)
+
+    cards = await service.segment_and_save_sheet(
+        image_bytes=dummy_image_bytes,
+        original_filename="decomposed_lookbook.png",
+    )
+
+    assert len(cards) == 4
+    categories = [c["category"] for c in cards]
+    assert "outerwear" in categories
+    assert "tops" in categories
+    assert "bottoms" in categories
+    assert "footwear" in categories
+
+
+@pytest.mark.asyncio
+async def test_wardrobe_service_small_accessory_retention(test_db, dummy_image_bytes, tmp_path):
+    storage_dir = str(tmp_path / "storage")
+    service = WardrobeService(
+        db_manager=test_db,
+        api_key="fake-key",
+        storage_dir=storage_dir,
+    )
+
+    # Accessory with 1.2% dimension (box_2d [100, 200, 112, 212] -> 0.012 height and width)
+    # This would have been dropped by the old 2% (0.02) threshold, but is kept with 0.8% (0.008)
+    mock_response = MagicMock()
+    mock_response.text = json.dumps({
+        "items": [
+            {
+                "label": "Gold Aviator Sunglasses",
+                "category": "accessories",
+                "box_2d": [100, 200, 115, 215],
+            }
+        ]
+    })
+    service.client.models.generate_content = MagicMock(return_value=mock_response)
+
+    cards = await service.segment_and_save_sheet(
+        image_bytes=dummy_image_bytes,
+        original_filename="accessory_test.png",
+    )
+
+    assert len(cards) == 1
+    assert cards[0]["label"] == "Gold Aviator Sunglasses"
+    assert cards[0]["category"] == "accessories"
+    assert cards[0]["bbox"] == [0.1, 0.2, 0.115, 0.215]
+
+

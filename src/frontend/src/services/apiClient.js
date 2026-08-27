@@ -83,6 +83,28 @@ export async function analyzeAndGenerateBaselines(files, prompt = '', lockedSect
 }
 
 /**
+ * Uploads a single photo to skip Step 1 Art Direction and start refinement directly.
+ * @param {File} file
+ * @param {string} [aspectRatio]
+ * @returns {Promise<{generation_id: string, image_url: string, seed: number, aspect_ratio: string, resolution: Object, compiled_prompt: string, created_at: string}>}
+ */
+export async function uploadDirectPhoto(file, aspectRatio = null) {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (aspectRatio && typeof aspectRatio === 'string') {
+    formData.append('aspect_ratio', aspectRatio);
+  }
+
+  const response = await fetch('/api/moodboard/upload-direct-photo', {
+    method: 'POST',
+    body: formData,
+  });
+
+  return handleApiResponse(response, 'Direct photo upload failed');
+}
+
+
+/**
  * Uploads 1-5 image files + optional prompt for moodboard analysis (legacy).
  * @param {File[]} files
  * @param {string} [prompt]

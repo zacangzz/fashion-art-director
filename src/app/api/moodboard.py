@@ -7,6 +7,7 @@ from app.config import get_settings
 from app.schemas.domain import (
     AnalyzeAndBaselinesResponse,
     BaselineSummary,
+    DirectPhotoUploadResponse,
     MoodboardAnalysisResponse,
     TagChip,
 )
@@ -176,3 +177,40 @@ async def analyze_moodboard(
         extracted_chips=chips,
         extracted_json=None,
     )
+
+
+@router.post("/upload-direct-photo", response_model=DirectPhotoUploadResponse)
+async def upload_direct_photo(
+    file: UploadFile = File(...),
+    aspect_ratio: Optional[str] = Form(None),
+):
+    """
+    Direct Photo Ingestion: Allows users to skip Step 1 Art Direction by uploading
+    their own photo. Saves the photo directly as a baseline record with auto-detected/selected
+    aspect ratio, ready for immediate conversation-based refinement.
+    """
+    if file.content_type not in {"image/png", "image/jpeg", "image/webp"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported format '{file.content_type}' for photo upload. Allowed formats: PNG, JPEG, WebP.",
+        )
+
+    try:
+        content = await file.read()
+        if not content:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Uploaded file is empty.",
+            )
+
+        result = await generation_service.register_uploaded_photo(
+            image_bytes=content,
+            filename=file.filename,
+            custom_aspect_ratio=aspect_ratio,
+        )
+        return DirectPhotoUploadResponse(**result)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        parse_and_raise_http_error(exc, model_name="DirectPhotoIngestion", context="Direct Photo Ingestion")
+

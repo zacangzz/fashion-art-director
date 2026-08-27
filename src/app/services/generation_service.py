@@ -45,6 +45,30 @@ ASPECT_RATIO_RESOLUTIONS: Dict[str, tuple[int, int]] = {
 }
 
 
+def detect_closest_aspect_ratio(width: int, height: int) -> str:
+    """
+    Given natural width and height of an image, calculates the ratio
+    and returns the closest supported preset aspect ratio key.
+    """
+    if not width or not height or height <= 0:
+        return "2:3"
+    target_ratio = width / height
+    ratios = {
+        "1:1": 1.0,
+        "16:9": 16 / 9,
+        "9:16": 9 / 16,
+        "21:9": 21 / 9,
+        "2:3": 2 / 3,
+        "3:2": 3 / 2,
+        "4:5": 4 / 5,
+        "5:4": 5 / 4,
+        "3:4": 3 / 4,
+        "4:3": 4 / 3,
+        "1.8:1": 1.8,
+    }
+    return min(ratios.keys(), key=lambda k: abs(ratios[k] - target_ratio))
+
+
 
 def _normalize_categories_dict(cats: Optional[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
     if not cats or not isinstance(cats, dict):
@@ -251,8 +275,8 @@ def compile_delta_prompt(
 
     sections = [
         "Visual Reference Foundation: Use the reference image as the structural, character, and stylistic anchor. "
-        "Maintain 1:1 original source sharpness and high-fidelity texture rendering (skin pores, crisp focus, natural micro-contrast). "
-        "Apply the requested modifications below seamlessly, allowing all naturally interconnected visual elements—including lighting falloff, cast shadows, color bounce, material reactions, and environmental reflections—to adjust organically for realistic visual cohesion without waxy smoothing or compression degradation."
+        "Maintain raw photo fidelity, 1:1 original source sharpness, visible skin pores, natural skin texture, stray hairs, minor skin blemishes, fine film grain, natural light, and natural micro-contrast. "
+        "Apply the requested modifications below seamlessly, allowing all naturally interconnected visual elements—including lighting falloff, cast shadows, color bounce, material reactions, and environmental reflections—to adjust organically for realistic visual cohesion without waxy smoothing, artificial plastic finish, or compression degradation."
     ]
 
     adjustments = []
@@ -728,6 +752,89 @@ class GenerationService:
             "aspect_ratio": aspect_ratio,
             "resolution": {"width": width, "height": height},
             "compiled_prompt": positive_prompt,
+        }
+
+    async def register_uploaded_photo(
+        self,
+        image_bytes: bytes,
+        filename: Optional[str] = None,
+        custom_aspect_ratio: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Registers an uploaded user photo as a baseline generation record,
+        allowing the user to skip art direction and immediately proceed to refinement.
+        """
+        gen_id = f"gen_upload_{uuid.uuid4().hex[:8]}"
+        created_at = datetime.now(timezone.utc).isoformat()
+        req_id = f"direct_upload_{uuid.uuid4().hex[:10]}"
+        seed = random.randint(1000000, 9999999)
+
+        # Open image to inspect dimensions
+        pil_img = Image.open(io.BytesIO(image_bytes))
+        if pil_img.mode not in ("RGB", "RGBA"):
+            pil_img = pil_img.convert("RGB")
+        orig_w, orig_h = pil_img.size
+
+        # Determine aspect ratio: use custom if valid, otherwise detect closest
+        if custom_aspect_ratio and custom_aspect_ratio in ASPECT_RATIO_RESOLUTIONS:
+            eff_aspect_ratio = custom_aspect_ratio
+        else:
+            eff_aspect_ratio = detect_closest_aspect_ratio(orig_w, orig_h)
+
+        gen_dir = os.path.join(self.storage_dir, "generations")
+        os.makedirs(gen_dir, exist_ok=True)
+        saved_filename = f"{gen_id}_master.png"
+        filepath = os.path.join(gen_dir, saved_filename)
+
+        # Save image as PNG (with DPI metadata)
+        pil_img.save(filepath, format="PNG", dpi=(600, 600))
+        final_w, final_h = pil_img.size
+
+        compiled_prompt = "Uploaded Reference Image"
+        negative_prompt = DEFAULT_NEGATIVE_PROMPT
+
+        record = {
+            "id": gen_id,
+            "parent_id": None,
+            "moodboard_id": None,
+            "is_baseline": True,
+            "created_at": created_at,
+            "schema_json": {
+                "source": "direct_upload",
+                "original_filename": filename,
+                "detected_aspect_ratio": eff_aspect_ratio,
+            },
+            "compiled_prompt": compiled_prompt,
+            "negative_prompt": negative_prompt,
+            "seed": seed,
+            "master_image_path": filepath,
+            "aspect_ratio": eff_aspect_ratio,
+            "resolution_width": final_w,
+            "resolution_height": final_h,
+        }
+        await self.db.create_generation(record)
+
+        self._audit(
+            "direct_photo_upload",
+            req_id,
+            generation_id=gen_id,
+            seed=seed,
+            aspect_ratio=eff_aspect_ratio,
+            resolution={"width": final_w, "height": final_h},
+            original_filename=filename,
+            bytes=len(image_bytes),
+        )
+
+        logger.info(f"Registered uploaded photo as baseline {gen_id} ({final_w}x{final_h}, aspect={eff_aspect_ratio}) at {filepath}")
+
+        return {
+            "generation_id": gen_id,
+            "image_url": f"/api/images/{saved_filename}",
+            "seed": seed,
+            "aspect_ratio": eff_aspect_ratio,
+            "resolution": {"width": final_w, "height": final_h},
+            "compiled_prompt": compiled_prompt,
+            "created_at": created_at,
         }
 
     async def generate_4_baselines(

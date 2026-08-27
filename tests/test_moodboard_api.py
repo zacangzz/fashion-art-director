@@ -106,3 +106,65 @@ async def test_analyze_and_baselines_with_aspect_ratio():
             _, kwargs = mock_gen.call_args
             assert kwargs.get("aspect_ratio") == "1.8:1"
 
+
+@pytest.mark.asyncio
+async def test_upload_direct_photo_success():
+    import io
+    from PIL import Image
+    # Create a small valid test PNG image (200x300 -> 2:3 ratio)
+    img_byte_arr = io.BytesIO()
+    Image.new("RGB", (200, 300), color=(255, 0, 0)).save(img_byte_arr, format="PNG")
+    png_bytes = img_byte_arr.getvalue()
+
+    files = {"file": ("my_photo.png", png_bytes, "image/png")}
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/api/moodboard/upload-direct-photo", files=files)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["generation_id"].startswith("gen_upload_")
+        assert data["aspect_ratio"] == "2:3"
+        assert data["compiled_prompt"] == "Uploaded Reference Image"
+        assert data["resolution"]["width"] == 200
+        assert data["resolution"]["height"] == 300
+        assert "/api/images/" in data["image_url"]
+
+
+@pytest.mark.asyncio
+async def test_upload_direct_photo_with_custom_aspect_ratio():
+    import io
+    from PIL import Image
+    img_byte_arr = io.BytesIO()
+    Image.new("RGB", (400, 400), color=(0, 255, 0)).save(img_byte_arr, format="PNG")
+    png_bytes = img_byte_arr.getvalue()
+
+    files = {"file": ("square.png", png_bytes, "image/png")}
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/api/moodboard/upload-direct-photo",
+            files=files,
+            data={"aspect_ratio": "16:9"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["aspect_ratio"] == "16:9"
+
+
+@pytest.mark.asyncio
+async def test_upload_direct_photo_invalid_mime():
+    files = {"file": ("document.pdf", b"%PDF fake", "application/pdf")}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/api/moodboard/upload-direct-photo", files=files)
+        assert response.status_code == 400
+        assert "Unsupported format" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_upload_direct_photo_empty():
+    files = {"file": ("empty.png", b"", "image/png")}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/api/moodboard/upload-direct-photo", files=files)
+        assert response.status_code == 400
+
+

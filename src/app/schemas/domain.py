@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -86,6 +86,16 @@ class AnalyzeAndBaselinesResponse(BaseModel):
     categories: Dict[str, List[TagChip]] = Field(default_factory=dict)
     schema_data: Optional[Dict[str, Any]] = Field(alias="schema", default=None)
     baselines: List[BaselineSummary] = Field(default_factory=list)
+
+
+class DirectPhotoUploadResponse(BaseModel):
+    generation_id: str
+    image_url: str
+    seed: int
+    aspect_ratio: str
+    resolution: Dict[str, int]
+    compiled_prompt: str
+    created_at: str
 
 
 class FineTuneGenerationRequest(BaseModel):
@@ -261,6 +271,40 @@ class GenerationResponse(BaseModel):
 # ==============================================================================
 # Wardrobe Composition Models
 # ==============================================================================
+
+class DetectedGarment(BaseModel):
+    label: str = Field(description="Descriptive title of the garment, footwear, or accessory")
+    category: Literal["outerwear", "tops", "bottoms", "footwear", "accessories", "full_outfit"] = Field(
+        default="tops", description="Garment classification"
+    )
+    box_2d: List[int] = Field(
+        description="Bounding box [ymin, xmin, ymax, xmax] as integers on a 0 to 1000 scale"
+    )
+
+
+class WardrobeSegmentationResult(BaseModel):
+    items: List[DetectedGarment] = Field(
+        default_factory=list,
+        description="List of detected standalone garments, footwear, and accessories"
+    )
+
+
+class ClothingRegionItem(BaseModel):
+    label: str = Field(description="Descriptive label of the subject clothing region")
+    category: Literal["outerwear", "tops", "bottoms", "footwear", "accessories", "full_outfit"] = Field(
+        default="tops", description="Region classification"
+    )
+    box_2d: List[int] = Field(
+        description="Bounding box [ymin, xmin, ymax, xmax] as integers on a 0 to 1000 scale"
+    )
+
+
+class ClothingRegionDetectionResult(BaseModel):
+    regions: List[ClothingRegionItem] = Field(
+        default_factory=list,
+        description="List of detected subject clothing regions"
+    )
+
 
 class GarmentCard(BaseModel):
     id: str

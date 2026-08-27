@@ -14,8 +14,9 @@ describe('App Component Workflow', () => {
   it('renders Step 1 Art Direction layout on initial load', () => {
     render(<App />);
     expect(screen.getByText('Image Gen Pipeline Studio')).toBeInTheDocument();
-    expect(screen.getByText(/Art Direction/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /1 Art Direction/i })).toBeInTheDocument();
     expect(screen.getByText(/Moodboard Ingestion/i)).toBeInTheDocument();
+    expect(screen.getByText(/Direct Photo Ingestion/i)).toBeInTheDocument();
   });
 
   it('renders workflow step navigation items', () => {

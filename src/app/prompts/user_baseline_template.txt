@@ -3,5 +3,5 @@ USER CREATIVE BASELINE & INTENT:
 {USER_PROMPT}
 </user_requirements>
 
-Analyze the moodboard images in conjunction with the user's creative requirements. Synthesize the optimal Master Generation Prompt with 600 DPI print-grade 4K optical clarity, medium-format sensor depth, and authentic physical textures, breaking down its core visual levers across all 9 categories.
+Analyze the moodboard images in conjunction with the user's creative requirements. Synthesize the optimal Master Generation Prompt with raw photo authenticity, fine film grain, visible skin pores, natural skin texture, stray hairs, minor skin blemishes, natural light, and authentic physical materials, breaking down its core visual levers across all 9 categories.
 

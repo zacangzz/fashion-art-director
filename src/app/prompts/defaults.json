@@ -1,3 +1,3 @@
 {
-  "negative_prompt": "blurry, low resolution, pixelated, compression artifacts, distorted anatomy, plastic skin, waxy texture, over-smoothed, airbrushed, loss of detail, muddy background, cartoonish shading, low quality scan"
+  "negative_prompt": "photorealistic render, 3d render, cgi, digital art, illustration, cartoon, anime, airbrushed, plastic skin, waxy skin, porcelain doll skin, artificial smoothing, beauty filter, doll face, fake reflections, studio flash glare, over-processed, oversaturated, perfect smooth skin, blurry, low resolution, pixelated, compression artifacts, distorted anatomy, loss of detail, muddy background, low quality scan"
 }
