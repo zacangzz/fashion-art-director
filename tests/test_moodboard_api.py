@@ -27,41 +27,112 @@ async def test_analyze_moodboard_invalid_mime_type():
         assert "Unsupported image/document format" in response.json()["detail"] or "Unsupported" in response.json()["detail"]
 
 @pytest.mark.asyncio
+@pytest.mark.asyncio
 async def test_analyze_moodboard_pdf_success():
     files = [("files", ("moodboard.pdf", b"%PDF-1.5 fake pdf content", "application/pdf"))]
-    mock_chips = [
-        TagChip(id="chip_1", category=TagCategory.MOOD_ERA, label="editorial"),
-    ]
+    mock_state = {
+        "master_prompt": "Editorial PDF scene",
+        "narrative": "A high-fashion scene from PDF",
+        "categories": {
+            "mood_era": [{"id": "chip_1", "category": "mood_era", "label": "editorial", "weight": 1.0, "enabled": True, "locked": False}]
+        },
+    }
 
-    with patch("app.api.moodboard.vision_service.analyze_moodboard", new_callable=AsyncMock) as mock_analyze:
-        mock_analyze.return_value = mock_chips
+    with patch("app.api.moodboard.vision_service.extract_tag_studio_state", new_callable=AsyncMock) as mock_extract:
+        mock_extract.return_value = mock_state
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post("/api/moodboard/analyze", files=files)
             assert response.status_code == 200
             data = response.json()
             assert data["moodboard_id"].startswith("mb_")
+            assert data["master_prompt"] == "Editorial PDF scene"
             assert len(data["extracted_chips"]) == 1
             assert data["extracted_chips"][0]["label"] == "editorial"
 
 @pytest.mark.asyncio
 async def test_analyze_moodboard_success():
     files = [("files", ("sample.jpg", b"\xff\xd8fakejpeg", "image/jpeg"))]
-    mock_chips = [
-        TagChip(id="chip_1", category=TagCategory.MOOD_ERA, label="cinematic"),
-        TagChip(id="chip_2", category=TagCategory.LIGHTING, label="golden hour"),
-    ]
+    mock_state = {
+        "master_prompt": "Cinematic golden hour scene",
+        "narrative": "A cinematic high fashion shot",
+        "categories": {
+            "mood_era": [{"id": "chip_1", "category": "mood_era", "label": "cinematic", "weight": 1.0, "enabled": True, "locked": False}],
+            "lighting": [{"id": "chip_2", "category": "lighting", "label": "golden hour", "weight": 1.0, "enabled": True, "locked": False}],
+        },
+    }
 
-    with patch("app.api.moodboard.vision_service.analyze_moodboard", new_callable=AsyncMock) as mock_analyze:
-        mock_analyze.return_value = mock_chips
+    with patch("app.api.moodboard.vision_service.extract_tag_studio_state", new_callable=AsyncMock) as mock_extract:
+        mock_extract.return_value = mock_state
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post("/api/moodboard/analyze", files=files)
             assert response.status_code == 200
             data = response.json()
             assert data["moodboard_id"].startswith("mb_")
+            assert data["master_prompt"] == "Cinematic golden hour scene"
             assert len(data["extracted_chips"]) == 2
             assert data["extracted_chips"][0]["label"] == "cinematic"
+
+
+@pytest.mark.asyncio
+async def test_generate_baselines_success():
+    mock_baselines = [
+        {
+            "id": "gen_base_1",
+            "seed": 111222,
+            "image_url": "/api/images/base1.png",
+            "created_at": "2026-08-26T00:00:00Z",
+            "aspect_ratio": "1.8:1",
+            "resolution": {"width": 1920, "height": 1080},
+            "compiled_prompt": "Cinematic master prompt",
+        }
+    ]
+
+    with patch("app.api.moodboard.generation_service.generate_4_baselines", new_callable=AsyncMock) as mock_gen:
+        mock_gen.return_value = mock_baselines
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/api/moodboard/generate-baselines",
+                json={
+                    "moodboard_id": "mb_test_123",
+                    "master_prompt": "Cinematic master prompt",
+                    "narrative": "A high-fashion shot",
+                    "categories": {},
+                    "aspect_ratio": "1.8:1",
+                },
+            )
+            assert response.status_code == 200
+            data = response.json()
+            assert data["moodboard_id"] == "mb_test_123"
+            assert len(data["baselines"]) == 1
+            assert data["baselines"][0]["id"] == "gen_base_1"
+
+
+@pytest.mark.asyncio
+async def test_resync_prompt_success():
+    mock_resync_result = {
+        "master_prompt": "Re-synthesized high fashion master prompt",
+        "narrative": "Updated scene narrative",
+    }
+
+    with patch("app.api.moodboard.vision_service.resync_master_prompt", new_callable=AsyncMock) as mock_resync:
+        mock_resync.return_value = mock_resync_result
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/api/moodboard/resync-prompt",
+                json={
+                    "narrative": "A high-fashion shot",
+                    "categories": {"mood_era": [{"label": "cinematic"}]},
+                    "previous_master_prompt": "Old master prompt",
+                },
+            )
+            assert response.status_code == 200
+            data = response.json()
+            assert data["master_prompt"] == "Re-synthesized high fashion master prompt"
+            assert data["narrative"] == "Updated scene narrative"
 
 
 @pytest.mark.asyncio

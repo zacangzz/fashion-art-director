@@ -48,7 +48,6 @@ class TagChip(BaseModel):
     label: str
     enabled: bool = True
     locked: bool = False
-    weight: float = 1.0
     isCustom: bool = False
 
 
@@ -73,7 +72,7 @@ class BaselineSummary(BaseModel):
     seed: int
     image_url: str
     created_at: str
-    aspect_ratio: Optional[str] = "2:3"
+    aspect_ratio: Optional[str] = None
     resolution: Optional[Dict[str, int]] = None
     compiled_prompt: Optional[str] = None
 
@@ -111,7 +110,7 @@ class FineTuneGenerationRequest(BaseModel):
     seed_mode: str = "locked"
     seed: int = 4289102
     use_image_reference: bool = True
-    aspect_ratio: Optional[str] = "2:3"
+    aspect_ratio: Optional[str] = "1:1"
     negative_prompt: Optional[str] = None
 
 
@@ -123,6 +122,7 @@ class FineTuneGenerationResponse(BaseModel):
     negative_prompt: str
     image_url: str
     created_at: str
+    aspect_ratio: Optional[str] = None
     resolution: Optional[Dict[str, int]] = None
 
 
@@ -142,7 +142,7 @@ class PrepareExportResponse(BaseModel):
     compiled_prompt: str
     negative_prompt: str = ""
     master_image_url: str
-    aspect_ratio: str = "2:3"
+    aspect_ratio: Optional[str] = None
     resolution: Optional[Dict[str, int]] = None
     created_at: str
 
@@ -176,6 +176,7 @@ class InpaintResponse(BaseModel):
     mask_url: Optional[str] = None
     mask_stats: Optional[Dict[str, Any]] = None
     created_at: str
+    aspect_ratio: Optional[str] = None
     resolution: Optional[Dict[str, int]] = None
 
 
@@ -199,7 +200,7 @@ class RefinementRequest(BaseModel):
     prompt: str
     seed_mode: str = "locked"
     seed: int = 4289102
-    aspect_ratio: Optional[str] = "2:3"
+    aspect_ratio: Optional[str] = "1:1"
     negative_prompt: Optional[str] = None
     conversation_id: Optional[str] = None
 
@@ -212,6 +213,7 @@ class RefinementResponse(BaseModel):
     negative_prompt: str
     image_url: str
     created_at: str
+    aspect_ratio: Optional[str] = None
     resolution: Optional[Dict[str, int]] = None
     conversation_id: Optional[str] = None
 
@@ -223,6 +225,8 @@ class ConversationMessage(BaseModel):
     image_url: str
     seed: int
     created_at: str
+    aspect_ratio: Optional[str] = None
+    resolution: Optional[Dict[str, int]] = None
 
 
 class ConversationResponse(BaseModel):
@@ -237,9 +241,41 @@ class MoodboardAnalysisSchema(BaseModel):
 
 
 class MoodboardAnalysisResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
     moodboard_id: str
+    master_prompt: Optional[str] = None
+    narrative: str = ""
+    categories: Dict[str, List[TagChip]] = Field(default_factory=dict)
+    schema_data: Optional[Dict[str, Any]] = Field(alias="schema", default=None)
     extracted_chips: List[TagChip] = Field(default_factory=list)
     extracted_json: Optional[Dict[str, Any]] = None
+
+
+class GenerateBaselinesRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    moodboard_id: str
+    master_prompt: Optional[str] = None
+    narrative: Optional[str] = ""
+    categories: Optional[Dict[str, List[Union[TagChip, Dict[str, Any]]]]] = None
+    schema_data: Optional[Dict[str, Any]] = Field(alias="schema", default=None)
+    aspect_ratio: Optional[str] = "1.8:1"
+    prompt_override: Optional[str] = None
+
+
+class GenerateBaselinesResponse(BaseModel):
+    moodboard_id: str
+    baselines: List[BaselineSummary] = Field(default_factory=list)
+
+
+class ResyncMasterPromptRequest(BaseModel):
+    narrative: Optional[str] = ""
+    categories: Optional[Dict[str, Any]] = None
+    previous_master_prompt: Optional[str] = None
+
+
+class ResyncMasterPromptResponse(BaseModel):
+    master_prompt: str
+    narrative: str
 
 
 class GenerationRequest(BaseModel):

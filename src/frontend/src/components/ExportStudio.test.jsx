@@ -163,6 +163,22 @@ describe('ExportStudio Component', () => {
       expect(fetchSpy).toHaveBeenCalledWith('https://example.com/master_enhanced.png');
     });
   });
+
+  it('displays accurate 1:1 square master and base resolutions instead of 1080x1620 default', () => {
+    const squareGenResult = {
+      generation_id: 'gen_square_1',
+      master_image_url: 'https://example.com/square.png',
+      seed: 1234567,
+      aspect_ratio: '1:1',
+      compiled_prompt: 'Minimalist editorial fashion shoot in 1:1 square ratio',
+    };
+
+    render(<ExportStudio generationResult={squareGenResult} />);
+
+    expect(screen.getAllByText(/Format: 1:1/i).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText(/1080 × 1080 px \(Standard Base\)/i)).toBeInTheDocument();
+    expect(screen.queryByText(/1080 × 1620/i)).not.toBeInTheDocument();
+  });
 });
 
 

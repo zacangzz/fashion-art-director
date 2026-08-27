@@ -1,0 +1,15 @@
+The user has updated the visual direction and tags for this scene. Re-harmonize and update the Master Generation Prompt and narrative accordingly.
+
+<scene_narrative>
+{CURRENT_NARRATIVE}
+</scene_narrative>
+
+<previous_master_prompt>
+{PREVIOUS_MASTER_PROMPT}
+</previous_master_prompt>
+
+<updated_visual_levers>
+{UPDATED_CATEGORIES_JSON}
+</updated_visual_levers>
+
+Synthesize the definitive updated Master Generation Prompt and core narrative reflecting all active tags above.

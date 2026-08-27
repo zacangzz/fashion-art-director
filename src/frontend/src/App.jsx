@@ -13,7 +13,8 @@ import {
 } from 'lucide-react';
 
 import MoodboardUploader from './components/MoodboardUploader';
-import BaselineSelector from './components/BaselineSelector';
+import PromptReviewSection from './components/PromptReviewSection';
+import BaselineSelector, { getBaseResolution, getMasterResolution } from './components/BaselineSelector';
 import RefinementChat from './components/RefinementChat';
 import WardrobePanel from './components/WardrobePanel';
 import CanvasStudio from './components/CanvasStudio';
@@ -25,6 +26,9 @@ import ComparisonModal from './components/ComparisonModal';
 import { DEFAULT_TAG_STATE } from './utils/defaultTags';
 import { compileModularPrompt } from './utils/promptCompiler';
 import {
+  analyzeMoodboard,
+  generateBaselines,
+  resyncMasterPrompt,
   analyzeAndGenerateBaselines,
   uploadDirectPhoto,
   refineGeneration,
@@ -44,7 +48,11 @@ export default function App() {
   const [baselinePrompt, setBaselinePrompt] = useState('');
   const [aspectRatio, setAspectRatio] = useState('1.8:1');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isGeneratingBaselines, setIsGeneratingBaselines] = useState(false);
+  const [isResyncingPrompt, setIsResyncingPrompt] = useState(false);
   const [moodboardId, setMoodboardId] = useState(null);
+  const [masterPrompt, setMasterPrompt] = useState('');
+  const [sceneNarrative, setSceneNarrative] = useState('');
   const [baselines, setBaselines] = useState([]);
   const [activeBaseline, setActiveBaseline] = useState(null);
 
@@ -125,12 +133,14 @@ export default function App() {
       }
       setPreviousGenerationResult(null);
 
+      const effRatio = response.aspect_ratio || aspectRatio;
       const initialGen = {
         generation_id: response.generation_id,
         master_image_url: response.image_url,
         seed: response.seed,
         compiled_prompt: response.compiled_prompt,
-        resolution: response.resolution || { width: 1080, height: 1620 },
+        aspect_ratio: effRatio,
+        resolution: response.resolution || getBaseResolution(effRatio),
       };
       setGenerationResult(initialGen);
 
@@ -155,8 +165,8 @@ export default function App() {
     }
   };
 
-  // Step 1: Analyze Moodboard & Generate 4 Baselines
-  const handleAnalyzeAndGenerateBaselines = async (promptOverride) => {
+  // Step 1A: Analyze Moodboard References & Synthesize Master Prompt + Visual Levers
+  const handleAnalyzeMoodboard = async (promptOverride) => {
     const promptToSend = typeof promptOverride === 'string' ? promptOverride : baselinePrompt;
 
     if (files.length === 0) {
@@ -164,7 +174,7 @@ export default function App() {
       return;
     }
     if (!promptToSend || !promptToSend.trim()) {
-      setErrorMessage('A starting creative prompt is required to analyze the moodboard and generate baselines.');
+      setErrorMessage('A starting creative prompt is required to analyze the moodboard.');
       return;
     }
 
@@ -172,7 +182,7 @@ export default function App() {
     setErrorMessage(null);
 
     try {
-      const response = await analyzeAndGenerateBaselines(
+      const response = await analyzeMoodboard(
         files,
         promptToSend.trim(),
         lockedCategories,
@@ -181,16 +191,48 @@ export default function App() {
       );
       setMoodboardId(response.moodboard_id);
 
-      if (response.categories && Object.keys(response.categories).length > 0) {
-        const nextState = {
-          master_prompt: response.master_prompt || null,
-          narrative: response.narrative || promptToSend || tagState.narrative,
-          categories: response.categories,
-          locked_categories: lockedCategories,
-        };
-        setTagState(nextState);
-        setBaselineTagSnapshot(JSON.parse(JSON.stringify(nextState)));
-      }
+      const nextState = {
+        master_prompt: response.master_prompt || null,
+        narrative: response.narrative || promptToSend || tagState.narrative,
+        categories: response.categories || {},
+        locked_categories: lockedCategories,
+      };
+      setTagState(nextState);
+      setBaselineTagSnapshot(JSON.parse(JSON.stringify(nextState)));
+      setMasterPrompt(response.master_prompt || '');
+      setSceneNarrative(response.narrative || promptToSend || '');
+    } catch (err) {
+      setErrorMessage(err.message || 'Failed to analyze moodboard references.');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  // Step 1B: Generate 4 Baseline Image Candidates from Customized Master Prompt
+  const handleGenerateBaselines = async () => {
+    if (!moodboardId && files.length === 0) {
+      setErrorMessage('Please upload and analyze moodboard references first.');
+      return;
+    }
+    if (!masterPrompt || !masterPrompt.trim()) {
+      setErrorMessage('Master prompt cannot be empty. Please enter or re-sync the prompt.');
+      return;
+    }
+
+    setIsGeneratingBaselines(true);
+    setErrorMessage(null);
+
+    try {
+      const payload = {
+        moodboard_id: moodboardId || `mb_${Date.now()}`,
+        master_prompt: masterPrompt.trim(),
+        narrative: sceneNarrative.trim(),
+        categories: tagState.categories,
+        aspect_ratio: aspectRatio,
+        prompt_override: masterPrompt.trim(),
+      };
+
+      const response = await generateBaselines(payload);
 
       if (response.baselines && response.baselines.length > 0) {
         setBaselines(response.baselines);
@@ -199,9 +241,40 @@ export default function App() {
       }
       await loadHistoryList();
     } catch (err) {
-      setErrorMessage(err.message || 'Failed to analyze moodboard and render baselines.');
+      setErrorMessage(err.message || 'Failed to render 4 baseline image candidates.');
     } finally {
-      setIsAnalyzing(false);
+      setIsGeneratingBaselines(false);
+    }
+  };
+
+  // On-Demand AI Master Prompt Re-Sync from Edited Visual Levers
+  const handleResyncMasterPrompt = async () => {
+    setIsResyncingPrompt(true);
+    setErrorMessage(null);
+
+    try {
+      const response = await resyncMasterPrompt({
+        narrative: sceneNarrative,
+        categories: tagState.categories,
+        previous_master_prompt: masterPrompt,
+      });
+
+      if (response.master_prompt) {
+        setMasterPrompt(response.master_prompt);
+      }
+      if (response.narrative) {
+        setSceneNarrative(response.narrative);
+      }
+
+      setTagState((prev) => ({
+        ...prev,
+        master_prompt: response.master_prompt || prev.master_prompt,
+        narrative: response.narrative || prev.narrative,
+      }));
+    } catch (err) {
+      setErrorMessage(err.message || 'Failed to re-sync master prompt with AI.');
+    } finally {
+      setIsResyncingPrompt(false);
     }
   };
 
@@ -218,13 +291,15 @@ export default function App() {
       setActiveSeed(baseline.seed);
       setPreviousGenerationResult(null);
 
-      const compiled = baseline.compiled_prompt || compileModularPrompt(tagState.narrative, tagState.categories);
+      const compiled = baseline.compiled_prompt || masterPrompt || compileModularPrompt(tagState.narrative, tagState.categories);
+      const effRatio = baseline.aspect_ratio || aspectRatio;
       const initialGen = {
         generation_id: baseline.id,
         master_image_url: baseline.image_url,
         seed: baseline.seed,
         compiled_prompt: compiled,
-        resolution: baseline.resolution || { width: 1080, height: 1620 },
+        aspect_ratio: effRatio,
+        resolution: baseline.resolution || getBaseResolution(effRatio),
       };
       setGenerationResult(initialGen);
 
@@ -269,12 +344,14 @@ export default function App() {
         setPreviousGenerationResult(generationResult);
       }
 
+      const effRatio = result.aspect_ratio || aspectRatio;
       const nextGen = {
         generation_id: result.generation_id,
         master_image_url: result.image_url,
         seed: result.seed,
         compiled_prompt: result.compiled_prompt,
-        resolution: result.resolution || { width: 1080, height: 1620 },
+        aspect_ratio: effRatio,
+        resolution: result.resolution || getBaseResolution(effRatio),
       };
       setGenerationResult(nextGen);
       setActiveSeed(result.seed);
@@ -302,18 +379,19 @@ export default function App() {
     }
   };
 
-  // Handle selecting a past message from the RefinementChat thread
   const handleSelectMessage = (msg) => {
     if (!msg || !msg.generation_id) return;
     if (generationResult && generationResult.generation_id !== msg.generation_id) {
       setPreviousGenerationResult(generationResult);
     }
+    const effRatio = msg.aspect_ratio || aspectRatio;
     setGenerationResult({
       generation_id: msg.generation_id,
       master_image_url: msg.image_url,
       seed: msg.seed,
       compiled_prompt: msg.prompt,
-      resolution: { width: 1080, height: 1620 },
+      aspect_ratio: effRatio,
+      resolution: msg.resolution || getBaseResolution(effRatio),
     });
     setActiveSeed(msg.seed);
   };
@@ -383,12 +461,14 @@ export default function App() {
         setPreviousGenerationResult(generationResult);
       }
 
+      const effRatio = result.aspect_ratio || aspectRatio;
       const nextGen = {
         generation_id: result.generation_id,
         master_image_url: result.image_url,
         seed: result.seed,
         compiled_prompt: result.compiled_prompt,
-        resolution: result.resolution || { width: 1080, height: 1620 },
+        aspect_ratio: effRatio,
+        resolution: result.resolution || getBaseResolution(effRatio),
       };
       setGenerationResult(nextGen);
       setActiveSeed(result.seed);
@@ -425,12 +505,14 @@ export default function App() {
     if (generationResult) {
       setPreviousGenerationResult(generationResult);
     }
+    const effRatio = result.aspect_ratio || aspectRatio;
     const nextGen = {
       generation_id: result.generation_id,
       master_image_url: result.image_url,
       seed: result.seed,
       compiled_prompt: result.compiled_prompt,
-      resolution: result.resolution || { width: 1080, height: 1620 },
+      aspect_ratio: effRatio,
+      resolution: result.resolution || getBaseResolution(effRatio),
     };
     setGenerationResult(nextGen);
 
@@ -498,15 +580,18 @@ export default function App() {
       });
     }
 
-    // Set immediate parent for Before/After split comparison in CanvasViewport
-    if (lineageChain.length > 1) {
-      const parent = lineageChain[lineageChain.length - 2];
+    const targetRatio = record.aspect_ratio || aspectRatio;
+    const masterRes = getMasterResolution(targetRatio);
+    if (parent) {
+      const parentRatio = parent.aspect_ratio || targetRatio;
+      const parentMasterRes = getMasterResolution(parentRatio);
       setPreviousGenerationResult({
         generation_id: parent.id,
         master_image_url: parent.master_image_url || parent.image_url,
         seed: parent.seed,
         compiled_prompt: parent.compiled_prompt || parent.prompt,
-        resolution: { width: parent.resolution_width || 3840, height: parent.resolution_height || 3840 },
+        aspect_ratio: parentRatio,
+        resolution: { width: parent.resolution_width || parentMasterRes.width, height: parent.resolution_height || parentMasterRes.height },
       });
     } else {
       setPreviousGenerationResult(null);
@@ -517,7 +602,8 @@ export default function App() {
       master_image_url: record.master_image_url || record.image_url,
       seed: record.seed,
       compiled_prompt: record.compiled_prompt || record.prompt,
-      resolution: { width: record.resolution_width || 3840, height: record.resolution_height || 3840 },
+      aspect_ratio: targetRatio,
+      resolution: { width: record.resolution_width || masterRes.width, height: record.resolution_height || masterRes.height },
       schema_json: record.schema_json,
     };
     setGenerationResult(restoredGen);
@@ -675,14 +761,14 @@ export default function App() {
       {/* Main Studio Viewport */}
       <main className="studio-main-container">
         {currentStep === 1 && (
-          /* Step 1: Moodboard Upload & 4-Baseline Selector */
+          /* Step 1: Moodboard Upload & 2-Stage Analysis + 4-Baseline Selector */
           <div className="step-1-layout">
             <MoodboardUploader
               files={files}
               onFilesChange={setFiles}
               prompt={baselinePrompt}
               onPromptChange={setBaselinePrompt}
-              onAnalyze={handleAnalyzeAndGenerateBaselines}
+              onAnalyze={handleAnalyzeMoodboard}
               isAnalyzing={isAnalyzing}
               aspectRatio={aspectRatio}
               onAspectRatioChange={setAspectRatio}
@@ -690,26 +776,57 @@ export default function App() {
               isDirectUploading={isDirectUploading}
             />
 
-            {baselines.length > 0 ? (
-              <BaselineSelector
-                baselines={baselines}
-                selectedBaselineId={activeBaseline?.id}
-                onSelectBaseline={handleSelectBaseline}
-                onProceedToStudio={handleProceedToStudio}
-                tagState={tagState}
-                aspectRatio={aspectRatio}
-              />
-            ) : (
-              <div className="baseline-selector-container">
-                <div className="viewport-empty-placeholder" style={{ padding: '60px 20px' }}>
-                  <Layers size={48} className="placeholder-icon" />
-                  <div className="placeholder-title">4 Baseline Image Candidates</div>
-                  <div className="placeholder-subtitle">
-                    Upload 1–5 moodboard images and provide your starting scene prompt to synthesize the Master Prompt, extract visual levers, and render 4 candidate seeds.
+            <div className="step-1-right-column">
+              {(moodboardId || masterPrompt || (tagState?.categories && Object.keys(tagState.categories).length > 0)) ? (
+                <>
+                  <PromptReviewSection
+                    tagState={tagState}
+                    onUpdateTagState={setTagState}
+                    masterPrompt={masterPrompt}
+                    onMasterPromptChange={setMasterPrompt}
+                    narrative={sceneNarrative}
+                    onNarrativeChange={setSceneNarrative}
+                    aspectRatio={aspectRatio}
+                    isResyncing={isResyncingPrompt}
+                    onResyncPrompt={handleResyncMasterPrompt}
+                    isGeneratingBaselines={isGeneratingBaselines}
+                    onGenerateBaselines={handleGenerateBaselines}
+                    hasBaselines={baselines.length > 0}
+                  />
+
+                  {baselines.length > 0 ? (
+                    <BaselineSelector
+                      baselines={baselines}
+                      selectedBaselineId={activeBaseline?.id}
+                      onSelectBaseline={handleSelectBaseline}
+                      onProceedToStudio={handleProceedToStudio}
+                      tagState={tagState}
+                      aspectRatio={aspectRatio}
+                    />
+                  ) : (
+                    <div className="baseline-selector-container">
+                      <div className="viewport-empty-placeholder" style={{ padding: '40px 20px' }}>
+                        <Sparkles size={36} className="placeholder-icon text-accent" />
+                        <div className="placeholder-title">Visual Direction & Levers Extracted</div>
+                        <div className="placeholder-subtitle">
+                          Review and customize your Master Prompt or visual levers above, then click <strong>"Generate 4 Baseline Candidates"</strong> to render candidate seeds across Google GenAI.
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="baseline-selector-container">
+                  <div className="viewport-empty-placeholder" style={{ padding: '60px 20px' }}>
+                    <Layers size={48} className="placeholder-icon" />
+                    <div className="placeholder-title">Step 1: Moodboard Analysis & Foundation Setup</div>
+                    <div className="placeholder-subtitle">
+                      Upload 1–5 moodboard reference images or PDFs on the left, enter your starting scene prompt, and click <strong>"Analyze Moodboard"</strong> to synthesize your Director's Master Prompt and 9-category visual levers.
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         )}
 

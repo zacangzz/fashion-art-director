@@ -331,11 +331,11 @@ export default function MoodboardUploader({
           <div className="baseline-prompt-hint">
             {!prompt.trim() ? (
               <span style={{ color: '#fb923c' }}>
-                * Please provide a starting prompt. The vision model will fuse your uploaded references with this prompt to generate 4 baseline candidates.
+                * Please provide a starting prompt. The vision model will analyze your uploaded references with this prompt to extract visual levers and synthesize the Master Prompt.
               </span>
             ) : (
               <span>
-                The AI Vision Director will synthesize your moodboard references together with this prompt to craft the optimal Master Prompt, 9-category visual levers, and 4 baseline candidates.
+                The AI Vision Director will analyze your moodboard references together with this prompt to synthesize the Master Generation Prompt and 9-category visual levers for your review.
               </span>
             )}
           </div>
@@ -352,7 +352,7 @@ export default function MoodboardUploader({
           {isAnalyzing ? (
             <>
               <Loader2 size={16} className="spin-animation" />
-              <span>Analyzing & Generating 4 Baselines...</span>
+              <span>Analyzing Moodboard & Synthesizing Levers...</span>
             </>
           ) : (
             <>
@@ -361,8 +361,8 @@ export default function MoodboardUploader({
                 {files.length === 0
                   ? 'Upload 1–5 Reference Files to Begin'
                   : !prompt.trim()
-                  ? 'Enter Starting Prompt to Generate Baselines'
-                  : 'Analyze & Generate 4 Baselines'}
+                  ? 'Enter Starting Prompt to Analyze'
+                  : 'Analyze Moodboard'}
               </span>
             </>
           )}

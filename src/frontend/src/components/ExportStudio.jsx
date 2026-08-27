@@ -12,11 +12,12 @@ import {
   Zap,
 } from 'lucide-react';
 import { prepareExport } from '../services/apiClient';
+import { getBaseResolution, getMasterResolution } from './BaselineSelector';
 
 export default function ExportStudio({
   generationResult,
   activeBaseline,
-  globalAspectRatio = '1.8:1',
+  globalAspectRatio = '1:1',
   history = [],
   onExportMasterPrepared,
 }) {
@@ -24,7 +25,7 @@ export default function ExportStudio({
     generationResult?.aspect_ratio ||
     activeBaseline?.aspect_ratio ||
     globalAspectRatio ||
-    '1.8:1';
+    '1:1';
 
   // Check if current generation result is already a prepared master
   const isAlreadyMaster = Boolean(
@@ -87,25 +88,28 @@ export default function ExportStudio({
     return '1 / 1';
   })();
 
+  const baseDefault = getBaseResolution(originalRatio);
+  const masterDefault = getMasterResolution(originalRatio);
+
   // Resolutions metadata
   const originalWidth =
     parentFromHistory?.resolution_width ||
     (!isAlreadyMaster && (generationResult?.resolution?.width || generationResult?.resolution_width)) ||
-    1080;
+    baseDefault.width;
   const originalHeight =
     parentFromHistory?.resolution_height ||
     (!isAlreadyMaster && (generationResult?.resolution?.height || generationResult?.resolution_height)) ||
-    1620;
+    baseDefault.height;
   const originalResolutionText = `${originalWidth} × ${originalHeight} px`;
 
   const upscaledWidth =
     preparedMaster?.resolution?.width ||
     preparedMaster?.resolution_width ||
-    3840;
+    masterDefault.width;
   const upscaledHeight =
     preparedMaster?.resolution?.height ||
     preparedMaster?.resolution_height ||
-    3840;
+    masterDefault.height;
   const upscaledResolutionText = `${upscaledWidth} × ${upscaledHeight} px`;
 
   const handlePrepareExport = async () => {

@@ -33,7 +33,7 @@ def test_compile_prompt_modular_narrative():
     assert "A stunning cinematic visual of a child on a patio." in compiled
     assert "Subject: young boy with ginger hair, wearing cream knit sweater." in compiled
     assert "Environment: set in sunlit stone terrace, featuring terracotta outdoor sofa." in compiled
-    assert "Composition: medium-wide shot, shot on (35mm prime lens:1.5)." in compiled
+    assert "Composition: medium-wide shot, shot on 35mm prime lens." in compiled
     assert "Lighting & Color: illuminated with golden hour sunlight, color palette of warm earthy palette." in compiled
     assert "Aesthetic: 1970s retro luxury." in compiled
 
@@ -249,7 +249,7 @@ async def test_fine_tune_generation_with_tag_chip_instances(tmp_path):
 
     with patch("app.services.generation_service.genai.Client", return_value=mock_client):
         service = GenerationService(db_manager=db_mgr, api_key="fake_key", storage_dir=storage_dir)
-        chip = TagChip(id="tag_1", category=TagCategory.SUBJECT_DETAILS, label="copper hair model", enabled=True, locked=False, weight=1.4)
+        chip = TagChip(id="tag_1", category=TagCategory.SUBJECT_DETAILS, label="copper hair model", enabled=True, locked=False)
         
         # Pass TagChip Pydantic instances in categories
         res = await service.fine_tune_generation(

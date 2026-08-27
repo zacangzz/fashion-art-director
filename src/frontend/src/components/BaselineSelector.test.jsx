@@ -122,48 +122,4 @@ describe('BaselineSelector', () => {
     });
     expect(mockWriteText).toHaveBeenCalledWith('A sunlit architectural terrace with terracotta elements.');
   });
-
-  it('renders generated moodboard info panel with narrative and visual levers', async () => {
-    const mockWriteText = vi.fn().mockResolvedValue(undefined);
-    Object.assign(navigator, {
-      clipboard: { writeText: mockWriteText },
-    });
-
-    const mockTagState = {
-      narrative: 'A sunlit editorial scene in a modernist pavilion.',
-      master_prompt: 'High fashion editorial photo with warm golden light.',
-      categories: {
-        subject_details: [{ label: 'striking elegant model', weight: 1.0 }],
-        lighting: [{ label: 'warm direct sunlight', weight: 1.2 }],
-        color_profile: [{ label: 'rich analog film palette', weight: 1.0 }],
-      },
-    };
-
-    render(
-      <BaselineSelector
-        baselines={mockBaselines}
-        selectedBaselineId="gen_1"
-        tagState={mockTagState}
-      />
-    );
-
-    // Verify Moodboard Info panel header and content
-    expect(
-      screen.getByText(/Generated Info from Moodboard \(Vision Synthesis & Visual Levers\)/i)
-    ).toBeInTheDocument();
-    expect(screen.getByText(/A sunlit editorial scene in a modernist pavilion\./i)).toBeInTheDocument();
-    expect(screen.getByText(/High fashion editorial photo with warm golden light\./i)).toBeInTheDocument();
-    expect(screen.getByText(/striking elegant model/i)).toBeInTheDocument();
-    expect(screen.getByText(/warm direct sunlight/i)).toBeInTheDocument();
-    expect(screen.getByText(/1.2x/i)).toBeInTheDocument();
-
-    // Verify Copy Info button
-    const copyInfoBtn = screen.getByRole('button', { name: /Copy Info/i });
-    await act(async () => {
-      fireEvent.click(copyInfoBtn);
-    });
-    expect(mockWriteText).toHaveBeenCalledWith(
-      expect.stringContaining('[Scene Narrative]')
-    );
-  });
 });

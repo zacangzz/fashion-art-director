@@ -83,7 +83,7 @@ def _normalize_categories_dict(cats: Optional[Dict[str, Any]]) -> Dict[str, List
                 elif isinstance(item, dict):
                     chip_list.append(item)
                 elif isinstance(item, str) and item.strip():
-                    chip_list.append({"label": item.strip(), "weight": 1.0, "enabled": True})
+                    chip_list.append({"label": item.strip(), "enabled": True})
         normalized[cat_key] = chip_list
     return normalized
 
@@ -114,22 +114,14 @@ def extract_category_labels(cats: Optional[Dict[str, Any]], cat_key: str) -> Lis
             if item.get("enabled", True) is False:
                 continue
             lbl = str(item.get("label", "")).strip()
-            weight = float(item.get("weight", 1.0))
             if lbl:
-                if weight > 1.25:
-                    labels.append(f"({lbl}:{weight:.1f})")
-                else:
-                    labels.append(lbl)
+                labels.append(lbl)
         elif hasattr(item, "label"):
             if getattr(item, "enabled", True) is False:
                 continue
             lbl = str(getattr(item, "label", "")).strip()
-            weight = float(getattr(item, "weight", 1.0))
             if lbl:
-                if weight > 1.25:
-                    labels.append(f"({lbl}:{weight:.1f})")
-                else:
-                    labels.append(lbl)
+                labels.append(lbl)
     return labels
 
 
@@ -564,7 +556,10 @@ class GenerationService:
             if reference_image_bytes:
                 contents.append(to_image_part(reference_image_bytes))
 
+            res_tuple = ASPECT_RATIO_RESOLUTIONS.get(aspect_ratio or "2:3", (2560, 3840))
+            res_str = f"{res_tuple[0]}x{res_tuple[1]}"
             suffix = IMAGE_GENERATION_SUFFIX.format(
+                RESOLUTION=res_str,
                 ASPECT_RATIO=aspect_ratio or "unspecified",
                 SEED=seed if seed is not None else "unspecified",
                 NEGATIVE_PROMPT=negative_prompt or DEFAULT_NEGATIVE_PROMPT,
@@ -582,7 +577,7 @@ class GenerationService:
                 self._audit("image_model_request", audit_request_id,
                     final_prompt=full_prompt,
                     config={"model": self.model_name, "seed": seed, "aspect_ratio": aspect_ratio,
-                            "negative_prompt": negative_prompt},
+                            "resolution": res_str, "negative_prompt": negative_prompt},
                     reference_image=reference)
 
             contents.append(full_prompt)
@@ -625,7 +620,10 @@ class GenerationService:
         logger.info(f"Calling multi-image model '{self.model_name}' (seed={seed}, aspect={aspect_ratio}, parts_count={len(contents)})")
         started = time.perf_counter()
 
+        res_tuple = ASPECT_RATIO_RESOLUTIONS.get(aspect_ratio or "2:3", (2560, 3840))
+        res_str = f"{res_tuple[0]}x{res_tuple[1]}"
         suffix = IMAGE_GENERATION_SUFFIX.format(
+            RESOLUTION=res_str,
             ASPECT_RATIO=aspect_ratio or "unspecified",
             SEED=seed if seed is not None else "unspecified",
             NEGATIVE_PROMPT=negative_prompt or DEFAULT_NEGATIVE_PROMPT,
@@ -717,6 +715,16 @@ class GenerationService:
         width, height = self._process_and_save_image(image_bytes, filepath, aspect_ratio)
         duration_ms = round((time.perf_counter() - started) * 1000, 1)
 
+        res_tuple = ASPECT_RATIO_RESOLUTIONS.get(aspect_ratio or "2:3", (2560, 3840))
+        res_str = f"{res_tuple[0]}x{res_tuple[1]}"
+        suffix_str = IMAGE_GENERATION_SUFFIX.format(
+            RESOLUTION=res_str,
+            ASPECT_RATIO=aspect_ratio or "unspecified",
+            SEED=seed if seed is not None else "unspecified",
+            NEGATIVE_PROMPT=negative_prompt or DEFAULT_NEGATIVE_PROMPT,
+        )
+        full_baseline_prompt = f"{positive_prompt.rstrip()} {suffix_str.strip()}"
+
         record = {
             "id": gen_id,
             "parent_id": None,
@@ -724,7 +732,7 @@ class GenerationService:
             "is_baseline": True,
             "created_at": created_at,
             "schema_json": state_dict,
-            "compiled_prompt": positive_prompt,
+            "compiled_prompt": full_baseline_prompt,
             "negative_prompt": negative_prompt,
             "seed": seed,
             "master_image_path": filepath,
@@ -751,7 +759,7 @@ class GenerationService:
             "created_at": created_at,
             "aspect_ratio": aspect_ratio,
             "resolution": {"width": width, "height": height},
-            "compiled_prompt": positive_prompt,
+            "compiled_prompt": full_baseline_prompt,
         }
 
     async def register_uploaded_photo(
@@ -842,15 +850,25 @@ class GenerationService:
         moodboard_id: str,
         state: Union[Dict[str, Any], SceneSchema],
         aspect_ratio: str = "2:3",
+        prompt_override: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Spawns 4 concurrent baseline generation tasks across 4 unique seeds.
+        Uses the Vision Director's master_prompt directly (or prompt_override),
+        only appending the technical quality suffix.
         """
-        state_dict = state.model_dump() if isinstance(state, SceneSchema) else state
+        state_dict = state.model_dump() if isinstance(state, SceneSchema) else (state or {})
         narrative = state_dict.get("narrative", "")
         categories = state_dict.get("categories", {})
+        master_prompt = state_dict.get("master_prompt", "")
 
-        compiled_prompt = compile_prompt(narrative=narrative, categories=categories)
+        if prompt_override and prompt_override.strip():
+            compiled_prompt = prompt_override.strip()
+        elif master_prompt and str(master_prompt).strip():
+            compiled_prompt = str(master_prompt).strip()
+        else:
+            compiled_prompt = compile_prompt(narrative=narrative, categories=categories)
+
         neg_prompt = DEFAULT_NEGATIVE_PROMPT
 
         # Generate 4 distinct seeds
@@ -1036,6 +1054,7 @@ class GenerationService:
             "negative_prompt": final_neg_prompt,
             "image_url": f"/api/images/{filename}",
             "created_at": created_at,
+            "aspect_ratio": aspect_ratio,
             "resolution": {"width": width, "height": height},
         }
 
@@ -1129,6 +1148,7 @@ class GenerationService:
             "negative_prompt": final_neg_prompt,
             "image_url": f"/api/images/{filename}",
             "created_at": created_at,
+            "aspect_ratio": aspect_ratio,
             "resolution": {"width": width, "height": height},
             "conversation_id": conversation_id,
         }
@@ -1353,6 +1373,7 @@ class GenerationService:
             "negative_prompt": final_neg_prompt,
             "image_url": f"/api/images/{filename}",
             "created_at": created_at,
+            "aspect_ratio": aspect_ratio,
             "resolution": {"width": width, "height": height},
             "conversation_id": conversation_id,
             "assignments": loaded_assignments,
@@ -1569,6 +1590,7 @@ class GenerationService:
             "mask_url": f"/api/images/{mask_filename}",
             "mask_stats": mask_stats,
             "created_at": created_at,
+            "aspect_ratio": aspect_ratio,
             "resolution": {"width": width, "height": height},
         }
 
@@ -1630,5 +1652,6 @@ class GenerationService:
             "seed": seed,
             "master_image_url": f"/api/images/{filename}",
             "master_image_path": filepath,
+            "aspect_ratio": aspect_ratio,
             "resolution": {"width": width, "height": height},
         }

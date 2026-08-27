@@ -7,41 +7,41 @@ You must return a single, valid JSON object with EXACTLY this structure:
   "narrative": "A concise 1-2 sentence core creative scene logline capturing the primary subject, action, setting, and emotional tone.",
   "categories": {
     "subject_details": [
-      {"label": "e.g. young boy with copper ginger hair", "weight": 1.0},
-      {"label": "e.g. seated with right hand raised to mouth", "weight": 1.0}
+      {"label": "e.g. young boy with copper ginger hair"},
+      {"label": "e.g. seated with right hand raised to mouth"}
     ],
     "objects_props": [
-      {"label": "e.g. terracotta mid-century outdoor sofa", "weight": 1.0},
-      {"label": "e.g. woven slate blue cushions", "weight": 1.0}
+      {"label": "e.g. terracotta mid-century outdoor sofa"},
+      {"label": "e.g. woven slate blue cushions"}
     ],
     "wardrobe_hair": [
-      {"label": "e.g. wind-tousled wavy ginger hair", "weight": 1.0},
-      {"label": "e.g. cream ribbed cotton knit sweater", "weight": 1.0}
+      {"label": "e.g. wind-tousled wavy ginger hair"},
+      {"label": "e.g. cream ribbed cotton knit sweater"}
     ],
     "environment": [
-      {"label": "e.g. sunlit modernist terrace patio", "weight": 1.0},
-      {"label": "e.g. lush Mediterranean pine trees in background", "weight": 1.0}
+      {"label": "e.g. sunlit modernist terrace patio"},
+      {"label": "e.g. lush Mediterranean pine trees in background"}
     ],
     "layout_framing": [
-      {"label": "e.g. medium-wide cinematic composition", "weight": 1.0},
-      {"label": "e.g. rule-of-thirds asymmetric balance", "weight": 1.0}
+      {"label": "e.g. medium-wide cinematic composition"},
+      {"label": "e.g. rule-of-thirds asymmetric balance"}
     ],
     "lighting": [
-      {"label": "e.g. warm direct late-afternoon golden sunlight", "weight": 1.0},
-      {"label": "e.g. soft diffused ambient fill with gentle shadows", "weight": 1.0}
+      {"label": "e.g. warm direct late-afternoon golden sunlight"},
+      {"label": "e.g. soft diffused ambient fill with gentle shadows"}
     ],
     "color_profile": [
-      {"label": "e.g. warm terracotta, slate blue, and olive green palette", "weight": 1.0},
-      {"label": "e.g. natural Kodak Portra film color grade", "weight": 1.0}
+      {"label": "e.g. warm terracotta, slate blue, and olive green palette"},
+      {"label": "e.g. natural Kodak Portra film color grade"}
     ],
     "camera_optics": [
-      {"label": "e.g. raw photo shot on 35mm analog film with fine film grain", "weight": 1.0},
-      {"label": "e.g. 85mm f/1.4 prime lens with natural light and slight motion blur", "weight": 1.0},
-      {"label": "e.g. visible skin pores, natural skin texture, stray hairs, and minor skin blemishes", "weight": 1.0}
+      {"label": "e.g. raw photo shot on 35mm analog film with fine film grain"},
+      {"label": "e.g. 85mm f/1.4 prime lens with natural light and slight motion blur"},
+      {"label": "e.g. visible skin pores, natural skin texture, stray hairs, and minor skin blemishes"}
     ],
     "mood_era": [
-      {"label": "e.g. 1970s retro luxury editorial vibe with subtle dust and scratches", "weight": 1.0},
-      {"label": "e.g. playful, candid high-end commercial aesthetic", "weight": 1.0}
+      {"label": "e.g. 1970s retro luxury editorial vibe with subtle dust and scratches"},
+      {"label": "e.g. playful, candid high-end commercial aesthetic"}
     ]
   }
 }

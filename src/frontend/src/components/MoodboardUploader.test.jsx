@@ -21,7 +21,7 @@ describe('MoodboardUploader', () => {
   it('disables analyze button when files are present but prompt is empty', () => {
     const file = new File(['dummy'], 'sample.png', { type: 'image/png' });
     render(<MoodboardUploader files={[file]} prompt="" onFilesChange={() => {}} onAnalyze={() => {}} />);
-    const btn = screen.getByRole('button', { name: /Enter Starting Prompt to Generate Baselines/i });
+    const btn = screen.getByRole('button', { name: /Enter Starting Prompt to Analyze/i });
     expect(btn).toBeDisabled();
   });
 
@@ -42,7 +42,7 @@ describe('MoodboardUploader', () => {
     const textarea = screen.getByLabelText(/Starting Scene Prompt/i);
     expect(textarea.value).toBe('Editorial sun-drenched terrace');
 
-    const btn = screen.getByRole('button', { name: /Analyze & Generate 4 Baselines/i });
+    const btn = screen.getByRole('button', { name: /Analyze Moodboard/i });
     expect(btn).not.toBeDisabled();
     fireEvent.click(btn);
     expect(onAnalyze).toHaveBeenCalledWith('Editorial sun-drenched terrace');
@@ -59,7 +59,7 @@ describe('MoodboardUploader', () => {
         isAnalyzing={true}
       />
     );
-    expect(screen.getByText(/Analyzing & Generating 4 Baselines.../i)).toBeInTheDocument();
+    expect(screen.getByText(/Analyzing Moodboard & Synthesizing Levers.../i)).toBeInTheDocument();
   });
 
   it('renders aspect ratio options defaulting to 1.8:1 and calls onAspectRatioChange', () => {

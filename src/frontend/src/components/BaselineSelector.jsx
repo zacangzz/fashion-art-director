@@ -73,6 +73,45 @@ export function parseAspectRatio(aspectRatioStr) {
   };
 }
 
+export const ASPECT_RATIO_PREVIEWS = {
+  '1:1': { width: 1080, height: 1080 },
+  '16:9': { width: 1920, height: 1080 },
+  '9:16': { width: 1080, height: 1920 },
+  '21:9': { width: 2560, height: 1080 },
+  '2:3': { width: 1080, height: 1620 },
+  '3:2': { width: 1620, height: 1080 },
+  '4:5': { width: 1080, height: 1350 },
+  '5:4': { width: 1350, height: 1080 },
+  '3:4': { width: 1080, height: 1440 },
+  '4:3': { width: 1440, height: 1080 },
+  '1.8:1': { width: 1920, height: 1067 },
+  '1.85:1': { width: 1998, height: 1080 },
+};
+
+export const ASPECT_RATIO_MASTERS = {
+  '1:1': { width: 3840, height: 3840 },
+  '16:9': { width: 3840, height: 2160 },
+  '9:16': { width: 2160, height: 3840 },
+  '21:9': { width: 3840, height: 1645 },
+  '2:3': { width: 2560, height: 3840 },
+  '3:2': { width: 3840, height: 2560 },
+  '4:5': { width: 3072, height: 3840 },
+  '5:4': { width: 3840, height: 3072 },
+  '3:4': { width: 2880, height: 3840 },
+  '4:3': { width: 3840, height: 2880 },
+  '1.8:1': { width: 3840, height: 2133 },
+  '1.85:1': { width: 3840, height: 2075 },
+};
+
+export function getBaseResolution(aspectRatioStr) {
+  return ASPECT_RATIO_PREVIEWS[aspectRatioStr] || { width: 1080, height: 1080 };
+}
+
+export function getMasterResolution(aspectRatioStr) {
+  return ASPECT_RATIO_MASTERS[aspectRatioStr] || { width: 3840, height: 3840 };
+}
+
+
 export default function BaselineSelector({
   baselines = [],
   selectedBaselineId,
@@ -393,140 +432,6 @@ export default function BaselineSelector({
             className={`baseline-prompt-content ${isPromptExpanded ? 'expanded' : 'collapsed'}`}
           >
             {activeBaselinePrompt}
-          </div>
-        </div>
-      )}
-
-      {/* Generated Info from Moodboard Inspector */}
-      {hasMoodboardInfo && (
-        <div className="baseline-moodboard-panel">
-          <div className="baseline-moodboard-header">
-            <div className="baseline-moodboard-title-group">
-              <Sparkles size={14} className="text-accent" />
-              <span className="baseline-moodboard-title">Generated Info from Moodboard (Vision Synthesis & Visual Levers)</span>
-              {totalTagsCount > 0 && (
-                <span className="baseline-moodboard-tag">
-                  {totalTagsCount} tags • {categoriesWithTags.length} categories
-                </span>
-              )}
-            </div>
-
-            <div className="baseline-prompt-actions">
-              <button
-                type="button"
-                className="btn-prompt-action"
-                onClick={handleCopyMoodboardInfo}
-                title="Copy Moodboard Analysis Info"
-              >
-                {copiedMoodboard ? (
-                  <>
-                    <Check size={12} className="text-success" />
-                    <span className="text-success">Copied</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy size={12} />
-                    <span>Copy Info</span>
-                  </>
-                )}
-              </button>
-
-              <button
-                type="button"
-                className="btn-prompt-action"
-                onClick={() => setIsMoodboardExpanded(!isMoodboardExpanded)}
-                title={isMoodboardExpanded ? "Collapse" : "Expand"}
-              >
-                {isMoodboardExpanded ? (
-                  <>
-                    <ChevronUp size={12} />
-                    <span>Collapse</span>
-                  </>
-                ) : (
-                  <>
-                    <ChevronDown size={12} />
-                    <span>Expand</span>
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-
-          <div className={`baseline-moodboard-content ${isMoodboardExpanded ? 'expanded' : 'collapsed'}`}>
-            {/* Core Scene Narrative */}
-            {tagState.narrative && (
-              <div className="baseline-moodboard-narrative-box">
-                <div className="baseline-moodboard-subheading">
-                  <FileText size={12} />
-                  <span>Scene Narrative & Core Logline</span>
-                </div>
-                <div className="baseline-moodboard-narrative-text">
-                  {tagState.narrative}
-                </div>
-              </div>
-            )}
-
-            {/* Master Generation Prompt (if distinct from narrative) */}
-            {tagState.master_prompt && tagState.master_prompt !== tagState.narrative && (
-              <div className="baseline-moodboard-narrative-box">
-                <div className="baseline-moodboard-subheading">
-                  <Palette size={12} />
-                  <span>Vision Director Master Prompt</span>
-                </div>
-                <div className="baseline-moodboard-narrative-text">
-                  {tagState.master_prompt}
-                </div>
-              </div>
-            )}
-
-            {/* 9-Category Extracted Visual Levers Grid */}
-            {categoriesWithTags.length > 0 && (
-              <div className="baseline-moodboard-categories-section">
-                <div className="baseline-moodboard-subheading">
-                  <Layers size={12} />
-                  <span>Extracted 9-Category Visual Levers</span>
-                </div>
-                <div className="baseline-moodboard-categories-grid">
-                  {categoriesWithTags.map((cat) => {
-                    const tagList = tagState.categories[cat.key] || [];
-                    return (
-                      <div key={cat.key} className="baseline-moodboard-category-card">
-                        <div className="baseline-moodboard-cat-header">
-                          <span
-                            className="baseline-moodboard-cat-dot"
-                            style={{ backgroundColor: cat.color }}
-                          />
-                          <span className="baseline-moodboard-cat-name">{cat.label}</span>
-                        </div>
-                        <div className="baseline-moodboard-chips-list">
-                          {tagList.map((tag, idx) => {
-                            const label = typeof tag === 'string' ? tag : tag.label;
-                            const weight = typeof tag === 'object' && tag.weight ? tag.weight : 1.0;
-                            return (
-                              <span
-                                key={`${cat.key}-${idx}-${label}`}
-                                className="baseline-moodboard-chip"
-                                style={{
-                                  borderColor: `${cat.color}40`,
-                                  backgroundColor: `${cat.color}15`,
-                                }}
-                              >
-                                <span>{label}</span>
-                                {weight !== 1.0 && (
-                                  <span className="baseline-moodboard-chip-weight">
-                                    {weight.toFixed(1)}x
-                                  </span>
-                                )}
-                              </span>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
           </div>
         </div>
       )}

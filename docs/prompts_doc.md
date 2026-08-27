@@ -60,6 +60,8 @@ The application operates across a **4-Step Sequential Studio Architecture** with
 | **12** | **Inpaint System Prompt** | `src/app/prompts/inpaint_system.txt` | `gemini-3.1-flash-image` | Step 3: Canvas Inpaint | Enforces strict pixel immutability outside mask boundaries and seamless edge blending. |
 | **13** | **Inpaint Suffix** | `src/app/prompts/inpaint_suffix.txt` | `gemini-3.1-flash-image` | Step 3: Canvas Inpaint | Negative prompt and boundary constraint appendix for spatial inpainting. |
 | **14** | **Default AI Upscale & Restoration Prompt** | `src/app/services/export_service.py` | `gemini-3.1-flash-lite-image` | Step 4: Export Master | Restores raw photo fidelity, film grain, fabric weave, visible skin pores, and natural textures. |
+| **15** | **Re-sync Master Prompt System Directive** | `src/app/prompts/resync_master_prompt_system.txt` | `gemini-3.1-flash-lite` | Step 1: Prompt Review | Re-synthesizes fluid editorial Master Prompt prose from user-updated 9-category visual levers. |
+| **16** | **Re-sync Master Prompt Template** | `src/app/prompts/resync_master_prompt_template.txt` | `gemini-3.1-flash-lite` | Step 1: Prompt Review | Injects scene narrative, previous prompt, and updated categories JSON into the re-sync call. |
 
 ---
 
@@ -81,41 +83,41 @@ You must return a single, valid JSON object with EXACTLY this structure:
   "narrative": "A concise 1-2 sentence core creative scene logline capturing the primary subject, action, setting, and emotional tone.",
   "categories": {
     "subject_details": [
-      {"label": "e.g. young boy with copper ginger hair", "weight": 1.0},
-      {"label": "e.g. seated with right hand raised to mouth", "weight": 1.0}
+      {"label": "e.g. young boy with copper ginger hair"},
+      {"label": "e.g. seated with right hand raised to mouth"}
     ],
     "objects_props": [
-      {"label": "e.g. terracotta mid-century outdoor sofa", "weight": 1.0},
-      {"label": "e.g. woven slate blue cushions", "weight": 1.0}
+      {"label": "e.g. terracotta mid-century outdoor sofa"},
+      {"label": "e.g. woven slate blue cushions"}
     ],
     "wardrobe_hair": [
-      {"label": "e.g. wind-tousled wavy ginger hair", "weight": 1.0},
-      {"label": "e.g. cream ribbed cotton knit sweater", "weight": 1.0}
+      {"label": "e.g. wind-tousled wavy ginger hair"},
+      {"label": "e.g. cream ribbed cotton knit sweater"}
     ],
     "environment": [
-      {"label": "e.g. sunlit modernist terrace patio", "weight": 1.0},
-      {"label": "e.g. lush Mediterranean pine trees in background", "weight": 1.0}
+      {"label": "e.g. sunlit modernist terrace patio"},
+      {"label": "e.g. lush Mediterranean pine trees in background"}
     ],
     "layout_framing": [
-      {"label": "e.g. medium-wide cinematic composition", "weight": 1.0},
-      {"label": "e.g. rule-of-thirds asymmetric balance", "weight": 1.0}
+      {"label": "e.g. medium-wide cinematic composition"},
+      {"label": "e.g. rule-of-thirds asymmetric balance"}
     ],
     "lighting": [
-      {"label": "e.g. warm direct late-afternoon golden sunlight", "weight": 1.0},
-      {"label": "e.g. soft diffused ambient fill with gentle shadows", "weight": 1.0}
+      {"label": "e.g. warm direct late-afternoon golden sunlight"},
+      {"label": "e.g. soft diffused ambient fill with gentle shadows"}
     ],
     "color_profile": [
-      {"label": "e.g. warm terracotta, slate blue, and olive green palette", "weight": 1.0},
-      {"label": "e.g. natural Kodak Portra film color grade", "weight": 1.0}
+      {"label": "e.g. warm terracotta, slate blue, and olive green palette"},
+      {"label": "e.g. natural Kodak Portra film color grade"}
     ],
     "camera_optics": [
-      {"label": "e.g. raw photo shot on 35mm analog film with fine film grain", "weight": 1.0},
-      {"label": "e.g. 85mm f/1.4 prime lens with natural light and slight motion blur", "weight": 1.0},
-      {"label": "e.g. visible skin pores, natural skin texture, stray hairs, and minor skin blemishes", "weight": 1.0}
+      {"label": "e.g. raw photo shot on 35mm analog film with fine film grain"},
+      {"label": "e.g. 85mm f/1.4 prime lens with natural light and slight motion blur"},
+      {"label": "e.g. visible skin pores, natural skin texture, stray hairs, and minor skin blemishes"}
     ],
     "mood_era": [
-      {"label": "e.g. 1970s retro luxury editorial vibe with subtle dust and scratches", "weight": 1.0},
-      {"label": "e.g. playful, candid high-end commercial aesthetic", "weight": 1.0}
+      {"label": "e.g. 1970s retro luxury editorial vibe with subtle dust and scratches"},
+      {"label": "e.g. playful, candid high-end commercial aesthetic"}
     ]
   }
 }
@@ -136,11 +138,6 @@ Directives:
 * **Full Verbatim Content**:
 
 ```text
-USER CREATIVE BASELINE & INTENT:
-<user_requirements>
-{USER_PROMPT}
-</user_requirements>
-
 Analyze the moodboard images in conjunction with the user's creative requirements. Synthesize the optimal Master Generation Prompt with raw photo authenticity, fine film grain, visible skin pores, natural skin texture, stray hairs, minor skin blemishes, natural light, and authentic physical materials, breaking down its core visual levers across all 9 categories.
 ```
 

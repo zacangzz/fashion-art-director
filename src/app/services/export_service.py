@@ -217,10 +217,10 @@ class ExportService:
             "compiled_prompt": prompt_str,
             "negative_prompt": gen.get("negative_prompt", ""),
             "seed": gen.get("seed"),
-            "aspect_ratio": gen.get("aspect_ratio", "2:3"),
+            "aspect_ratio": gen.get("aspect_ratio", "1:1"),
             "resolution": {
-                "width": gen.get("resolution_width", 1440),
-                "height": gen.get("resolution_height", 1440),
+                "width": gen.get("resolution_width", 3840),
+                "height": gen.get("resolution_height", 3840),
             },
         }
         if inpaint_meta:

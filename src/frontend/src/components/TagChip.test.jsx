@@ -14,10 +14,9 @@ describe('TagChip component', () => {
     isCustom: false,
   };
 
-  it('renders chip label and weight badge', () => {
+  it('renders chip label and lock controls', () => {
     render(<TagChip chip={sampleChip} onUpdate={vi.fn()} onDelete={vi.fn()} />);
     expect(screen.getByText('Cyberpunk Warrior')).toBeInTheDocument();
-    expect(screen.getByText('1.0x')).toBeInTheDocument();
   });
 
   it('toggles lock state when lock icon is clicked', () => {
@@ -45,19 +44,6 @@ describe('TagChip component', () => {
 
     expect(handleUpdate).toHaveBeenCalledWith('chip-1', expect.objectContaining({
       label: 'Neon Mech Warrior',
-      enabled: true,
-    }));
-  });
-
-  it('updates weight when weight stepper is clicked', () => {
-    const handleUpdate = vi.fn();
-    render(<TagChip chip={sampleChip} onUpdate={handleUpdate} onDelete={vi.fn()} />);
-
-    const weightBadge = screen.getByText('1.0x');
-    fireEvent.click(weightBadge);
-
-    expect(handleUpdate).toHaveBeenCalledWith('chip-1', expect.objectContaining({
-      weight: 1.1,
       enabled: true,
     }));
   });

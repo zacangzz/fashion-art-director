@@ -56,7 +56,7 @@ async def test_extract_tag_studio_state_preserves_locked_categories():
 
     existing_categories = {
         "camera_optics": [
-            {"id": "tag_cam_locked", "category": "camera_optics", "label": "85mm prime f/1.4", "enabled": True, "locked": True, "weight": 1.5, "isCustom": False}
+            {"id": "tag_cam_locked", "category": "camera_optics", "label": "85mm prime f/1.4", "enabled": True, "locked": True, "isCustom": False}
         ]
     }
 
@@ -70,7 +70,6 @@ async def test_extract_tag_studio_state_preserves_locked_categories():
 
         assert "camera_optics" in state["categories"]
         assert state["categories"]["camera_optics"][0]["label"] == "85mm prime f/1.4"
-        assert state["categories"]["camera_optics"][0]["weight"] == 1.5
 
 
 @pytest.mark.asyncio

@@ -48,17 +48,6 @@ export default function TagChip({ chip, onUpdate, onDelete }) {
     }
   };
 
-  const handleWeightClick = (e) => {
-    e.stopPropagation();
-    // Step weight up by 0.1, wrap from 2.0 back to 0.5
-    let currentWeight = typeof chip.weight === 'number' ? chip.weight : 1.0;
-    let nextWeight = Math.round((currentWeight + 0.1) * 10) / 10;
-    if (nextWeight > 2.05) {
-      nextWeight = 0.5;
-    }
-    onUpdate(chip.id, { weight: nextWeight, enabled: true });
-  };
-
   const handleDeleteClick = (e) => {
     e.stopPropagation();
     onDelete(chip.id);
@@ -114,16 +103,6 @@ export default function TagChip({ chip, onUpdate, onDelete }) {
           {chip.label}
         </span>
       )}
-
-      {/* Weight Multiplier Badge */}
-      <span
-        className="tag-chip-weight"
-        title="Click to cycle weight (0.5x to 2.0x)"
-        onClick={handleWeightClick}
-        style={{ cursor: 'pointer' }}
-      >
-        {chip.weight ? `${chip.weight.toFixed(1)}x` : '1.0x'}
-      </span>
 
       {/* Delete Tag Button */}
       <button

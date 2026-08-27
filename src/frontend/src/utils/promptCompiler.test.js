@@ -15,9 +15,9 @@ describe('promptCompiler', () => {
   };
 
   describe('extractCategoryLabels', () => {
-    it('formats weighted tags (>1.25) with emphasis parenthesis', () => {
+    it('extracts active category labels cleanly', () => {
       const labels = extractCategoryLabels(baseCategories, 'lighting');
-      expect(labels).toEqual(['(golden hour rim light:1.5)']);
+      expect(labels).toEqual(['golden hour rim light']);
     });
 
     it('ignores disabled chips', () => {
@@ -68,7 +68,7 @@ describe('promptCompiler', () => {
       expect(compiled).toContain('A dramatic editorial portrait.');
       expect(compiled).toContain('Subject: chic model, wearing black leather jacket.');
       expect(compiled).toContain('Environment: set in brutalist concrete alley.');
-      expect(compiled).toContain('Lighting & Color: illuminated with (golden hour rim light:1.5).');
+      expect(compiled).toContain('Lighting & Color: illuminated with golden hour rim light.');
     });
 
     it('honors prompt override', () => {

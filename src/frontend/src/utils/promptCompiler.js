@@ -11,9 +11,6 @@ const CATEGORY_NAMES = {
   custom: 'Custom Tags',
 };
 
-/**
- * Extracts active labels with weights from a category chip list.
- */
 export function extractCategoryLabels(cats, catKey) {
   if (!cats || !cats[catKey]) return [];
   const items = cats[catKey];
@@ -24,13 +21,8 @@ export function extractCategoryLabels(cats, catKey) {
     } else if (item && typeof item === 'object') {
       if (item.enabled === false) continue;
       const lbl = String(item.label || '').trim();
-      const weight = Number(item.weight) || 1.0;
       if (lbl) {
-        if (weight > 1.25) {
-          labels.push(`(${lbl}:${weight.toFixed(1)})`);
-        } else {
-          labels.push(lbl);
-        }
+        labels.push(lbl);
       }
     }
   }

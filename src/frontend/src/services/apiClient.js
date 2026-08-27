@@ -105,12 +105,22 @@ export async function uploadDirectPhoto(file, aspectRatio = null) {
 
 
 /**
- * Uploads 1-5 image files + optional prompt for moodboard analysis (legacy).
+ * Uploads 1-5 image files + optional prompt for moodboard analysis (Step 1A).
+ * Extracts Master Prompt, Narrative, and 9-category visual levers without generating images.
  * @param {File[]} files
  * @param {string} [prompt]
- * @returns {Promise<{moodboard_id: string, extracted_chips: Array, extracted_json: Object}>}
+ * @param {string[]} [lockedCategories]
+ * @param {Object} [existingSchema]
+ * @param {string} [aspectRatio]
+ * @returns {Promise<{moodboard_id: string, master_prompt: string, narrative: string, categories: Object, schema_data: Object}>}
  */
-export async function analyzeMoodboard(files, prompt = '') {
+export async function analyzeMoodboard(
+  files,
+  prompt = '',
+  lockedCategories = null,
+  existingSchema = null,
+  aspectRatio = '1.8:1'
+) {
   const formData = new FormData();
   files.forEach((file) => {
     formData.append('files', file);
@@ -118,13 +128,56 @@ export async function analyzeMoodboard(files, prompt = '') {
   if (prompt && typeof prompt === 'string' && prompt.trim()) {
     formData.append('prompt', prompt.trim());
   }
+  if (lockedCategories && Array.isArray(lockedCategories) && lockedCategories.length > 0) {
+    formData.append('locked_categories', JSON.stringify(lockedCategories));
+  }
+  if (existingSchema && typeof existingSchema === 'object') {
+    formData.append('existing_schema', JSON.stringify(existingSchema));
+  }
+  if (aspectRatio && typeof aspectRatio === 'string') {
+    formData.append('aspect_ratio', aspectRatio);
+  }
 
   const response = await fetch('/api/moodboard/analyze', {
     method: 'POST',
     body: formData,
   });
 
-  return handleApiResponse(response, 'Moodboard analysis failed');
+  return handleApiResponse(response, 'Moodboard vision analysis failed');
+}
+
+/**
+ * Spawns 4 concurrent baseline image candidate generations from customized Master Prompt (Step 1B).
+ * @param {Object} payload { moodboard_id, master_prompt, narrative, categories, aspect_ratio, prompt_override }
+ * @returns {Promise<{moodboard_id: string, baselines: Array}>}
+ */
+export async function generateBaselines(payload) {
+  const response = await fetch('/api/moodboard/generate-baselines', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  return handleApiResponse(response, 'Baseline candidate generation failed');
+}
+
+/**
+ * Re-synthesizes fluid directorial Master Prompt prose from user-updated visual levers on demand.
+ * @param {Object} payload { narrative, categories, previous_master_prompt }
+ * @returns {Promise<{master_prompt: string, narrative: string}>}
+ */
+export async function resyncMasterPrompt(payload) {
+  const response = await fetch('/api/moodboard/resync-prompt', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  return handleApiResponse(response, 'Master prompt re-sync failed');
 }
 
 /**

@@ -8,7 +8,11 @@ from app.schemas.domain import (
     AnalyzeAndBaselinesResponse,
     BaselineSummary,
     DirectPhotoUploadResponse,
+    GenerateBaselinesRequest,
+    GenerateBaselinesResponse,
     MoodboardAnalysisResponse,
+    ResyncMasterPromptRequest,
+    ResyncMasterPromptResponse,
     TagChip,
 )
 from app.utils.error_handler import parse_and_raise_http_error
@@ -155,28 +159,129 @@ async def analyze_and_baselines(
 async def analyze_moodboard(
     files: List[UploadFile] = File(...),
     prompt: Optional[str] = Form(None),
+    locked_categories: Optional[str] = Form(None),
+    locked_sections: Optional[str] = Form(None),
+    existing_categories: Optional[str] = Form(None),
+    existing_schema: Optional[str] = Form(None),
+    existing_narrative: Optional[str] = Form(None),
+    aspect_ratio: Optional[str] = Form("1.8:1"),
 ):
     """
-    Backwards-compatible analysis endpoint.
+    Step 1A: Analyzes 1-5 moodboard files + starting creative prompt ->
+    extracts 9-category visual tags, narrative, and Vision Director's Master Prompt without generating images.
     """
     moodboard_id, image_bytes_list, saved_paths = await _process_and_save_upload_files(
         files, settings.STORAGE_DIR
     )
 
+    raw_locked = locked_categories or locked_sections
+    parsed_locked = None
+    if raw_locked:
+        try:
+            parsed_locked = json.loads(raw_locked) if isinstance(raw_locked, str) else raw_locked
+        except Exception:
+            parsed_locked = None
+
+    raw_existing = existing_categories or existing_schema
+    parsed_existing = None
+    if raw_existing:
+        try:
+            parsed_existing = json.loads(raw_existing) if isinstance(raw_existing, str) else raw_existing
+        except Exception:
+            parsed_existing = None
+
     try:
-        chips = await vision_service.analyze_moodboard(
+        tag_state = await vision_service.extract_tag_studio_state(
             image_bytes_list,
             prompt=prompt,
+            locked_categories=parsed_locked,
+            existing_categories=parsed_existing.get("categories") if isinstance(parsed_existing, dict) and "categories" in parsed_existing else parsed_existing,
+            existing_narrative=existing_narrative or (parsed_existing.get("narrative") if isinstance(parsed_existing, dict) else None),
             image_paths=[os.path.relpath(path) for path in saved_paths],
         )
     except Exception as exc:
-        parse_and_raise_http_error(exc, model_name=settings.VISION_MODEL, context="Moodboard Analysis")
+        parse_and_raise_http_error(exc, model_name=settings.VISION_MODEL, context="Vision Tag & Master Prompt Extraction")
+
+    categories_resp = {}
+    all_chips: List[TagChip] = []
+    for cat_name, chip_list in tag_state.get("categories", {}).items():
+        parsed_chips = [
+            TagChip(**c) if isinstance(c, dict) else c
+            for c in chip_list
+        ]
+        categories_resp[cat_name] = parsed_chips
+        all_chips.extend(parsed_chips)
 
     return MoodboardAnalysisResponse(
         moodboard_id=moodboard_id,
-        extracted_chips=chips,
-        extracted_json=None,
+        master_prompt=tag_state.get("master_prompt"),
+        narrative=tag_state.get("narrative", ""),
+        categories=categories_resp,
+        schema_data=tag_state,
+        extracted_chips=all_chips,
+        extracted_json=tag_state,
     )
+
+
+@router.post("/generate-baselines", response_model=GenerateBaselinesResponse)
+async def generate_baselines(request: GenerateBaselinesRequest):
+    """
+    Step 1B: Generates 4 concurrent baseline image candidates across 4 unique seeds
+    using the customized Master Prompt directly + technical quality suffix.
+    """
+    eff_aspect_ratio = request.aspect_ratio or "1.8:1"
+    state_payload = {
+        "master_prompt": request.master_prompt,
+        "narrative": request.narrative or "",
+        "categories": request.categories or {},
+    }
+
+    try:
+        baselines_raw = await generation_service.generate_4_baselines(
+            moodboard_id=request.moodboard_id,
+            state=state_payload,
+            aspect_ratio=eff_aspect_ratio,
+            prompt_override=request.prompt_override or request.master_prompt,
+        )
+        baselines = [
+            BaselineSummary(
+                id=b["id"],
+                seed=b["seed"],
+                image_url=b["image_url"],
+                created_at=b["created_at"],
+                aspect_ratio=b.get("aspect_ratio", eff_aspect_ratio),
+                resolution=b.get("resolution"),
+                compiled_prompt=b.get("compiled_prompt"),
+            )
+            for b in baselines_raw
+        ]
+    except Exception as exc:
+        parse_and_raise_http_error(exc, model_name=settings.IMAGEN_MODEL, context="Baseline Image Generation")
+
+    return GenerateBaselinesResponse(
+        moodboard_id=request.moodboard_id,
+        baselines=baselines,
+    )
+
+
+@router.post("/resync-prompt", response_model=ResyncMasterPromptResponse)
+async def resync_prompt(request: ResyncMasterPromptRequest):
+    """
+    On-Demand Re-Sync: Calls Gemini Vision/Language model to re-synthesize fluid,
+    high-fashion directorial Master Prompt prose from user-updated visual levers.
+    """
+    try:
+        result = await vision_service.resync_master_prompt(
+            narrative=request.narrative,
+            categories=request.categories,
+            previous_master_prompt=request.previous_master_prompt,
+        )
+        return ResyncMasterPromptResponse(
+            master_prompt=result.get("master_prompt", ""),
+            narrative=result.get("narrative", ""),
+        )
+    except Exception as exc:
+        parse_and_raise_http_error(exc, model_name=settings.VISION_MODEL, context="Master Prompt Re-Sync")
 
 
 @router.post("/upload-direct-photo", response_model=DirectPhotoUploadResponse)

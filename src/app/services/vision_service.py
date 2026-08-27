@@ -9,7 +9,12 @@ from google.genai import types
 from app.schemas.domain import TagChip, TagCategory
 from app.utils.logger import get_logger
 from app.utils.telemetry import TelemetryLogger, get_current_request_id
-from app.utils.prompt_loader import EXTRACTION_SYSTEM_PROMPT, USER_BASELINE_TEMPLATE
+from app.utils.prompt_loader import (
+    EXTRACTION_SYSTEM_PROMPT,
+    USER_BASELINE_TEMPLATE,
+    RESYNC_MASTER_PROMPT_SYSTEM,
+    RESYNC_MASTER_PROMPT_TEMPLATE,
+)
 from app.utils.image_utils import to_image_part
 
 logger = get_logger("vision_service")
@@ -28,34 +33,34 @@ VALID_CATEGORIES = [
 
 DEFAULT_FALLBACK_TAGS: Dict[str, List[Dict[str, Any]]] = {
     TagCategory.SUBJECT_DETAILS.value: [
-        {"label": "striking expressive subject", "weight": 1.0},
-        {"label": "natural authentic pose", "weight": 1.0},
+        {"label": "striking expressive subject"},
+        {"label": "natural authentic pose"},
     ],
     TagCategory.OBJECTS_PROPS.value: [
-        {"label": "curated designer furniture", "weight": 1.0},
+        {"label": "curated designer furniture"},
     ],
     TagCategory.WARDROBE_HAIR.value: [
-        {"label": "tailored contemporary wardrobe", "weight": 1.0},
-        {"label": "styled textured hair", "weight": 1.0},
+        {"label": "tailored contemporary wardrobe"},
+        {"label": "styled textured hair"},
     ],
     TagCategory.ENVIRONMENT.value: [
-        {"label": "architectural spatial setting", "weight": 1.0},
-        {"label": "refined ambient light", "weight": 1.0},
+        {"label": "architectural spatial setting"},
+        {"label": "refined ambient light"},
     ],
     TagCategory.LAYOUT_FRAMING.value: [
-        {"label": "cinematic rule-of-thirds composition", "weight": 1.0},
+        {"label": "cinematic rule-of-thirds composition"},
     ],
     TagCategory.LIGHTING.value: [
-        {"label": "directional soft natural key light", "weight": 1.0},
+        {"label": "directional soft natural key light"},
     ],
     TagCategory.COLOR_PROFILE.value: [
-        {"label": "muted rich editorial palette", "weight": 1.0},
+        {"label": "muted rich editorial palette"},
     ],
     TagCategory.CAMERA_OPTICS.value: [
-        {"label": "85mm prime lens f/1.8 shallow depth", "weight": 1.0},
+        {"label": "85mm prime lens f/1.8 shallow depth"},
     ],
     TagCategory.MOOD_ERA.value: [
-        {"label": "timeless candid vibe", "weight": 1.0},
+        {"label": "timeless candid vibe"},
     ],
 }
 
@@ -203,13 +208,10 @@ class VisionService:
             for idx, tag in enumerate(raw_tags):
                 if isinstance(tag, str):
                     label_str = tag.strip()
-                    weight_val = 1.0
                 elif isinstance(tag, dict):
                     label_str = str(tag.get("label", "")).strip()
-                    weight_val = float(tag.get("weight", 1.0))
                 else:
                     label_str = str(tag).strip()
-                    weight_val = 1.0
 
                 if not label_str:
                     continue
@@ -220,7 +222,6 @@ class VisionService:
                     "label": label_str,
                     "enabled": True,
                     "locked": cat_key in locked_set,
-                    "weight": weight_val,
                     "isCustom": False,
                 })
 
@@ -232,7 +233,6 @@ class VisionService:
                         "label": fb_tag["label"],
                         "enabled": True,
                         "locked": cat_key in locked_set,
-                        "weight": fb_tag.get("weight", 1.0),
                         "isCustom": False,
                     })
 
@@ -289,3 +289,87 @@ class VisionService:
             for tag_dict in cat_tags:
                 all_chips.append(TagChip(**tag_dict))
         return all_chips
+
+    async def resync_master_prompt(
+        self,
+        narrative: Optional[str] = None,
+        categories: Optional[Dict[str, Any]] = None,
+        previous_master_prompt: Optional[str] = None,
+    ) -> Dict[str, str]:
+        """
+        Re-synthesizes the Master Generation Prompt and narrative from updated 9-category visual levers.
+        """
+        request_id = get_current_request_id() or f"resync_{uuid.uuid4().hex}"
+        logger.info(f"Re-syncing Master Generation Prompt using {self.model_name}...")
+
+        clean_cats: Dict[str, List[str]] = {}
+        if categories and isinstance(categories, dict):
+            for cat_key, items in categories.items():
+                chip_list = []
+                if isinstance(items, list):
+                    for item in items:
+                        if isinstance(item, dict):
+                            lbl = str(item.get("label", "")).strip()
+                            if lbl:
+                                chip_list.append(lbl)
+                        elif hasattr(item, "label"):
+                            lbl = str(getattr(item, "label", "")).strip()
+                            if lbl:
+                                chip_list.append(lbl)
+                        elif isinstance(item, str) and item.strip():
+                            chip_list.append(item.strip())
+                clean_cats[cat_key] = chip_list
+
+        cats_json_str = json.dumps(clean_cats, indent=2)
+
+        user_content = (
+            RESYNC_MASTER_PROMPT_TEMPLATE
+            .replace("{CURRENT_NARRATIVE}", narrative.strip() if narrative else "Editorial portrait scene")
+            .replace("{PREVIOUS_MASTER_PROMPT}", previous_master_prompt.strip() if previous_master_prompt else "None")
+            .replace("{UPDATED_CATEGORIES_JSON}", cats_json_str)
+        )
+
+        contents = [
+            types.Content(
+                role="user",
+                parts=[types.Part.from_text(text=user_content)],
+            )
+        ]
+
+        config = types.GenerateContentConfig(
+            system_instruction=RESYNC_MASTER_PROMPT_SYSTEM,
+            response_mime_type="application/json",
+            temperature=0.4,
+        )
+
+        self._audit(
+            "resync_prompt_request",
+            request_id,
+            model=self.model_name,
+            narrative=narrative,
+            categories_count={k: len(v) for k, v in clean_cats.items()},
+        )
+
+        response = await self._generate_content_async(contents=contents, config=config)
+        raw_text = response.text or "{}"
+
+        try:
+            parsed = json.loads(raw_text)
+        except Exception:
+            logger.warning("Failed to parse JSON response for resync_master_prompt, falling back to raw text")
+            parsed = {"master_prompt": raw_text.strip(), "narrative": narrative or ""}
+
+        master_prompt = parsed.get("master_prompt", "").strip() or (previous_master_prompt or "")
+        updated_narrative = parsed.get("narrative", "").strip() or (narrative or "")
+
+        self._audit(
+            "resync_prompt_response",
+            request_id,
+            master_prompt=master_prompt,
+            narrative=updated_narrative,
+        )
+
+        return {
+            "master_prompt": master_prompt,
+            "narrative": updated_narrative,
+        }
