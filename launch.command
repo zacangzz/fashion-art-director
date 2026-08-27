@@ -26,7 +26,7 @@ echo -e "${BOLD}${MAGENTA}======================================================
 # Helper for step status
 print_step() {
     local step_num="$1"
-    local total_steps="8"
+    local total_steps="6"
     local title="$2"
     echo -e "${BOLD}${CYAN}[${step_num}/${total_steps}]${RESET} ${BOLD}${title}${RESET}"
 }
@@ -156,45 +156,36 @@ if ! command -v uv &> /dev/null; then
                 break
             fi
         done
+    else
+        print_error "'curl' is not available. Cannot install uv."
+        print_error "Please install curl or uv manually: https://docs.astral.sh/uv/getting-started/installation/"
+        exit 1
     fi
 fi
 
-if command -v uv &> /dev/null; then
-    UV_VER=$(uv --version 2>/dev/null || echo "uv")
-    print_success "'$UV_VER' detected and ready."
-else
-    print_warning "Could not auto-install uv. Falling back to system python3 environment."
+if ! command -v uv &> /dev/null; then
+    print_error "Failed to install uv. Please install it manually: https://docs.astral.sh/uv/getting-started/installation/"
+    exit 1
 fi
 
-# ------------------------------------------------------------------------------
+UV_VER=$(uv --version 2>/dev/null || echo "uv")
+print_success "'$UV_VER' detected and ready."
+
 # ------------------------------------------------------------------------------
 # STEP 3: Environment Synchronization & Locked Dependencies
 # ------------------------------------------------------------------------------
 print_step "3" "Synchronizing Python Virtual Environment & Locked Dependencies"
 
-if command -v uv &> /dev/null; then
-    print_info "Syncing dependencies strictly from project configuration (pyproject.toml / uv.lock)..."
-    if [ -f "uv.lock" ]; then
-        uv sync --frozen
-    else
-        uv sync
-    fi
-    source .venv/bin/activate
-    PYTHON_EXEC="$(which python)"
-    PYTHON_VER=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')")
-    print_success "Virtual environment synchronized with uv: Python v$PYTHON_VER"
+print_info "Syncing dependencies strictly from project configuration (pyproject.toml / uv.lock)..."
+if [ -f "uv.lock" ]; then
+    uv sync --frozen
 else
-    if [ ! -d ".venv" ]; then
-        print_info "Creating '.venv' via python3 -m venv..."
-        python3 -m venv .venv
-    fi
-    source .venv/bin/activate
-    print_info "Installing package dependencies from pyproject.toml..."
-    pip install -q -e .
-    PYTHON_EXEC="$(which python)"
-    PYTHON_VER=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')")
-    print_success "Virtual environment ready: Python v$PYTHON_VER"
+    uv sync
 fi
+source .venv/bin/activate
+PYTHON_EXEC="$(which python)"
+PYTHON_VER=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')")
+print_success "Virtual environment synchronized with uv: Python v$PYTHON_VER"
 
 # ------------------------------------------------------------------------------
 # STEP 4: Configuration & API Key Setup
@@ -280,19 +271,17 @@ print_info "Imagen Model:   ${BOLD}${IMAGEN_MODEL}${RESET}"
 print_info "Inpaint Model:  ${BOLD}${INPAINT_MODEL}${RESET}"
 
 # ------------------------------------------------------------------------------
-# STEP 5: Storage Directories & Database Check
+# STEP 5: Storage, Frontend Assets & Port Availability
 # ------------------------------------------------------------------------------
-print_step "5" "Checking Local Storage & SQLite Database"
+print_step "5" "Checking Storage, Frontend Assets & Port Availability"
+
+# Storage directories
 mkdir -p "storage/moodboards" "storage/generations" "storage/logs" "storage/wardrobe/items" "storage/wardrobe/sources"
 print_success "Storage directories verified (storage/moodboards, storage/generations, storage/logs, storage/wardrobe)."
 
-# ------------------------------------------------------------------------------
-# STEP 6: Frontend Production Assets Check & Build
-# ------------------------------------------------------------------------------
-print_step "6" "Checking Frontend Studio Assets"
-
-if [ ! -f "src/frontend/dist/index.html" ] || scripts/frontend_needs_build.sh; then
-    if command -v npm &> /dev/null; then
+# Frontend production assets — build fresh if npm available, otherwise use pre-committed dist/
+if command -v npm &> /dev/null; then
+    if [ ! -f "src/frontend/dist/index.html" ] || scripts/frontend_needs_build.sh; then
         print_info "Building frontend production assets with Vite..."
         (
             cd src/frontend
@@ -301,26 +290,27 @@ if [ ! -f "src/frontend/dist/index.html" ] || scripts/frontend_needs_build.sh; t
             fi
             npm run build
         )
-        print_success "Frontend assets successfully compiled into src/frontend/dist."
-    elif [ -f "src/frontend/dist/index.html" ]; then
-        print_success "Using existing pre-built frontend distribution (src/frontend/dist)."
+        print_success "Frontend assets freshly compiled into src/frontend/dist."
     else
-        print_warning "npm not found to compile frontend. Backend will serve interactive API docs and landing page."
+        print_success "Frontend assets up to date (npm available, no source changes detected)."
     fi
 else
-    print_success "Production frontend assets verified and up to date."
+    if [ -f "src/frontend/dist/index.html" ]; then
+        print_success "Using pre-built frontend distribution (src/frontend/dist)."
+    else
+        print_error "No pre-built frontend found at src/frontend/dist/index.html and npm is not installed."
+        print_error "Either install Node.js/npm to build the frontend, or ensure dist/ is committed to the repository."
+        exit 1
+    fi
 fi
 
-# ------------------------------------------------------------------------------
-# STEP 7: Port Availability & Stale Process Cleanup
-# ------------------------------------------------------------------------------
-print_step "7" "Checking Port Availability & Cleaning Stale Processes (Port $PORT)"
+# Port availability & stale process cleanup
 kill_stale_processes "$PORT"
 
 # ------------------------------------------------------------------------------
-# STEP 8: Launch Backend Server & Open Browser
+# STEP 6: Launch Backend Server & Open Browser
 # ------------------------------------------------------------------------------
-print_step "8" "Starting Studio Server & Opening Browser"
+print_step "6" "Starting Studio Server & Opening Browser"
 print_info "Starting Uvicorn ASGI server on http://${HOST}:${PORT}..."
 
 # Start uvicorn in background

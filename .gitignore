@@ -13,5 +13,4 @@ storage/
 !storage/generations/
 !storage/logs/
 !storage/**/.gitkeep
-src/frontend/dist/
 src/frontend/node_modules/
