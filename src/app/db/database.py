@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS generations (
     resolution_width INTEGER NOT NULL DEFAULT 1440,
     resolution_height INTEGER NOT NULL DEFAULT 1440,
     conversation_id TEXT NULL,
+    model_name TEXT NULL,
     FOREIGN KEY(parent_id) REFERENCES generations(id),
     FOREIGN KEY(moodboard_id) REFERENCES moodboards(id)
 );
@@ -106,6 +107,9 @@ class DatabaseManager:
                 if "aspect_ratio" not in columns:
                     logger.info("Migrating DB: adding column 'aspect_ratio'")
                     await db.execute("ALTER TABLE generations ADD COLUMN aspect_ratio TEXT DEFAULT '2:3'")
+                if "model_name" not in columns:
+                    logger.info("Migrating DB: adding column 'model_name'")
+                    await db.execute("ALTER TABLE generations ADD COLUMN model_name TEXT")
 
             # Cache current table columns for rapid future insertions
             async with db.execute("PRAGMA table_info(generations)") as cursor:
@@ -163,6 +167,11 @@ class DatabaseManager:
             data["compiled_prompt"] = data.get("prompt", "")
         data["prompt"] = data["compiled_prompt"]
 
+        # Ensure model_name is set
+        if not data.get("model_name"):
+            if isinstance(data.get("schema_json"), dict):
+                data["model_name"] = data["schema_json"].get("imagen_model") or data["schema_json"].get("model_name")
+
         # Ensure is_baseline is bool
         data["is_baseline"] = bool(data.get("is_baseline", False))
         return data
@@ -187,6 +196,9 @@ class DatabaseManager:
             schema_val = _safe_serialize(schema_val)
 
         compiled_prompt = gen_data.get("compiled_prompt") or gen_data.get("prompt", "")
+        model_name = gen_data.get("model_name")
+        if not model_name and isinstance(gen_data.get("schema_json"), dict):
+            model_name = gen_data["schema_json"].get("imagen_model") or gen_data["schema_json"].get("model_name")
 
         async with aiosqlite.connect(self.db_path) as db:
             if self._table_columns_cache is None:
@@ -208,6 +220,7 @@ class DatabaseManager:
                 "resolution_width": gen_data.get("resolution_width", 3840),
                 "resolution_height": gen_data.get("resolution_height", 3840),
                 "conversation_id": gen_data.get("conversation_id"),
+                "model_name": model_name,
             }
 
             # Map schema & prompt to both modern and legacy column names if present

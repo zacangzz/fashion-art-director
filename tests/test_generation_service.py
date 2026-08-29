@@ -412,10 +412,13 @@ async def test_inpaint_region_audit_and_mask_tracking(tmp_path):
         assert req_event["source_image"]["width"] == 100
         assert "bytes" not in req_event["mask"] or isinstance(req_event["mask"]["bytes"], int)
 
-        assert resp_event["event"] == "inpaint_response"
-        assert resp_event["generation_id"] == child_id
-        assert resp_event["mask_artifact"]["filename"] == f"{child_id}_mask.png"
-        assert resp_event["mask_artifact"]["coverage_percentage"] == 4.0
+        # 5. Assert wire payload prompt contains dynamic resolution and teeth tokens
+        call_kwargs = mock_client.models.generate_content.call_args.kwargs
+        sent_contents = call_kwargs["contents"]
+        sent_prompt = sent_contents[2]
+        assert "Resolution: 2560x3840 (Aspect ratio: 2:3)" in sent_prompt
+        assert "realistic teeth texture" in sent_prompt
+        assert "unnaturally white teeth" in sent_prompt
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,7 @@
 import os
 import io
 import uuid
+import base64
 import random
 import asyncio
 import hashlib
@@ -24,7 +25,11 @@ from app.utils.prompt_loader import (
     REFINEMENT_SYSTEM_PROMPT,
     WARDROBE_COMPOSITION_SYSTEM_PROMPT,
 )
-from app.utils.image_utils import to_image_part
+from app.utils.image_utils import (
+    to_image_part,
+    normalize_interaction_aspect_ratio,
+    to_interaction_image_input,
+)
 
 
 logger = get_logger("generation_service")
@@ -267,7 +272,9 @@ def compile_delta_prompt(
 
     sections = [
         "Visual Reference Foundation: Use the reference image as the structural, character, and stylistic anchor. "
-        "Maintain raw photo fidelity, 1:1 original source sharpness, visible skin pores, natural skin texture, stray hairs, minor skin blemishes, fine film grain, natural light, and natural micro-contrast. "
+        "Maintain raw photo fidelity, 1:1 original source sharpness, visible skin pores, natural skin texture, "
+        "realistic teeth texture, natural tooth alignment, authentic gum line, subtle dental translucency, "
+        "minor skin blemishes, natural light, and natural micro-contrast. "
         "Apply the requested modifications below seamlessly, allowing all naturally interconnected visual elements—including lighting falloff, cast shadows, color bounce, material reactions, and environmental reflections—to adjust organically for realistic visual cohesion without waxy smoothing, artificial plastic finish, or compression degradation."
     ]
 
@@ -481,26 +488,42 @@ class GenerationService:
         aspect_ratio: str,
     ) -> tuple[int, int]:
         """
-        Ensures consistent 4K master output resolution across all generation endpoints.
-        Scales up using Lanczos resampling if needed, embeds 600 DPI, and saves as PNG.
+        Saves the direct API-generated 4K image without backend scaling or digital resampling adjustments.
+        Reads native dimensions directly from PIL Image and persists the raw image bytes to disk.
         """
-        target_res = ASPECT_RATIO_RESOLUTIONS.get(aspect_ratio, (3840, 3840))
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
         try:
             pil_img = Image.open(io.BytesIO(image_bytes))
-            if pil_img.mode not in ("RGB", "RGBA"):
-                pil_img = pil_img.convert("RGB")
-            curr_w, curr_h = pil_img.size
-            if curr_w < target_res[0] or curr_h < target_res[1]:
-                logger.info(f"Upscaling generated image from {curr_w}x{curr_h} to 4K target {target_res[0]}x{target_res[1]}")
-                pil_img = pil_img.resize(target_res, Image.Resampling.LANCZOS)
-            pil_img.save(filepath, format="PNG", dpi=(600, 600))
-            return pil_img.size
-        except Exception as err:
-            logger.warning(f"Error processing 4K image with PIL, saving raw bytes: {err}")
+            actual_w, actual_h = pil_img.size
             with open(filepath, "wb") as f:
                 f.write(image_bytes)
-            return target_res
+            logger.info(
+                f"Saved direct 4K output image to {filepath} "
+                f"(native resolution: {actual_w}x{actual_h}, size: {len(image_bytes)} bytes)"
+            )
+            return (actual_w, actual_h)
+        except Exception as err:
+            logger.warning(f"Error reading image dimensions with PIL, saving raw bytes: {err}")
+            with open(filepath, "wb") as f:
+                f.write(image_bytes)
+            return (0, 0)
+
+    async def _execute_with_retry(self, func, *args, max_retries: int = 3, **kwargs) -> Any:
+        last_err = None
+        for attempt in range(max_retries):
+            try:
+                return await asyncio.to_thread(func, *args, **kwargs)
+            except Exception as err:
+                err_str = str(err).lower()
+                last_err = err
+                is_transient = any(code in err_str for code in ["503", "504", "429", "deadline", "unavailable", "resource_exhausted", "timeout"])
+                if is_transient and attempt < max_retries - 1:
+                    backoff = (2 ** attempt) + random.uniform(0.5, 1.5)
+                    logger.warning(f"Transient GenAI network/service error on attempt {attempt+1}/{max_retries}: {err}. Retrying in {backoff:.1f}s...")
+                    await asyncio.sleep(backoff)
+                else:
+                    raise
+        raise last_err
 
     async def _call_image_model(
         self,
@@ -511,60 +534,87 @@ class GenerationService:
         reference_image_bytes: Optional[bytes] = None,
         audit_request_id: Optional[str] = None,
         reference_image_path: Optional[str] = None,
+        model_name: Optional[str] = None,
+        temperature: Optional[float] = None,
     ) -> bytes:
         """
-        Invokes Gemini or Imagen model to generate image bytes.
+        Invokes Google GenAI Interactions API with image_size='4K' to generate image bytes directly.
         """
-        logger.info(f"Calling image model '{self.model_name}' (seed={seed}, aspect={aspect_ratio}, has_reference={bool(reference_image_bytes)})")
+        active_model = model_name or self.model_name
+        norm_aspect = normalize_interaction_aspect_ratio(aspect_ratio)
+        logger.info(
+            f"Calling image model '{active_model}' via Interactions API "
+            f"(seed={seed}, aspect={aspect_ratio} -> {norm_aspect}, image_size='4K', temp={temperature}, has_reference={bool(reference_image_bytes)})"
+        )
 
         started = time.perf_counter()
-        if "imagen" in self.model_name.lower():
+        if "imagen" in active_model.lower():
             config = types.GenerateImagesConfig(
                 number_of_images=1,
                 output_mime_type="image/png",
-                aspect_ratio=aspect_ratio if aspect_ratio in ["1:1", "3:4", "4:3", "9:16", "16:9"] else "1:1",
+                aspect_ratio=norm_aspect if norm_aspect in ["1:1", "3:4", "4:3", "9:16", "16:9"] else "1:1",
                 negative_prompt=negative_prompt if negative_prompt else None,
             )
             if audit_request_id:
-                self._audit("image_model_request", audit_request_id, final_prompt=prompt, config={
-                    "model": self.model_name, "seed": seed, "aspect_ratio": aspect_ratio,
-                    "negative_prompt": negative_prompt,
-                }, reference_image=None)
+                self._audit(
+                    "image_model_request",
+                    audit_request_id,
+                    final_prompt=prompt,
+                    config={
+                        "model": active_model,
+                        "seed": seed,
+                        "aspect_ratio": norm_aspect,
+                        "negative_prompt": negative_prompt,
+                        "temperature": temperature,
+                    },
+                    reference_image=None,
+                )
             try:
-                response = await asyncio.to_thread(
+                response = await self._execute_with_retry(
                     self.client.models.generate_images,
-                    model=self.model_name,
+                    model=active_model,
                     prompt=prompt,
                     config=config,
                 )
             except Exception as model_err:
                 if audit_request_id:
-                    self._audit("image_model_error", audit_request_id, error=repr(model_err))
+                    self._audit("image_model_error", audit_request_id, model=active_model, error=repr(model_err))
                 raise
             if response.generated_images:
                 image_bytes = response.generated_images[0].image.image_bytes
                 logger.info(f"Received image bytes from Imagen model ({len(image_bytes)} bytes)")
                 if audit_request_id:
-                    self._audit("image_model_response", audit_request_id,
+                    self._audit(
+                        "image_model_response",
+                        audit_request_id,
+                        model=active_model,
                         response_metadata=response.model_dump() if callable(getattr(response, "model_dump", None)) else None,
                         output={"sha256": hashlib.sha256(image_bytes).hexdigest(), "bytes": len(image_bytes)},
-                        duration_ms=round((time.perf_counter() - started) * 1000, 1))
+                        duration_ms=round((time.perf_counter() - started) * 1000, 1),
+                    )
                 return image_bytes
         else:
-            # Modern multimodal generation call (e.g. gemini-3.1-flash-lite-image)
-            contents = []
+            # Modern Google GenAI Interactions API with native 4K output
+            input_items = []
             if reference_image_bytes:
-                contents.append(to_image_part(reference_image_bytes))
+                input_items.append(to_interaction_image_input(reference_image_bytes, optimize=True))
 
             res_tuple = ASPECT_RATIO_RESOLUTIONS.get(aspect_ratio or "2:3", (2560, 3840))
             res_str = f"{res_tuple[0]}x{res_tuple[1]}"
             suffix = IMAGE_GENERATION_SUFFIX.format(
                 RESOLUTION=res_str,
-                ASPECT_RATIO=aspect_ratio or "unspecified",
+                ASPECT_RATIO=aspect_ratio or norm_aspect,
                 SEED=seed if seed is not None else "unspecified",
                 NEGATIVE_PROMPT=negative_prompt or DEFAULT_NEGATIVE_PROMPT,
             )
             full_prompt = f"{prompt.rstrip()} {suffix.strip()}"
+            input_items.append({"type": "text", "text": full_prompt})
+
+            response_format = {
+                "type": "image",
+                "aspect_ratio": norm_aspect,
+                "image_size": "4K",
+            }
 
             if audit_request_id:
                 reference = None
@@ -574,37 +624,93 @@ class GenerationService:
                         "sha256": hashlib.sha256(reference_image_bytes).hexdigest(),
                         "bytes": len(reference_image_bytes),
                     }
-                self._audit("image_model_request", audit_request_id,
+                self._audit(
+                    "image_model_request",
+                    audit_request_id,
                     final_prompt=full_prompt,
-                    config={"model": self.model_name, "seed": seed, "aspect_ratio": aspect_ratio,
-                            "resolution": res_str, "negative_prompt": negative_prompt},
-                    reference_image=reference)
-
-            contents.append(full_prompt)
-
-            try:
-                response = await asyncio.to_thread(
-                    self.client.models.generate_content,
-                    model=self.model_name,
-                    contents=contents,
+                    config={
+                        "model": active_model,
+                        "seed": seed,
+                        "aspect_ratio": norm_aspect,
+                        "image_size": "4K",
+                        "resolution": res_str,
+                        "negative_prompt": negative_prompt,
+                        "temperature": temperature,
+                    },
+                    reference_image=reference,
                 )
-            except Exception as model_err:
-                if audit_request_id:
-                    self._audit("image_model_error", audit_request_id, error=repr(model_err))
-                raise
 
-            if response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
-                for part in response.candidates[0].content.parts:
-                    if getattr(part, "inline_data", None) and part.inline_data.data:
-                        logger.info(f"Received inline image bytes from Gemini model ({len(part.inline_data.data)} bytes)")
-                        if audit_request_id:
-                            self._audit("image_model_response", audit_request_id,
-                                response_metadata=response.model_dump() if callable(getattr(response, "model_dump", None)) else None,
-                                output={"sha256": hashlib.sha256(part.inline_data.data).hexdigest(), "bytes": len(part.inline_data.data)},
-                                duration_ms=round((time.perf_counter() - started) * 1000, 1))
-                        return part.inline_data.data
+            kwargs: Dict[str, Any] = {
+                "model": active_model,
+                "input": input_items if len(input_items) > 1 else full_prompt,
+                "response_format": response_format,
+            }
+            if temperature is not None:
+                kwargs["generation_config"] = {"temperature": float(temperature)}
 
-        raise RuntimeError(f"No image bytes returned from Google GenAI API for model {self.model_name}.")
+            # Attempt Interactions API first; fallback to generate_content if interactions endpoint is unavailable
+            try:
+                interaction = await self._execute_with_retry(
+                    self.client.interactions.create,
+                    **kwargs,
+                )
+                image_bytes = None
+                if getattr(interaction, "output_image", None) and interaction.output_image and getattr(interaction.output_image, "data", None):
+                    image_bytes = base64.b64decode(interaction.output_image.data)
+                elif hasattr(interaction, "steps"):
+                    for step in getattr(interaction, "steps", []):
+                        if getattr(step, "type", None) == "model_output":
+                            for block in getattr(step, "content", []):
+                                if getattr(block, "type", None) == "image" and getattr(block, "data", None):
+                                    image_bytes = base64.b64decode(block.data)
+                                    break
+                        if image_bytes:
+                            break
+
+                if image_bytes:
+                    logger.info(f"Received direct 4K image bytes from Gemini Interactions API ({len(image_bytes)} bytes)")
+                    if audit_request_id:
+                        self._audit(
+                            "image_model_response",
+                            audit_request_id,
+                            model=active_model,
+                            output={"sha256": hashlib.sha256(image_bytes).hexdigest(), "bytes": len(image_bytes)},
+                            duration_ms=round((time.perf_counter() - started) * 1000, 1),
+                        )
+                    return image_bytes
+            except Exception as interaction_err:
+                logger.warning(f"Interactions API call encountered: {interaction_err}. Trying generate_content fallback...")
+                # Fallback to generate_content
+                contents = []
+                if reference_image_bytes:
+                    contents.append(to_image_part(reference_image_bytes, optimize=True))
+                contents.append(full_prompt)
+                gen_config = None
+                if temperature is not None:
+                    gen_config = types.GenerateContentConfig(temperature=float(temperature))
+
+                try:
+                    response = await self._execute_with_retry(
+                        self.client.models.generate_content,
+                        model=active_model,
+                        contents=contents,
+                        config=gen_config,
+                    ) if gen_config else await self._execute_with_retry(
+                        self.client.models.generate_content,
+                        model=active_model,
+                        contents=contents,
+                    )
+                    if response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
+                        for part in response.candidates[0].content.parts:
+                            if getattr(part, "inline_data", None) and part.inline_data.data:
+                                logger.info(f"Received inline image bytes from fallback Gemini model ({len(part.inline_data.data)} bytes)")
+                                return part.inline_data.data
+                except Exception as fallback_err:
+                    if audit_request_id:
+                        self._audit("image_model_error", audit_request_id, model=active_model, error=repr(fallback_err))
+                    raise fallback_err
+
+        raise RuntimeError(f"No image bytes returned from Google GenAI API for model {active_model}.")
 
     async def _call_multi_image_model(
         self,
@@ -613,52 +719,149 @@ class GenerationService:
         aspect_ratio: str = "2:3",
         negative_prompt: str = "",
         audit_request_id: Optional[str] = None,
+        model_name: Optional[str] = None,
+        temperature: Optional[float] = None,
     ) -> bytes:
         """
-        Invokes Gemini multimodal generation with multiple image parts + structured text.
+        Invokes Gemini multimodal generation with multiple image parts + structured text using Interactions API.
         """
-        logger.info(f"Calling multi-image model '{self.model_name}' (seed={seed}, aspect={aspect_ratio}, parts_count={len(contents)})")
+        active_model = model_name or self.model_name
+        norm_aspect = normalize_interaction_aspect_ratio(aspect_ratio)
+        logger.info(
+            f"Calling multi-image model '{active_model}' via Interactions API "
+            f"(seed={seed}, aspect={aspect_ratio} -> {norm_aspect}, image_size='4K', temp={temperature}, parts_count={len(contents)})"
+        )
         started = time.perf_counter()
 
         res_tuple = ASPECT_RATIO_RESOLUTIONS.get(aspect_ratio or "2:3", (2560, 3840))
         res_str = f"{res_tuple[0]}x{res_tuple[1]}"
         suffix = IMAGE_GENERATION_SUFFIX.format(
             RESOLUTION=res_str,
-            ASPECT_RATIO=aspect_ratio or "unspecified",
+            ASPECT_RATIO=aspect_ratio or norm_aspect,
             SEED=seed if seed is not None else "unspecified",
             NEGATIVE_PROMPT=negative_prompt or DEFAULT_NEGATIVE_PROMPT,
         )
-        contents.append(suffix.strip())
+
+        input_items = []
+        for item in contents:
+            if isinstance(item, str):
+                if item.strip():
+                    input_items.append({"type": "text", "text": item})
+            elif isinstance(item, bytes):
+                input_items.append(to_interaction_image_input(item, optimize=True))
+            elif isinstance(item, dict) and item.get("type"):
+                input_items.append(item)
+            elif hasattr(item, "inline_data") and getattr(item, "inline_data", None):
+                raw_d = item.inline_data.data
+                mime_t = getattr(item.inline_data, "mime_type", "image/png")
+                input_items.append({
+                    "type": "image",
+                    "data": base64.b64encode(raw_d).decode("utf-8") if isinstance(raw_d, bytes) else str(raw_d),
+                    "mime_type": mime_t,
+                })
+            elif hasattr(item, "as_image") and callable(item.as_image):
+                try:
+                    pil_conv = item.as_image()
+                    buf = io.BytesIO()
+                    pil_conv.save(buf, format="PNG")
+                    input_items.append({
+                        "type": "image",
+                        "data": base64.b64encode(buf.getvalue()).decode("utf-8"),
+                        "mime_type": "image/png",
+                    })
+                except Exception:
+                    pass
+
+        input_items.append({"type": "text", "text": suffix.strip()})
 
         if audit_request_id:
-            self._audit("multi_image_model_request", audit_request_id,
-                parts_count=len(contents),
-                config={"model": self.model_name, "seed": seed, "aspect_ratio": aspect_ratio,
-                        "negative_prompt": negative_prompt})
+            self._audit(
+                "multi_image_model_request",
+                audit_request_id,
+                parts_count=len(input_items),
+                config={
+                    "model": active_model,
+                    "seed": seed,
+                    "aspect_ratio": norm_aspect,
+                    "image_size": "4K",
+                    "negative_prompt": negative_prompt,
+                    "temperature": temperature,
+                },
+            )
+
+        response_format = {
+            "type": "image",
+            "aspect_ratio": norm_aspect,
+            "image_size": "4K",
+        }
+
+        kwargs: Dict[str, Any] = {
+            "model": active_model,
+            "input": input_items,
+            "response_format": response_format,
+        }
+        if temperature is not None:
+            kwargs["generation_config"] = {"temperature": float(temperature)}
 
         try:
-            response = await asyncio.to_thread(
-                self.client.models.generate_content,
-                model=self.model_name,
-                contents=contents,
+            interaction = await self._execute_with_retry(
+                self.client.interactions.create,
+                **kwargs,
             )
-        except Exception as model_err:
-            if audit_request_id:
-                self._audit("multi_image_model_error", audit_request_id, error=repr(model_err))
-            raise
+            image_bytes = None
+            if getattr(interaction, "output_image", None) and interaction.output_image and getattr(interaction.output_image, "data", None):
+                image_bytes = base64.b64decode(interaction.output_image.data)
+            elif hasattr(interaction, "steps"):
+                for step in getattr(interaction, "steps", []):
+                    if getattr(step, "type", None) == "model_output":
+                        for block in getattr(step, "content", []):
+                            if getattr(block, "type", None) == "image" and getattr(block, "data", None):
+                                image_bytes = base64.b64decode(block.data)
+                                break
+                    if image_bytes:
+                        break
 
-        if response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
-            for part in response.candidates[0].content.parts:
-                if getattr(part, "inline_data", None) and part.inline_data.data:
-                    logger.info(f"Received inline image bytes from Gemini multi-image model ({len(part.inline_data.data)} bytes)")
-                    if audit_request_id:
-                        self._audit("multi_image_model_response", audit_request_id,
-                            response_metadata=response.model_dump() if callable(getattr(response, "model_dump", None)) else None,
-                            output={"sha256": hashlib.sha256(part.inline_data.data).hexdigest(), "bytes": len(part.inline_data.data)},
-                            duration_ms=round((time.perf_counter() - started) * 1000, 1))
-                    return part.inline_data.data
+            if image_bytes:
+                logger.info(f"Received direct 4K image bytes from Gemini multi-image Interactions API ({len(image_bytes)} bytes)")
+                if audit_request_id:
+                    self._audit(
+                        "multi_image_model_response",
+                        audit_request_id,
+                        model=active_model,
+                        output={"sha256": hashlib.sha256(image_bytes).hexdigest(), "bytes": len(image_bytes)},
+                        duration_ms=round((time.perf_counter() - started) * 1000, 1),
+                    )
+                return image_bytes
+        except Exception as interaction_err:
+            logger.warning(f"Multi-image Interactions API call encountered: {interaction_err}. Trying generate_content fallback...")
+            fallback_contents = list(contents) + [suffix.strip()]
+            gen_config = None
+            if temperature is not None:
+                gen_config = types.GenerateContentConfig(temperature=float(temperature))
 
-        raise RuntimeError(f"No image bytes returned from Google GenAI API for model {self.model_name}.")
+            try:
+                response = await self._execute_with_retry(
+                    self.client.models.generate_content,
+                    model=active_model,
+                    contents=fallback_contents,
+                    config=gen_config,
+                ) if gen_config else await self._execute_with_retry(
+                    self.client.models.generate_content,
+                    model=active_model,
+                    contents=fallback_contents,
+                )
+                if response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
+                    for part in response.candidates[0].content.parts:
+                        if getattr(part, "inline_data", None) and part.inline_data.data:
+                            logger.info(f"Received inline image bytes from Gemini multi-image fallback model ({len(part.inline_data.data)} bytes)")
+                            return part.inline_data.data
+            except Exception as fallback_err:
+                if audit_request_id:
+                    self._audit("multi_image_model_error", audit_request_id, model=active_model, error=repr(fallback_err))
+                raise fallback_err
+
+        raise RuntimeError(f"No image bytes returned from Google GenAI API for model {active_model}.")
+
 
     async def generate_single_baseline(
         self,
@@ -668,14 +871,17 @@ class GenerationService:
         negative_prompt: str,
         seed: int,
         aspect_ratio: str = "2:3",
+        imagen_model: Optional[str] = None,
+        temperature: Optional[float] = 1.0,
     ) -> Dict[str, Any]:
         """
         Generates and saves a single baseline image.
         """
+        active_model = imagen_model or self.model_name
         gen_id = f"gen_base_{uuid.uuid4().hex[:8]}"
         created_at = datetime.now(timezone.utc).isoformat()
         req_id = f"baseline_single_{uuid.uuid4().hex[:10]}"
-        logger.info(f"Generating baseline candidate {gen_id} (seed={seed})...")
+        logger.info(f"Generating baseline candidate {gen_id} (seed={seed}, temp={temperature}, model='{active_model}')...")
 
         started = time.perf_counter()
         self._audit(
@@ -686,7 +892,8 @@ class GenerationService:
             aspect_ratio=aspect_ratio,
             positive_prompt=positive_prompt,
             negative_prompt=negative_prompt,
-            model=self.model_name,
+            temperature=temperature,
+            model=active_model,
         )
 
         try:
@@ -696,6 +903,8 @@ class GenerationService:
                 seed=seed,
                 aspect_ratio=aspect_ratio,
                 audit_request_id=req_id,
+                model_name=active_model,
+                temperature=temperature,
             )
         except Exception as err:
             self._audit(
@@ -703,6 +912,7 @@ class GenerationService:
                 req_id,
                 moodboard_id=moodboard_id,
                 seed=seed,
+                model=active_model,
                 error=str(err),
             )
             raise
@@ -725,13 +935,18 @@ class GenerationService:
         )
         full_baseline_prompt = f"{positive_prompt.rstrip()} {suffix_str.strip()}"
 
+        schema_payload = dict(state_dict) if isinstance(state_dict, dict) else {}
+        schema_payload["imagen_model"] = active_model
+        schema_payload["model_name"] = active_model
+        schema_payload["temperature"] = temperature
+
         record = {
             "id": gen_id,
             "parent_id": None,
             "moodboard_id": moodboard_id,
             "is_baseline": True,
             "created_at": created_at,
-            "schema_json": state_dict,
+            "schema_json": schema_payload,
             "compiled_prompt": full_baseline_prompt,
             "negative_prompt": negative_prompt,
             "seed": seed,
@@ -739,6 +954,7 @@ class GenerationService:
             "aspect_ratio": aspect_ratio,
             "resolution_width": width,
             "resolution_height": height,
+            "model_name": active_model,
         }
         await self.db.create_generation(record)
         self._audit(
@@ -747,6 +963,7 @@ class GenerationService:
             generation_id=gen_id,
             moodboard_id=moodboard_id,
             seed=seed,
+            model=active_model,
             duration_ms=duration_ms,
             output={"sha256": hashlib.sha256(image_bytes).hexdigest(), "bytes": len(image_bytes), "filename": filename},
         )
@@ -760,6 +977,7 @@ class GenerationService:
             "aspect_ratio": aspect_ratio,
             "resolution": {"width": width, "height": height},
             "compiled_prompt": full_baseline_prompt,
+            "temperature": temperature,
         }
 
     async def register_uploaded_photo(
@@ -851,12 +1069,15 @@ class GenerationService:
         state: Union[Dict[str, Any], SceneSchema],
         aspect_ratio: str = "2:3",
         prompt_override: Optional[str] = None,
+        imagen_model: Optional[str] = None,
+        temperature: Optional[float] = 1.0,
     ) -> List[Dict[str, Any]]:
         """
         Spawns 4 concurrent baseline generation tasks across 4 unique seeds.
         Uses the Vision Director's master_prompt directly (or prompt_override),
         only appending the technical quality suffix.
         """
+        active_model = imagen_model or self.model_name
         state_dict = state.model_dump() if isinstance(state, SceneSchema) else (state or {})
         narrative = state_dict.get("narrative", "")
         categories = state_dict.get("categories", {})
@@ -874,7 +1095,7 @@ class GenerationService:
         # Generate 4 distinct seeds
         seeds = random.sample(range(100000, 9999999), 4)
         req_id = f"baseline_batch_{uuid.uuid4().hex[:10]}"
-        logger.info(f"Spawning 4 concurrent baseline tasks for moodboard '{moodboard_id}' across seeds: {seeds}")
+        logger.info(f"Spawning 4 concurrent baseline tasks for moodboard '{moodboard_id}' across seeds {seeds} using image model '{active_model}' (temp={temperature})")
 
         started = time.perf_counter()
         self._audit(
@@ -884,8 +1105,9 @@ class GenerationService:
             seeds=seeds,
             aspect_ratio=aspect_ratio,
             compiled_prompt=compiled_prompt,
+            temperature=temperature,
             categories_count={k: len(v) if isinstance(v, list) else 0 for k, v in categories.items()} if isinstance(categories, dict) else {},
-            model=self.model_name,
+            model=active_model,
         )
 
         tasks = [
@@ -896,6 +1118,8 @@ class GenerationService:
                 negative_prompt=neg_prompt,
                 seed=seed,
                 aspect_ratio=aspect_ratio,
+                imagen_model=active_model,
+                temperature=temperature,
             )
             for seed in seeds
         ]
@@ -908,6 +1132,7 @@ class GenerationService:
                 req_id,
                 moodboard_id=moodboard_id,
                 seeds=seeds,
+                model=active_model,
                 error=str(err),
             )
             raise
@@ -918,6 +1143,7 @@ class GenerationService:
             req_id,
             moodboard_id=moodboard_id,
             seeds=seeds,
+            model=active_model,
             generation_ids=[r["id"] for r in results],
             duration_ms=batch_duration_ms,
         )
@@ -938,11 +1164,13 @@ class GenerationService:
         use_image_reference: bool = True,
         aspect_ratio: str = "2:3",
         negative_prompt: Optional[str] = None,
+        imagen_model: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Re-generates with seed locking and parent baseline image conditioning using the Prompt Compiler.
         """
-        logger.info(f"Fine-tuning generation from parent '{parent_id}' with locked seed #{seed} (use_image_reference={use_image_reference})")
+        active_model = imagen_model or self.model_name
+        logger.info(f"Fine-tuning generation from parent '{parent_id}' with locked seed #{seed} using model '{active_model}' (use_image_reference={use_image_reference})")
 
         state_dict = {}
         if state is not None:
@@ -987,7 +1215,7 @@ class GenerationService:
             parent_id=parent_id, narrative=eff_narrative, compiled_prompt=compiled_prompt,
             seed=seed, use_image_reference=use_image_reference,
             aspect_ratio=aspect_ratio, negative_prompt=final_neg_prompt,
-            model=self.model_name)
+            model=active_model)
 
         parent_bytes = None
         if use_image_reference and parent_record and parent_record.get("master_image_path"):
@@ -1009,8 +1237,8 @@ class GenerationService:
             reference_image_bytes=parent_bytes,
             audit_request_id=request_id,
             reference_image_path=parent_record.get("master_image_path") if parent_bytes and parent_record else None,
+            model_name=active_model,
         )
-
 
         gen_dir = os.path.join(self.storage_dir, "generations")
         os.makedirs(gen_dir, exist_ok=True)
@@ -1022,6 +1250,8 @@ class GenerationService:
         record_state = {
             "narrative": eff_narrative,
             "categories": eff_categories,
+            "imagen_model": active_model,
+            "model_name": active_model,
         }
 
         record = {
@@ -1038,12 +1268,14 @@ class GenerationService:
             "aspect_ratio": aspect_ratio,
             "resolution_width": width,
             "resolution_height": height,
+            "model_name": active_model,
         }
         await self.db.create_generation(record)
         self._audit("fine_tune_response", request_id,
             generation_id=child_id, parent_id=parent_id,
             output_path=filepath, compiled_prompt=compiled_prompt,
-            seed=seed, aspect_ratio=aspect_ratio, negative_prompt=final_neg_prompt)
+            seed=seed, aspect_ratio=aspect_ratio, negative_prompt=final_neg_prompt,
+            model=active_model)
         logger.info(f"Fine-tuned iteration {child_id} created successfully.")
 
         return {
@@ -1066,12 +1298,14 @@ class GenerationService:
         aspect_ratio: str = "2:3",
         negative_prompt: Optional[str] = None,
         conversation_id: Optional[str] = None,
+        imagen_model: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Conversation-based refinement: sends reference image + free-text instruction
         to the image model with seed locking. Each result is linked to a conversation thread.
         """
-        logger.info(f"Refinement generation from parent '{parent_id}' with seed #{seed} (conversation={conversation_id})")
+        active_model = imagen_model or self.model_name
+        logger.info(f"Refinement generation from parent '{parent_id}' with seed #{seed} using model '{active_model}' (conversation={conversation_id})")
 
         parent_record = await self.db.get_generation(parent_id) if parent_id else None
         moodboard_id = parent_record.get("moodboard_id") if parent_record else None
@@ -1084,7 +1318,7 @@ class GenerationService:
         self._audit("refinement_request", request_id,
             parent_id=parent_id, user_prompt=prompt, compiled_prompt=compiled_prompt,
             seed=seed, aspect_ratio=aspect_ratio, negative_prompt=final_neg_prompt,
-            conversation_id=conversation_id, model=self.model_name)
+            conversation_id=conversation_id, model=active_model)
 
         # Load parent image for reference conditioning
         parent_bytes = None
@@ -1108,6 +1342,7 @@ class GenerationService:
             reference_image_bytes=parent_bytes,
             audit_request_id=request_id,
             reference_image_path=parent_record.get("master_image_path") if parent_bytes and parent_record else None,
+            model_name=active_model,
         )
 
         gen_dir = os.path.join(self.storage_dir, "generations")
@@ -1123,7 +1358,7 @@ class GenerationService:
             "moodboard_id": moodboard_id,
             "is_baseline": False,
             "created_at": created_at,
-            "schema_json": {"refinement_prompt": prompt, "conversation_id": conversation_id},
+            "schema_json": {"refinement_prompt": prompt, "conversation_id": conversation_id, "imagen_model": active_model, "model_name": active_model},
             "compiled_prompt": compiled_prompt,
             "negative_prompt": final_neg_prompt,
             "seed": seed,
@@ -1132,12 +1367,14 @@ class GenerationService:
             "resolution_width": width,
             "resolution_height": height,
             "conversation_id": conversation_id,
+            "model_name": active_model,
         }
         await self.db.create_generation(record)
         self._audit("refinement_response", request_id,
             generation_id=child_id, parent_id=parent_id,
             output_path=filepath, compiled_prompt=compiled_prompt,
-            seed=seed, aspect_ratio=aspect_ratio, conversation_id=conversation_id)
+            seed=seed, aspect_ratio=aspect_ratio, conversation_id=conversation_id,
+            model=active_model)
         logger.info(f"Refinement {child_id} created successfully.")
 
         return {
@@ -1162,12 +1399,15 @@ class GenerationService:
         negative_prompt: Optional[str] = None,
         conversation_id: Optional[str] = None,
         custom_instruction: Optional[str] = None,
+        imagen_model: Optional[str] = None,
+        vision_model: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Multi-image wardrobe composition: sends base reference image + 1 or more garment reference images
         with numbered pin directives to Gemini.
         """
-        logger.info(f"Composing wardrobe from parent '{parent_id}' with {len(assignments)} garment assignments (seed={seed}, conv={conversation_id})")
+        active_model = imagen_model or self.model_name
+        logger.info(f"Composing wardrobe from parent '{parent_id}' with {len(assignments)} garment assignments using image model '{active_model}' (seed={seed}, conv={conversation_id})")
 
         parent_record = await self.db.get_generation(parent_id) if parent_id else None
         moodboard_id = parent_record.get("moodboard_id") if parent_record else None
@@ -1234,6 +1474,7 @@ class GenerationService:
         grounding_data = await self.wardrobe_service.ground_wardrobe_pins(
             image_bytes=parent_bytes,
             assignments=assignments_for_grounding,
+            vision_model=vision_model,
         )
         grounded_by_pin = {
             g.get("pin_number"): g for g in grounding_data.get("grounded_pins", []) if isinstance(g, dict)
@@ -1298,6 +1539,8 @@ class GenerationService:
             aspect_ratio=aspect_ratio,
             negative_prompt=final_neg_prompt,
             conversation_id=conversation_id,
+            model=active_model,
+            vision_model=vision_model,
         )
 
         child_id = f"gen_wardrobe_{uuid.uuid4().hex[:8]}"
@@ -1309,6 +1552,7 @@ class GenerationService:
             aspect_ratio=aspect_ratio,
             negative_prompt=final_neg_prompt,
             audit_request_id=request_id,
+            model_name=active_model,
         )
 
         gen_dir = os.path.join(self.storage_dir, "generations")
@@ -1329,6 +1573,9 @@ class GenerationService:
                 "refinement_prompt": f"Wardrobe swap ({len(loaded_assignments)} item{'s' if len(loaded_assignments) != 1 else ''}): " + ", ".join([f"Pin #{a['pin_number']}" for a in loaded_assignments]),
                 "conversation_id": conversation_id,
                 "assignments": loaded_assignments,
+                "imagen_model": active_model,
+                "model_name": active_model,
+                "vision_model": vision_model,
             },
             "compiled_prompt": compiled_prompt,
             "negative_prompt": final_neg_prompt,
@@ -1338,6 +1585,7 @@ class GenerationService:
             "resolution_width": width,
             "resolution_height": height,
             "conversation_id": conversation_id,
+            "model_name": active_model,
         }
         await self.db.create_generation(record)
 
@@ -1362,6 +1610,8 @@ class GenerationService:
             seed=seed,
             aspect_ratio=aspect_ratio,
             conversation_id=conversation_id,
+            model=active_model,
+            vision_model=vision_model,
         )
         logger.info(f"Wardrobe composition {child_id} created successfully.")
 
@@ -1437,10 +1687,24 @@ class GenerationService:
 
         started = time.perf_counter()
 
+        # Derive target resolution from aspect ratio or source image
+        res_tuple = ASPECT_RATIO_RESOLUTIONS.get(aspect_ratio, (base_image.width, base_image.height))
+        res_str = f"{res_tuple[0]}x{res_tuple[1]}"
+
         # Formulate precise spatial instructions for the model
-        spatial_prompt = INPAINT_SYSTEM_PROMPT.replace("{USER_PROMPT}", prompt.strip())
+        spatial_prompt = (
+            INPAINT_SYSTEM_PROMPT
+            .replace("{USER_PROMPT}", prompt.strip())
+            .replace("{RESOLUTION}", res_str)
+            .replace("{ASPECT_RATIO}", aspect_ratio or "unspecified")
+        )
         if neg_prompt:
-            suffix = INPAINT_SUFFIX.replace("{NEGATIVE_PROMPT}", neg_prompt)
+            suffix = (
+                INPAINT_SUFFIX
+                .replace("{NEGATIVE_PROMPT}", neg_prompt)
+                .replace("{RESOLUTION}", res_str)
+                .replace("{ASPECT_RATIO}", aspect_ratio or "unspecified")
+            )
             spatial_prompt = f"{spatial_prompt}\n\n{suffix}"
 
         contents = [base_image, mask_image, spatial_prompt]
@@ -1546,7 +1810,6 @@ class GenerationService:
             duration_ms=duration_ms,
         )
 
-        # Store inpaint metadata in generation schema_json
         inpaint_meta = {
             "parent_id": parent_id or None,
             "prompt": prompt,
@@ -1554,9 +1817,12 @@ class GenerationService:
             "mask_url": f"/api/images/{mask_filename}",
             "mask_path": mask_filepath,
             "mask_stats": mask_stats,
+            "model": "gemini-3-pro-image",
         }
         updated_state = dict(saved_state) if isinstance(saved_state, dict) else {}
         updated_state["inpaint_metadata"] = inpaint_meta
+        updated_state["model_name"] = "gemini-3-pro-image"
+        updated_state["inpaint_model"] = "gemini-3-pro-image"
 
         record = {
             "id": child_id,
@@ -1572,6 +1838,7 @@ class GenerationService:
             "aspect_ratio": aspect_ratio,
             "resolution_width": width,
             "resolution_height": height,
+            "model_name": "gemini-3-pro-image",
         }
         await self.db.create_generation(record)
         logger.info(

@@ -10,6 +10,8 @@ import {
   X,
   Activity,
   ExternalLink,
+  Eye,
+  Cpu,
 } from 'lucide-react';
 
 import MoodboardUploader from './components/MoodboardUploader';
@@ -29,6 +31,7 @@ import {
   analyzeMoodboard,
   generateBaselines,
   resyncMasterPrompt,
+  checkPromptConflicts,
   analyzeAndGenerateBaselines,
   uploadDirectPhoto,
   refineGeneration,
@@ -37,16 +40,31 @@ import {
   exportBundle,
   fetchHistory,
   restoreGeneration,
+  fetchModelConfig,
 } from './services/apiClient';
 
 export default function App() {
   // 4-Step Sequential Workflow: 1: Art Direction, 2: Refinement, 3: Canvas, 4: Export
   const [currentStep, setCurrentStep] = useState(1);
 
+  // Model Selection state
+  const [modelConfig, setModelConfig] = useState({
+    available_vision_models: ['gemini-3.5-flash-lite', 'gemini-3.7-flash'],
+    available_imagen_models: ['gemini-3.1-flash-lite-image', 'gemini-3.1-flash-image', 'gemini-3-pro-image'],
+    default_vision_model: 'gemini-3.5-flash-lite',
+    default_imagen_model: 'gemini-3.1-flash-image',
+    inpaint_model: 'gemini-3-pro-image',
+  });
+  const [visionModel, setVisionModel] = useState(() => localStorage.getItem('studio_vision_model') || 'gemini-3.5-flash-lite');
+  const [imagenModel, setImagenModel] = useState(() => localStorage.getItem('studio_imagen_model') || 'gemini-3.1-flash-image');
+
   // Step 1: Ingest & Baselines state
   const [files, setFiles] = useState([]);
   const [baselinePrompt, setBaselinePrompt] = useState('');
   const [aspectRatio, setAspectRatio] = useState('1.8:1');
+  const [temperature, setTemperature] = useState(1.0);
+  const [promptConflicts, setPromptConflicts] = useState([]);
+  const [isCheckingConflicts, setIsCheckingConflicts] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isGeneratingBaselines, setIsGeneratingBaselines] = useState(false);
   const [isResyncingPrompt, setIsResyncingPrompt] = useState(false);
@@ -91,10 +109,40 @@ export default function App() {
   const [errorMessage, setErrorMessage] = useState(null);
   const [isDirectUploading, setIsDirectUploading] = useState(false);
 
-  // Load history on mount
+  // Load history and model configuration on mount
   useEffect(() => {
     loadHistoryList();
+    loadModelConfig();
   }, []);
+
+  const loadModelConfig = async () => {
+    try {
+      const cfg = await fetchModelConfig();
+      if (cfg) {
+        setModelConfig(cfg);
+        const storedVision = localStorage.getItem('studio_vision_model');
+        const storedImagen = localStorage.getItem('studio_imagen_model');
+        if (!storedVision && cfg.default_vision_model) {
+          setVisionModel(cfg.default_vision_model);
+        }
+        if (!storedImagen && cfg.default_imagen_model) {
+          setImagenModel(cfg.default_imagen_model);
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to load dynamic model configuration:', err);
+    }
+  };
+
+  const handleVisionModelChange = (model) => {
+    setVisionModel(model);
+    localStorage.setItem('studio_vision_model', model);
+  };
+
+  const handleImagenModelChange = (model) => {
+    setImagenModel(model);
+    localStorage.setItem('studio_imagen_model', model);
+  };
 
   const loadHistoryList = async () => {
     try {
@@ -187,7 +235,8 @@ export default function App() {
         promptToSend.trim(),
         lockedCategories,
         tagState,
-        aspectRatio
+        aspectRatio,
+        visionModel
       );
       setMoodboardId(response.moodboard_id);
 
@@ -201,6 +250,7 @@ export default function App() {
       setBaselineTagSnapshot(JSON.parse(JSON.stringify(nextState)));
       setMasterPrompt(response.master_prompt || '');
       setSceneNarrative(response.narrative || promptToSend || '');
+      setPromptConflicts(response.conflicts || []);
     } catch (err) {
       setErrorMessage(err.message || 'Failed to analyze moodboard references.');
     } finally {
@@ -230,6 +280,8 @@ export default function App() {
         categories: tagState.categories,
         aspect_ratio: aspectRatio,
         prompt_override: masterPrompt.trim(),
+        imagen_model: imagenModel,
+        temperature: temperature,
       };
 
       const response = await generateBaselines(payload);
@@ -257,6 +309,7 @@ export default function App() {
         narrative: sceneNarrative,
         categories: tagState.categories,
         previous_master_prompt: masterPrompt,
+        vision_model: visionModel,
       });
 
       if (response.master_prompt) {
@@ -264,6 +317,9 @@ export default function App() {
       }
       if (response.narrative) {
         setSceneNarrative(response.narrative);
+      }
+      if (response.conflicts) {
+        setPromptConflicts(response.conflicts);
       }
 
       setTagState((prev) => ({
@@ -275,6 +331,25 @@ export default function App() {
       setErrorMessage(err.message || 'Failed to re-sync master prompt with AI.');
     } finally {
       setIsResyncingPrompt(false);
+    }
+  };
+
+  // On-Demand Scan for Contradictory Instructions & Conflicts
+  const handleCheckConflicts = async () => {
+    if (!masterPrompt && !sceneNarrative) return;
+    setIsCheckingConflicts(true);
+    try {
+      const response = await checkPromptConflicts({
+        master_prompt: masterPrompt,
+        narrative: sceneNarrative,
+        categories: tagState.categories,
+        vision_model: visionModel,
+      });
+      setPromptConflicts(response.conflicts || []);
+    } catch (err) {
+      console.warn('Conflict scan failed:', err);
+    } finally {
+      setIsCheckingConflicts(false);
     }
   };
 
@@ -336,6 +411,7 @@ export default function App() {
         seed_mode: seedMode,
         aspect_ratio: aspectRatio,
         conversation_id: conversationId,
+        imagen_model: imagenModel,
       };
 
       const result = await refineGeneration(payload);
@@ -453,6 +529,8 @@ export default function App() {
         aspect_ratio: aspectRatio,
         conversation_id: conversationId,
         custom_instruction: customInstruction,
+        imagen_model: imagenModel,
+        vision_model: visionModel,
       };
 
       const result = await composeWardrobe(payload);
@@ -716,8 +794,42 @@ export default function App() {
           </button>
         </div>
 
-        {/* Header Actions */}
+        {/* Header Actions & Model Selectors */}
         <div className="header-actions">
+          <div className="model-selectors-container">
+            <div className="model-selector-chip" title="Vision Model for Analysis, Directing & Pin Grounding">
+              <Eye size={12} className="text-cyan-400 shrink-0" />
+              <span className="model-selector-chip-label">Vision</span>
+              <select
+                className="model-select-input"
+                value={visionModel}
+                onChange={(e) => handleVisionModelChange(e.target.value)}
+              >
+                {modelConfig.available_vision_models.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="model-selector-chip" title="Image Model for Baselines, Fine-Tuning & Refinement">
+              <Cpu size={12} className="text-amber-400 shrink-0" />
+              <span className="model-selector-chip-label">Imagen</span>
+              <select
+                className="model-select-input"
+                value={imagenModel}
+                onChange={(e) => handleImagenModelChange(e.target.value)}
+              >
+                {modelConfig.available_imagen_models.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
           <a
             href="/telemetry"
             target="_blank"
@@ -787,6 +899,11 @@ export default function App() {
                     narrative={sceneNarrative}
                     onNarrativeChange={setSceneNarrative}
                     aspectRatio={aspectRatio}
+                    temperature={temperature}
+                    onTemperatureChange={setTemperature}
+                    conflicts={promptConflicts}
+                    isCheckingConflicts={isCheckingConflicts}
+                    onCheckConflicts={handleCheckConflicts}
                     isResyncing={isResyncingPrompt}
                     onResyncPrompt={handleResyncMasterPrompt}
                     isGeneratingBaselines={isGeneratingBaselines}
@@ -893,6 +1010,7 @@ export default function App() {
                   onCompose={handleComposeWardrobe}
                   isComposing={isComposingWardrobe}
                   activeGenerationId={generationResult?.generation_id || activeBaseline?.id}
+                  visionModel={visionModel}
                 />
               </div>
             )}

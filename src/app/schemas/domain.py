@@ -67,6 +67,15 @@ class SceneSchema(BaseModel):
 # API Contract Models
 # ==============================================================================
 
+class PromptConflict(BaseModel):
+    id: str = Field(description="Unique conflict identifier")
+    severity: Literal["warning", "error", "info"] = "warning"
+    conflicting_elements: List[str] = Field(default_factory=list, description="Contradicting phrases or tag labels")
+    categories: List[str] = Field(default_factory=list, description="Categories containing conflicting elements")
+    explanation: str = Field(description="Explanation of why these instructions fight for dominance")
+    recommendation: Optional[str] = Field(default=None, description="Suggested resolution")
+
+
 class BaselineSummary(BaseModel):
     id: str
     seed: int
@@ -75,6 +84,7 @@ class BaselineSummary(BaseModel):
     aspect_ratio: Optional[str] = None
     resolution: Optional[Dict[str, int]] = None
     compiled_prompt: Optional[str] = None
+    temperature: Optional[float] = None
 
 
 class AnalyzeAndBaselinesResponse(BaseModel):
@@ -85,6 +95,7 @@ class AnalyzeAndBaselinesResponse(BaseModel):
     categories: Dict[str, List[TagChip]] = Field(default_factory=dict)
     schema_data: Optional[Dict[str, Any]] = Field(alias="schema", default=None)
     baselines: List[BaselineSummary] = Field(default_factory=list)
+    conflicts: List[PromptConflict] = Field(default_factory=list)
 
 
 class DirectPhotoUploadResponse(BaseModel):
@@ -112,6 +123,7 @@ class FineTuneGenerationRequest(BaseModel):
     use_image_reference: bool = True
     aspect_ratio: Optional[str] = "1:1"
     negative_prompt: Optional[str] = None
+    imagen_model: Optional[str] = None
 
 
 class FineTuneGenerationResponse(BaseModel):
@@ -164,6 +176,7 @@ class GenerationRecordResponse(BaseModel):
     aspect_ratio: str = "1:1"
     resolution_width: int = 3840
     resolution_height: int = 3840
+    model_name: Optional[str] = None
 
 
 class InpaintResponse(BaseModel):
@@ -203,6 +216,7 @@ class RefinementRequest(BaseModel):
     aspect_ratio: Optional[str] = "1:1"
     negative_prompt: Optional[str] = None
     conversation_id: Optional[str] = None
+    imagen_model: Optional[str] = None
 
 
 class RefinementResponse(BaseModel):
@@ -249,6 +263,7 @@ class MoodboardAnalysisResponse(BaseModel):
     schema_data: Optional[Dict[str, Any]] = Field(alias="schema", default=None)
     extracted_chips: List[TagChip] = Field(default_factory=list)
     extracted_json: Optional[Dict[str, Any]] = None
+    conflicts: List[PromptConflict] = Field(default_factory=list)
 
 
 class GenerateBaselinesRequest(BaseModel):
@@ -260,6 +275,8 @@ class GenerateBaselinesRequest(BaseModel):
     schema_data: Optional[Dict[str, Any]] = Field(alias="schema", default=None)
     aspect_ratio: Optional[str] = "1.8:1"
     prompt_override: Optional[str] = None
+    imagen_model: Optional[str] = None
+    temperature: Optional[float] = 1.0
 
 
 class GenerateBaselinesResponse(BaseModel):
@@ -271,11 +288,24 @@ class ResyncMasterPromptRequest(BaseModel):
     narrative: Optional[str] = ""
     categories: Optional[Dict[str, Any]] = None
     previous_master_prompt: Optional[str] = None
+    vision_model: Optional[str] = None
 
 
 class ResyncMasterPromptResponse(BaseModel):
     master_prompt: str
     narrative: str
+    conflicts: List[PromptConflict] = Field(default_factory=list)
+
+
+class CheckConflictsRequest(BaseModel):
+    master_prompt: Optional[str] = ""
+    narrative: Optional[str] = ""
+    categories: Optional[Dict[str, Any]] = None
+    vision_model: Optional[str] = None
+
+
+class CheckConflictsResponse(BaseModel):
+    conflicts: List[PromptConflict] = Field(default_factory=list)
 
 
 class GenerationRequest(BaseModel):
@@ -288,6 +318,7 @@ class GenerationRequest(BaseModel):
     seed: int = 4289102
     negative_prompt: str = ""
     aspect_ratio: str = "1:1"
+    imagen_model: Optional[str] = None
 
 
 class Resolution(BaseModel):
@@ -369,6 +400,7 @@ class ClothingRegion(BaseModel):
 
 class DetectRegionsRequest(BaseModel):
     generation_id: Optional[str] = None
+    vision_model: Optional[str] = None
 
 
 class DetectRegionsResponse(BaseModel):
@@ -392,6 +424,8 @@ class WardrobeComposeRequest(BaseModel):
     negative_prompt: Optional[str] = None
     conversation_id: Optional[str] = None
     custom_instruction: Optional[str] = None
+    imagen_model: Optional[str] = None
+    vision_model: Optional[str] = None
 
 
 class WardrobeComposeResponse(BaseModel):

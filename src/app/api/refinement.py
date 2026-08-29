@@ -26,6 +26,7 @@ async def refine_image(request: RefinementRequest):
     Step 2: Conversation-based image refinement.
     Sends reference parent image + free-text prompt to Gemini with locked seed.
     """
+    eff_imagen_model = request.imagen_model or settings.IMAGEN_MODEL
     try:
         conv_id = request.conversation_id
         if not conv_id:
@@ -42,10 +43,11 @@ async def refine_image(request: RefinementRequest):
             aspect_ratio=request.aspect_ratio or "2:3",
             negative_prompt=request.negative_prompt,
             conversation_id=conv_id,
+            imagen_model=eff_imagen_model,
         )
         return RefinementResponse(**result)
     except Exception as exc:
-        parse_and_raise_http_error(exc, model_name=settings.IMAGEN_MODEL, context="Refinement Generation")
+        parse_and_raise_http_error(exc, model_name=eff_imagen_model, context="Refinement Generation")
 
 
 @router.get("/conversations/{conversation_id}", response_model=ConversationResponse)

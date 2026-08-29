@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     VISION_MODEL: str = "gemini-3.5-flash-lite"
     IMAGEN_MODEL: str = "gemini-3-pro-image"
     INPAINT_MODEL: str = "gemini-3-pro-image"
+    GENAI_TIMEOUT_SECONDS: int = 300
 
     @field_validator("VISION_MODEL", "IMAGEN_MODEL", "INPAINT_MODEL", mode="before")
     @classmethod

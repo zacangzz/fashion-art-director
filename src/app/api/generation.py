@@ -22,6 +22,7 @@ async def fine_tune_generation(request: FineTuneGenerationRequest):
     """
     Step 3: Seed-locked multimodal fine-tuning generation using Prompt Compiler.
     """
+    eff_imagen_model = request.imagen_model or settings.IMAGEN_MODEL
     try:
         result = await generation_service.fine_tune_generation(
             parent_id=request.parent_id or "",
@@ -36,10 +37,11 @@ async def fine_tune_generation(request: FineTuneGenerationRequest):
             use_image_reference=request.use_image_reference,
             aspect_ratio=request.aspect_ratio or "2:3",
             negative_prompt=request.negative_prompt,
+            imagen_model=eff_imagen_model,
         )
         return FineTuneGenerationResponse(**result)
     except Exception as exc:
-        parse_and_raise_http_error(exc, model_name=settings.IMAGEN_MODEL, context="Seed-Locked Fine-Tuning")
+        parse_and_raise_http_error(exc, model_name=eff_imagen_model, context="Seed-Locked Fine-Tuning")
 
 
 def _serialize_legacy_input(request: GenerationRequest) -> str:

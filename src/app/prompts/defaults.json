@@ -1,3 +1,4 @@
 {
-  "negative_prompt": "photorealistic render, 3d render, cgi, digital art, illustration, cartoon, anime, airbrushed, plastic skin, waxy skin, porcelain doll skin, artificial smoothing, beauty filter, doll face, fake reflections, studio flash glare, over-processed, oversaturated, perfect smooth skin, blurry, low resolution, pixelated, compression artifacts, distorted anatomy, loss of detail, muddy background, low quality scan"
+  "negative_prompt": "photorealistic render, 3d render, cgi, digital art, illustration, cartoon, anime, airbrushed, plastic skin, waxy skin, porcelain doll skin, artificial smoothing, beauty filter, doll face, fake reflections, studio flash glare, over-processed, oversaturated, perfect smooth skin, unnaturally white teeth, glowing teeth, fused teeth, missing teeth, extra teeth, unnatural dentures, solid white bar teeth, blurry, low resolution, pixelated, compression artifacts, distorted anatomy, loss of detail, muddy background, low quality scan"
 }
+

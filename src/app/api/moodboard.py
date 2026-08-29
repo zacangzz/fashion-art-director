@@ -7,10 +7,13 @@ from app.config import get_settings
 from app.schemas.domain import (
     AnalyzeAndBaselinesResponse,
     BaselineSummary,
+    CheckConflictsRequest,
+    CheckConflictsResponse,
     DirectPhotoUploadResponse,
     GenerateBaselinesRequest,
     GenerateBaselinesResponse,
     MoodboardAnalysisResponse,
+    PromptConflict,
     ResyncMasterPromptRequest,
     ResyncMasterPromptResponse,
     TagChip,
@@ -75,11 +78,16 @@ async def analyze_and_baselines(
     existing_categories: Optional[str] = Form(None),
     existing_narrative: Optional[str] = Form(None),
     aspect_ratio: Optional[str] = Form("1.8:1"),
+    vision_model: Optional[str] = Form(None),
+    imagen_model: Optional[str] = Form(None),
 ):
     """
     Step 1: Analyzes 1-5 moodboard files + optional creative prompt baseline ->
     extracts 9-category visual tags & narrative -> triggers 4 concurrent baseline generations.
     """
+    eff_vision_model = vision_model or settings.VISION_MODEL
+    eff_imagen_model = imagen_model or settings.IMAGEN_MODEL
+
     moodboard_id, image_bytes_list, saved_paths = await _process_and_save_upload_files(
         files, settings.STORAGE_DIR
     )
@@ -110,9 +118,10 @@ async def analyze_and_baselines(
             existing_categories=parsed_existing.get("categories") if isinstance(parsed_existing, dict) and "categories" in parsed_existing else parsed_existing,
             existing_narrative=existing_narrative or (parsed_existing.get("narrative") if isinstance(parsed_existing, dict) else None),
             image_paths=[os.path.relpath(path) for path in saved_paths],
+            model_name=eff_vision_model,
         )
     except Exception as exc:
-        parse_and_raise_http_error(exc, model_name=settings.VISION_MODEL, context="Vision Tag & Narrative Extraction")
+        parse_and_raise_http_error(exc, model_name=eff_vision_model, context="Vision Tag & Narrative Extraction")
 
     # 2. Concurrently Generate 4 Baselines
     eff_aspect_ratio = aspect_ratio or "1.8:1"
@@ -121,6 +130,7 @@ async def analyze_and_baselines(
             moodboard_id=moodboard_id,
             state=tag_state,
             aspect_ratio=eff_aspect_ratio,
+            imagen_model=eff_imagen_model,
         )
         baselines = [
             BaselineSummary(
@@ -131,11 +141,12 @@ async def analyze_and_baselines(
                 aspect_ratio=b.get("aspect_ratio", eff_aspect_ratio),
                 resolution=b.get("resolution"),
                 compiled_prompt=b.get("compiled_prompt"),
+                temperature=b.get("temperature"),
             )
             for b in baselines_raw
         ]
     except Exception as exc:
-        parse_and_raise_http_error(exc, model_name=settings.IMAGEN_MODEL, context="Concurrent 4-Baseline Generation")
+        parse_and_raise_http_error(exc, model_name=eff_imagen_model, context="Concurrent 4-Baseline Generation")
 
     # Construct strongly typed category tag models for response
     categories_resp = {}
@@ -145,6 +156,12 @@ async def analyze_and_baselines(
             for c in chip_list
         ]
 
+    raw_conflicts = tag_state.get("conflicts", [])
+    parsed_conflicts = [
+        PromptConflict(**c) if isinstance(c, dict) else c
+        for c in raw_conflicts
+    ]
+
     return AnalyzeAndBaselinesResponse(
         moodboard_id=moodboard_id,
         master_prompt=tag_state.get("master_prompt"),
@@ -152,6 +169,7 @@ async def analyze_and_baselines(
         categories=categories_resp,
         schema_data=tag_state,
         baselines=baselines,
+        conflicts=parsed_conflicts,
     )
 
 
@@ -165,11 +183,13 @@ async def analyze_moodboard(
     existing_schema: Optional[str] = Form(None),
     existing_narrative: Optional[str] = Form(None),
     aspect_ratio: Optional[str] = Form("1.8:1"),
+    vision_model: Optional[str] = Form(None),
 ):
     """
     Step 1A: Analyzes 1-5 moodboard files + starting creative prompt ->
     extracts 9-category visual tags, narrative, and Vision Director's Master Prompt without generating images.
     """
+    eff_vision_model = vision_model or settings.VISION_MODEL
     moodboard_id, image_bytes_list, saved_paths = await _process_and_save_upload_files(
         files, settings.STORAGE_DIR
     )
@@ -198,9 +218,10 @@ async def analyze_moodboard(
             existing_categories=parsed_existing.get("categories") if isinstance(parsed_existing, dict) and "categories" in parsed_existing else parsed_existing,
             existing_narrative=existing_narrative or (parsed_existing.get("narrative") if isinstance(parsed_existing, dict) else None),
             image_paths=[os.path.relpath(path) for path in saved_paths],
+            model_name=eff_vision_model,
         )
     except Exception as exc:
-        parse_and_raise_http_error(exc, model_name=settings.VISION_MODEL, context="Vision Tag & Master Prompt Extraction")
+        parse_and_raise_http_error(exc, model_name=eff_vision_model, context="Vision Tag & Master Prompt Extraction")
 
     categories_resp = {}
     all_chips: List[TagChip] = []
@@ -212,6 +233,12 @@ async def analyze_moodboard(
         categories_resp[cat_name] = parsed_chips
         all_chips.extend(parsed_chips)
 
+    raw_conflicts = tag_state.get("conflicts", [])
+    parsed_conflicts = [
+        PromptConflict(**c) if isinstance(c, dict) else c
+        for c in raw_conflicts
+    ]
+
     return MoodboardAnalysisResponse(
         moodboard_id=moodboard_id,
         master_prompt=tag_state.get("master_prompt"),
@@ -220,6 +247,7 @@ async def analyze_moodboard(
         schema_data=tag_state,
         extracted_chips=all_chips,
         extracted_json=tag_state,
+        conflicts=parsed_conflicts,
     )
 
 
@@ -229,11 +257,13 @@ async def generate_baselines(request: GenerateBaselinesRequest):
     Step 1B: Generates 4 concurrent baseline image candidates across 4 unique seeds
     using the customized Master Prompt directly + technical quality suffix.
     """
+    eff_imagen_model = request.imagen_model or settings.IMAGEN_MODEL
     eff_aspect_ratio = request.aspect_ratio or "1.8:1"
     state_payload = {
         "master_prompt": request.master_prompt,
         "narrative": request.narrative or "",
         "categories": request.categories or {},
+        "imagen_model": eff_imagen_model,
     }
 
     try:
@@ -242,6 +272,8 @@ async def generate_baselines(request: GenerateBaselinesRequest):
             state=state_payload,
             aspect_ratio=eff_aspect_ratio,
             prompt_override=request.prompt_override or request.master_prompt,
+            imagen_model=eff_imagen_model,
+            temperature=request.temperature if request.temperature is not None else 1.0,
         )
         baselines = [
             BaselineSummary(
@@ -252,11 +284,12 @@ async def generate_baselines(request: GenerateBaselinesRequest):
                 aspect_ratio=b.get("aspect_ratio", eff_aspect_ratio),
                 resolution=b.get("resolution"),
                 compiled_prompt=b.get("compiled_prompt"),
+                temperature=b.get("temperature", request.temperature),
             )
             for b in baselines_raw
         ]
     except Exception as exc:
-        parse_and_raise_http_error(exc, model_name=settings.IMAGEN_MODEL, context="Baseline Image Generation")
+        parse_and_raise_http_error(exc, model_name=eff_imagen_model, context="Baseline Image Generation")
 
     return GenerateBaselinesResponse(
         moodboard_id=request.moodboard_id,
@@ -270,18 +303,48 @@ async def resync_prompt(request: ResyncMasterPromptRequest):
     On-Demand Re-Sync: Calls Gemini Vision/Language model to re-synthesize fluid,
     high-fashion directorial Master Prompt prose from user-updated visual levers.
     """
+    eff_vision_model = request.vision_model or settings.VISION_MODEL
     try:
         result = await vision_service.resync_master_prompt(
             narrative=request.narrative,
             categories=request.categories,
             previous_master_prompt=request.previous_master_prompt,
+            model_name=eff_vision_model,
         )
+        raw_conflicts = result.get("conflicts", [])
+        parsed_conflicts = [
+            PromptConflict(**c) if isinstance(c, dict) else c
+            for c in raw_conflicts
+        ]
         return ResyncMasterPromptResponse(
             master_prompt=result.get("master_prompt", ""),
             narrative=result.get("narrative", ""),
+            conflicts=parsed_conflicts,
         )
     except Exception as exc:
-        parse_and_raise_http_error(exc, model_name=settings.VISION_MODEL, context="Master Prompt Re-Sync")
+        parse_and_raise_http_error(exc, model_name=eff_vision_model, context="Master Prompt Re-Sync")
+
+
+@router.post("/check-conflicts", response_model=CheckConflictsResponse)
+async def check_conflicts(request: CheckConflictsRequest):
+    """
+    On-demand conflict scan: Analyzes Master Prompt, Narrative, and 9-category visual levers
+    for contradictory directives.
+    """
+    eff_vision_model = request.vision_model or settings.VISION_MODEL
+    try:
+        raw_conflicts = await vision_service.check_prompt_conflicts(
+            master_prompt=request.master_prompt,
+            narrative=request.narrative,
+            categories=request.categories,
+            model_name=eff_vision_model,
+        )
+        return CheckConflictsResponse(
+            conflicts=[PromptConflict(**c) if isinstance(c, dict) else c for c in raw_conflicts]
+        )
+    except Exception as exc:
+        parse_and_raise_http_error(exc, model_name=eff_vision_model, context="Prompt Conflict Check")
+
 
 
 @router.post("/upload-direct-photo", response_model=DirectPhotoUploadResponse)

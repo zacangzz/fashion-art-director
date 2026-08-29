@@ -137,6 +137,50 @@ describe('HistoryDrawer', () => {
     const img = screen.getByRole('img', { name: /Mask for gen_inpaint_99/i });
     expect(img).toHaveAttribute('src', '/api/images/gen_inpaint_99_mask.png');
   });
+
+  it('renders model name when available and N/A for user uploads or missing models', () => {
+    const mixedHistory = [
+      {
+        id: 'gen_base_1',
+        is_baseline: true,
+        seed: 12345,
+        master_image_url: '/api/images/gen_base_1.png',
+        compiled_prompt: 'fashion studio shot',
+        created_at: '2026-08-24T00:00:00Z',
+        model_name: 'gemini-3.1-flash-image',
+      },
+      {
+        id: 'gen_upload_abc',
+        is_baseline: true,
+        seed: 67890,
+        master_image_url: '/api/images/gen_upload_abc.png',
+        compiled_prompt: 'Uploaded Reference Image',
+        created_at: '2026-08-24T00:05:00Z',
+        schema_json: { source: 'direct_upload' },
+      },
+      {
+        id: 'gen_legacy_xyz',
+        is_baseline: false,
+        seed: 11223,
+        master_image_url: '/api/images/gen_legacy_xyz.png',
+        compiled_prompt: 'legacy iteration',
+        created_at: '2026-08-24T00:10:00Z',
+      },
+    ];
+
+    render(
+      <HistoryDrawer
+        isOpen={true}
+        history={mixedHistory}
+        activeGenerationId="gen_base_1"
+        onClose={() => {}}
+      />
+    );
+
+    expect(screen.getByText('gemini-3.1-flash-image')).toBeInTheDocument();
+    const naElements = screen.getAllByText('N/A');
+    expect(naElements.length).toBe(2);
+  });
 });
 
 

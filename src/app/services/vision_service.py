@@ -14,6 +14,7 @@ from app.utils.prompt_loader import (
     USER_BASELINE_TEMPLATE,
     RESYNC_MASTER_PROMPT_SYSTEM,
     RESYNC_MASTER_PROMPT_TEMPLATE,
+    CHECK_CONFLICTS_SYSTEM_PROMPT,
 )
 from app.utils.image_utils import to_image_part
 
@@ -57,7 +58,7 @@ DEFAULT_FALLBACK_TAGS: Dict[str, List[Dict[str, Any]]] = {
         {"label": "muted rich editorial palette"},
     ],
     TagCategory.CAMERA_OPTICS.value: [
-        {"label": "85mm prime lens f/1.8 shallow depth"},
+        {"label": "85mm prime lens f/1.8"},
     ],
     TagCategory.MOOD_ERA.value: [
         {"label": "timeless candid vibe"},
@@ -97,16 +98,19 @@ class VisionService:
     def _prepare_image_parts(self, image_bytes_list: List[bytes]) -> List[types.Part]:
         return [to_image_part(b) for b in image_bytes_list]
 
-    async def _generate_content_async(self, contents: List[Any], config: types.GenerateContentConfig) -> Any:
+    async def _generate_content_async(
+        self, contents: List[Any], config: types.GenerateContentConfig, model: Optional[str] = None
+    ) -> Any:
+        active_model = model or self.model_name
         aio_client = getattr(self.client, "aio", None)
         if aio_client is not None:
             models = getattr(aio_client, "models", None)
             gen_func = getattr(models, "generate_content", None)
             if callable(gen_func) and asyncio.iscoroutinefunction(gen_func):
-                return await gen_func(model=self.model_name, contents=contents, config=config)
+                return await gen_func(model=active_model, contents=contents, config=config)
         return await asyncio.to_thread(
             self.client.models.generate_content,
-            model=self.model_name,
+            model=active_model,
             contents=contents,
             config=config,
         )
@@ -119,15 +123,17 @@ class VisionService:
         existing_categories: Optional[Dict[str, Any]] = None,
         existing_narrative: Optional[str] = None,
         image_paths: Optional[List[str]] = None,
+        model_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Synthesizes a dual narrative summary and 9-category TagChip dictionary from
         moodboard reference files and an optional user creative text prompt.
         Preserves categories in locked_categories from existing_categories if supplied.
         """
+        active_model = model_name or self.model_name
         prompt_log = f" with prompt baseline ('{prompt[:50]}...')" if prompt and prompt.strip() else ""
         logger.info(
-            f"Extracting 9-category visual tags from {len(image_bytes_list)} moodboard file(s){prompt_log} using {self.model_name}..."
+            f"Extracting 9-category visual tags from {len(image_bytes_list)} moodboard file(s){prompt_log} using {active_model}..."
         )
         contents: List[Any] = self._prepare_image_parts(image_bytes_list)
 
@@ -141,7 +147,7 @@ class VisionService:
         self._audit(
             "vision_request",
             request_id,
-            model=self.model_name,
+            model=active_model,
             config={"response_mime_type": "application/json"},
             image_paths=image_paths or [],
             instruction=instruction,
@@ -154,9 +160,9 @@ class VisionService:
         )
 
         try:
-            response = await self._generate_content_async(contents, gen_config)
+            response = await self._generate_content_async(contents, gen_config, model=active_model)
         except Exception as model_err:
-            self._audit("vision_error", request_id, stage="model_call", error=repr(model_err))
+            self._audit("vision_error", request_id, stage="model_call", model=active_model, error=repr(model_err))
             raise
 
         raw_text = getattr(response, "text", "") or ""
@@ -238,6 +244,21 @@ class VisionService:
 
             categories_result[cat_key] = chip_list
 
+        # Parse conflicts if detected by the model
+        raw_conflicts = extracted_data.get("conflicts") or []
+        conflicts_result = []
+        if isinstance(raw_conflicts, list):
+            for idx, c in enumerate(raw_conflicts):
+                if isinstance(c, dict):
+                    conflicts_result.append({
+                        "id": c.get("id") or f"conflict_{idx+1}",
+                        "severity": c.get("severity", "warning"),
+                        "conflicting_elements": c.get("conflicting_elements") or [],
+                        "categories": c.get("categories") or [],
+                        "explanation": c.get("explanation") or "",
+                        "recommendation": c.get("recommendation"),
+                    })
+
         self._audit(
             "vision_response",
             request_id,
@@ -245,6 +266,7 @@ class VisionService:
             extracted_master_prompt=extracted_master_prompt,
             extracted_narrative=extracted_narrative,
             categories_count={k: len(v) for k, v in categories_result.items()},
+            conflicts_count=len(conflicts_result),
         )
 
         return {
@@ -252,6 +274,7 @@ class VisionService:
             "narrative": extracted_narrative,
             "categories": categories_result,
             "locked_categories": list(locked_set),
+            "conflicts": conflicts_result,
         }
 
     async def extract_scene_schema(
@@ -295,12 +318,14 @@ class VisionService:
         narrative: Optional[str] = None,
         categories: Optional[Dict[str, Any]] = None,
         previous_master_prompt: Optional[str] = None,
+        model_name: Optional[str] = None,
     ) -> Dict[str, str]:
         """
         Re-synthesizes the Master Generation Prompt and narrative from updated 9-category visual levers.
         """
+        active_model = model_name or self.model_name
         request_id = get_current_request_id() or f"resync_{uuid.uuid4().hex}"
-        logger.info(f"Re-syncing Master Generation Prompt using {self.model_name}...")
+        logger.info(f"Re-syncing Master Generation Prompt using {active_model}...")
 
         clean_cats: Dict[str, List[str]] = {}
         if categories and isinstance(categories, dict):
@@ -345,12 +370,12 @@ class VisionService:
         self._audit(
             "resync_prompt_request",
             request_id,
-            model=self.model_name,
+            model=active_model,
             narrative=narrative,
             categories_count={k: len(v) for k, v in clean_cats.items()},
         )
 
-        response = await self._generate_content_async(contents=contents, config=config)
+        response = await self._generate_content_async(contents=contents, config=config, model=active_model)
         raw_text = response.text or "{}"
 
         try:
@@ -362,14 +387,125 @@ class VisionService:
         master_prompt = parsed.get("master_prompt", "").strip() or (previous_master_prompt or "")
         updated_narrative = parsed.get("narrative", "").strip() or (narrative or "")
 
+        raw_conflicts = parsed.get("conflicts") or []
+        conflicts_result = []
+        if isinstance(raw_conflicts, list):
+            for idx, c in enumerate(raw_conflicts):
+                if isinstance(c, dict):
+                    conflicts_result.append({
+                        "id": c.get("id") or f"conflict_{idx+1}",
+                        "severity": c.get("severity", "warning"),
+                        "conflicting_elements": c.get("conflicting_elements") or [],
+                        "categories": c.get("categories") or [],
+                        "explanation": c.get("explanation") or "",
+                        "recommendation": c.get("recommendation"),
+                    })
+
         self._audit(
             "resync_prompt_response",
             request_id,
+            model=active_model,
             master_prompt=master_prompt,
             narrative=updated_narrative,
+            conflicts_count=len(conflicts_result),
         )
 
         return {
             "master_prompt": master_prompt,
             "narrative": updated_narrative,
+            "conflicts": conflicts_result,
         }
+
+    async def check_prompt_conflicts(
+        self,
+        master_prompt: Optional[str] = "",
+        narrative: Optional[str] = "",
+        categories: Optional[Dict[str, Any]] = None,
+        model_name: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        On-Demand conflict check: Reviews master prompt, narrative, and visual lever tags
+        for contradictory directives that would confuse the image model.
+        """
+        active_model = model_name or self.model_name
+        request_id = get_current_request_id() or f"conflicts_{uuid.uuid4().hex}"
+        logger.info(f"Checking prompt conflicts using {active_model}...")
+
+        clean_cats: Dict[str, List[str]] = {}
+        if categories and isinstance(categories, dict):
+            for cat_key, items in categories.items():
+                chip_list = []
+                if isinstance(items, list):
+                    for item in items:
+                        if isinstance(item, dict):
+                            lbl = str(item.get("label", "")).strip()
+                            if lbl:
+                                chip_list.append(lbl)
+                        elif hasattr(item, "label"):
+                            lbl = str(getattr(item, "label", "")).strip()
+                            if lbl:
+                                chip_list.append(lbl)
+                        elif isinstance(item, str) and item.strip():
+                            chip_list.append(item.strip())
+                clean_cats[cat_key] = chip_list
+
+        cats_json_str = json.dumps(clean_cats, indent=2)
+        user_content = (
+            f"Please review the following visual direction for conflicts:\n\n"
+            f"SCENE NARRATIVE:\n{narrative.strip() if narrative else 'None'}\n\n"
+            f"MASTER GENERATION PROMPT:\n{master_prompt.strip() if master_prompt else 'None'}\n\n"
+            f"9-CATEGORY VISUAL LEVERS (JSON):\n{cats_json_str}"
+        )
+
+        contents = [
+            types.Content(
+                role="user",
+                parts=[types.Part.from_text(text=user_content)],
+            )
+        ]
+
+        config = types.GenerateContentConfig(
+            system_instruction=CHECK_CONFLICTS_SYSTEM_PROMPT,
+            response_mime_type="application/json",
+            temperature=0.2,
+        )
+
+        self._audit(
+            "check_conflicts_request",
+            request_id,
+            model=active_model,
+            master_prompt=master_prompt,
+            categories_count={k: len(v) for k, v in clean_cats.items()},
+        )
+
+        try:
+            response = await self._generate_content_async(contents=contents, config=config, model=active_model)
+            raw_text = response.text or "{}"
+            parsed = json.loads(raw_text)
+        except Exception as exc:
+            logger.warning(f"Error executing check_prompt_conflicts: {exc}")
+            parsed = {"conflicts": []}
+
+        raw_conflicts = parsed.get("conflicts") or []
+        conflicts_result = []
+        if isinstance(raw_conflicts, list):
+            for idx, c in enumerate(raw_conflicts):
+                if isinstance(c, dict):
+                    conflicts_result.append({
+                        "id": c.get("id") or f"conflict_{idx+1}",
+                        "severity": c.get("severity", "warning"),
+                        "conflicting_elements": c.get("conflicting_elements") or [],
+                        "categories": c.get("categories") or [],
+                        "explanation": c.get("explanation") or "",
+                        "recommendation": c.get("recommendation"),
+                    })
+
+        self._audit(
+            "check_conflicts_response",
+            request_id,
+            model=active_model,
+            conflicts_count=len(conflicts_result),
+        )
+
+        return conflicts_result
+

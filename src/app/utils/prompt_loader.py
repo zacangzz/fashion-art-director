@@ -30,4 +30,5 @@ CLOTHING_REGION_DETECTION_PROMPT = load_prompt("clothing_region_detection.txt")
 SUBJECT_GROUNDING_PROMPT = load_prompt("subject_grounding_system.txt")
 RESYNC_MASTER_PROMPT_SYSTEM = load_prompt("resync_master_prompt_system.txt")
 RESYNC_MASTER_PROMPT_TEMPLATE = load_prompt("resync_master_prompt_template.txt")
+CHECK_CONFLICTS_SYSTEM_PROMPT = load_prompt("check_conflicts_system.txt")
 

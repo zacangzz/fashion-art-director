@@ -1,7 +1,8 @@
 import os
 import uuid
-from fastapi import APIRouter, HTTPException, UploadFile, File, status
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, status
 from fastapi.responses import FileResponse
+from typing import Optional
 
 from app.config import get_settings
 from app.schemas.domain import (
@@ -26,11 +27,15 @@ generation_service = get_generation_service()
 
 
 @router.post("/upload", response_model=WardrobeUploadResponse)
-async def upload_wardrobe_sheet(file: UploadFile = File(...)):
+async def upload_wardrobe_sheet(
+    file: UploadFile = File(...),
+    vision_model: Optional[str] = Form(None),
+):
     """
     Uploads a multi-garment sheet or lookbook image.
     Uses Gemini vision to detect bounding boxes and auto-segments into individual garment cards.
     """
+    eff_vision_model = vision_model or settings.VISION_MODEL
     try:
         if not file.content_type.startswith("image/"):
             raise HTTPException(
@@ -46,10 +51,11 @@ async def upload_wardrobe_sheet(file: UploadFile = File(...)):
         items = await wardrobe_service.segment_and_save_sheet(
             image_bytes=contents,
             original_filename=file.filename or "wardrobe_sheet.png",
+            vision_model=eff_vision_model,
         )
         return WardrobeUploadResponse(items=[GarmentCard(**item) for item in items])
     except Exception as exc:
-        parse_and_raise_http_error(exc, model_name=settings.VISION_MODEL, context="Wardrobe Segmentation")
+        parse_and_raise_http_error(exc, model_name=eff_vision_model, context="Wardrobe Segmentation")
 
 
 @router.get("/items", response_model=WardrobeListResponse)
@@ -117,6 +123,7 @@ async def detect_clothing_regions(request: DetectRegionsRequest):
     """
     Analyzes the active generation image to detect target clothing regions for auto-mask overlay.
     """
+    eff_vision_model = request.vision_model or settings.VISION_MODEL
     try:
         if not request.generation_id:
             raise HTTPException(
@@ -132,10 +139,13 @@ async def detect_clothing_regions(request: DetectRegionsRequest):
         with open(gen["master_image_path"], "rb") as f:
             img_bytes = f.read()
 
-        regions = await wardrobe_service.detect_clothing_regions(img_bytes)
+        regions = await wardrobe_service.detect_clothing_regions(
+            img_bytes,
+            vision_model=eff_vision_model,
+        )
         return DetectRegionsResponse(regions=[ClothingRegion(**r) for r in regions])
     except Exception as exc:
-        parse_and_raise_http_error(exc, model_name=settings.VISION_MODEL, context="Clothing Region Detection")
+        parse_and_raise_http_error(exc, model_name=eff_vision_model, context="Clothing Region Detection")
 
 
 @router.post("/compose", response_model=WardrobeComposeResponse)
@@ -145,6 +155,8 @@ async def compose_wardrobe(request: WardrobeComposeRequest):
     Combines parent generation + selected wardrobe references into a single cohesive output.
     Appends result as a new conversation iteration.
     """
+    eff_imagen_model = request.imagen_model or settings.IMAGEN_MODEL
+    eff_vision_model = request.vision_model or settings.VISION_MODEL
     try:
         conv_id = request.conversation_id
         if not conv_id:
@@ -162,7 +174,9 @@ async def compose_wardrobe(request: WardrobeComposeRequest):
             negative_prompt=request.negative_prompt,
             conversation_id=conv_id,
             custom_instruction=request.custom_instruction,
+            imagen_model=eff_imagen_model,
+            vision_model=eff_vision_model,
         )
         return WardrobeComposeResponse(**result)
     except Exception as exc:
-        parse_and_raise_http_error(exc, model_name=settings.IMAGEN_MODEL, context="Wardrobe Composition")
+        parse_and_raise_http_error(exc, model_name=eff_imagen_model, context="Wardrobe Composition")

@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse
 
 from app.config import get_settings
 from app.dependencies import get_db_manager
-from app.api import moodboard, generation, history, export, inpaint, refinement, wardrobe, telemetry
+from app.api import moodboard, generation, history, export, inpaint, refinement, wardrobe, telemetry, config
 from app.utils.telemetry import (
     set_current_request_id,
     generate_request_id,
@@ -109,6 +109,7 @@ app.add_middleware(
 )
 
 # Include API Routers
+app.include_router(config.router)
 app.include_router(moodboard.router)
 app.include_router(generation.router)
 app.include_router(history.router)

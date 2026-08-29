@@ -121,6 +121,7 @@ describe('PromptReviewSection', () => {
         masterPrompt="High fashion editorial photo with warm golden light."
         narrative={mockTagState.narrative}
         aspectRatio="16:9"
+        temperature={1.25}
         onUpdateTagState={vi.fn()}
         onMasterPromptChange={vi.fn()}
         onNarrativeChange={vi.fn()}
@@ -132,9 +133,87 @@ describe('PromptReviewSection', () => {
     expect(
       screen.getByText(/Full Prompt Submitted to API \(Baseline Generation Preview\)/i)
     ).toBeInTheDocument();
-    expect(screen.getByText(/3840x2160 \(16:9\)/i)).toBeInTheDocument();
-    expect(
-      screen.getByText(/Resolution: 3840x2160 \(Aspect ratio: 16:9\)\. 600 DPI ultra-high-resolution print quality\./i)
-    ).toBeInTheDocument();
+    expect(screen.getByText(/3840x2160 \(16:9\) • Temp 1.25/i)).toBeInTheDocument();
+  });
+
+  it('renders temperature slider and invokes onTemperatureChange', () => {
+    const onTempChange = vi.fn();
+    render(
+      <PromptReviewSection
+        tagState={mockTagState}
+        masterPrompt={mockTagState.master_prompt}
+        narrative={mockTagState.narrative}
+        temperature={1.0}
+        onTemperatureChange={onTempChange}
+        onUpdateTagState={vi.fn()}
+        onMasterPromptChange={vi.fn()}
+        onNarrativeChange={vi.fn()}
+        onResyncPrompt={vi.fn()}
+        onGenerateBaselines={vi.fn()}
+      />
+    );
+
+    const slider = screen.getByLabelText(/Seed generation temperature/i);
+    expect(slider).toBeInTheDocument();
+    expect(slider).toHaveValue('1');
+
+    fireEvent.change(slider, { target: { value: '1.45' } });
+    expect(onTempChange).toHaveBeenCalledWith(1.45);
+  });
+
+  it('renders conflict warning box when prompt conflicts exist', () => {
+    const mockConflicts = [
+      {
+        id: 'c1',
+        severity: 'warning',
+        conflicting_elements: ['harsh afternoon sunlight', 'soft diffuse studio strobe'],
+        categories: ['lighting'],
+        explanation: 'Direct sun creates hard shadows which contradicts diffuse studio lighting.',
+        recommendation: 'Choose either natural sunlight or controlled studio lighting.',
+      },
+    ];
+
+    render(
+      <PromptReviewSection
+        tagState={mockTagState}
+        masterPrompt={mockTagState.master_prompt}
+        narrative={mockTagState.narrative}
+        conflicts={mockConflicts}
+        onUpdateTagState={vi.fn()}
+        onMasterPromptChange={vi.fn()}
+        onNarrativeChange={vi.fn()}
+        onResyncPrompt={vi.fn()}
+        onGenerateBaselines={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText(/Contradictory Visual Directives Detected \(1\)/i)).toBeInTheDocument();
+    expect(screen.getByText('harsh afternoon sunlight')).toBeInTheDocument();
+    expect(screen.getByText('soft diffuse studio strobe')).toBeInTheDocument();
+    expect(screen.getByText(/Direct sun creates hard shadows which contradicts diffuse studio lighting\./i)).toBeInTheDocument();
+    expect(screen.getByText(/Choose either natural sunlight or controlled studio lighting\./i)).toBeInTheDocument();
+  });
+
+  it('invokes onCheckConflicts when Scan for Conflicts button is clicked', () => {
+    const onCheckConflicts = vi.fn();
+    render(
+      <PromptReviewSection
+        tagState={mockTagState}
+        masterPrompt={mockTagState.master_prompt}
+        narrative={mockTagState.narrative}
+        onCheckConflicts={onCheckConflicts}
+        onUpdateTagState={vi.fn()}
+        onMasterPromptChange={vi.fn()}
+        onNarrativeChange={vi.fn()}
+        onResyncPrompt={vi.fn()}
+        onGenerateBaselines={vi.fn()}
+      />
+    );
+
+    const scanBtn = screen.getByRole('button', { name: /Scan for Conflicts/i });
+    expect(scanBtn).toBeInTheDocument();
+    fireEvent.click(scanBtn);
+    expect(onCheckConflicts).toHaveBeenCalled();
   });
 });
+

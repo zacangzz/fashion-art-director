@@ -2,6 +2,7 @@ import os
 from functools import lru_cache
 from typing import Optional
 from google import genai
+from google.genai import types
 
 from app.config import get_settings
 from app.db.database import DatabaseManager
@@ -20,7 +21,10 @@ def get_db_manager() -> DatabaseManager:
 @lru_cache()
 def get_gemini_client() -> genai.Client:
     settings = get_settings()
-    return genai.Client(api_key=settings.GEMINI_API_KEY)
+    timeout_ms = settings.GENAI_TIMEOUT_SECONDS * 1000
+    http_opts = types.HttpOptions(timeout=timeout_ms)
+    return genai.Client(api_key=settings.GEMINI_API_KEY, http_options=http_opts)
+
 
 
 @lru_cache()

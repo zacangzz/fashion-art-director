@@ -41,7 +41,7 @@ export const DEFAULT_TAG_STATE = {
     ],
     camera_optics: [
       { id: 'tag_cam_1', category: 'camera_optics', label: '35mm prime lens', enabled: true, locked: false, isCustom: false },
-      { id: 'tag_cam_2', category: 'camera_optics', label: 'shallow depth of field f/2.0', enabled: true, locked: false, isCustom: false },
+      { id: 'tag_cam_2', category: 'camera_optics', label: 'prime lens f/2.0', enabled: true, locked: false, isCustom: false },
     ],
     mood_era: [
       { id: 'tag_mod_1', category: 'mood_era', label: 'editorial luxury aesthetic', enabled: true, locked: false, isCustom: false },

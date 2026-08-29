@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Sparkles,
   Terminal,
@@ -13,8 +13,12 @@ import {
   Ratio,
   ArrowRight,
   Sliders,
+  SlidersHorizontal,
   ChevronDown,
   ChevronUp,
+  AlertTriangle,
+  Search,
+  Info,
 } from 'lucide-react';
 import TagChip from './TagChip';
 import { CATEGORIES } from '../utils/defaultTags';
@@ -45,6 +49,11 @@ export default function PromptReviewSection({
   narrative = '',
   onNarrativeChange,
   aspectRatio = '1.8:1',
+  temperature = 1.0,
+  onTemperatureChange,
+  conflicts = [],
+  isCheckingConflicts = false,
+  onCheckConflicts,
   isResyncing = false,
   onResyncPrompt,
   isGeneratingBaselines = false,
@@ -60,6 +69,31 @@ export default function PromptReviewSection({
 
   const categories = tagState.categories || {};
 
+  const conflictedTagsMap = useMemo(() => {
+    const map = new Map();
+    if (!conflicts || conflicts.length === 0) return map;
+    conflicts.forEach((c) => {
+      (c.conflicting_elements || []).forEach((el) => {
+        const clean = String(el).toLowerCase().trim();
+        if (clean) {
+          map.set(clean, c);
+        }
+      });
+    });
+    return map;
+  }, [conflicts]);
+
+  const checkChipConflicted = (label) => {
+    if (!label || conflictedTagsMap.size === 0) return { isConflicted: false, reason: '' };
+    const cleanLabel = String(label).toLowerCase().trim();
+    for (const [conflictedKey, conflictObj] of conflictedTagsMap.entries()) {
+      if (cleanLabel.includes(conflictedKey) || conflictedKey.includes(cleanLabel)) {
+        return { isConflicted: true, reason: conflictObj.explanation || 'Conflicting directive' };
+      }
+    }
+    return { isConflicted: false, reason: '' };
+  };
+
   const handleCopyPrompt = async () => {
     if (!masterPrompt) return;
     try {
@@ -72,7 +106,7 @@ export default function PromptReviewSection({
   };
 
   const targetResolution = ASPECT_RATIO_RESOLUTIONS[aspectRatio] || '3840x2133';
-  const fullPromptPreview = `${(masterPrompt || '').trim()} Resolution: ${targetResolution} (Aspect ratio: ${aspectRatio}). 600 DPI ultra-high-resolution print quality. Seed: [Candidate Seed #1..4]. Do not include: ${DEFAULT_NEGATIVE_PROMPT}.`;
+  const fullPromptPreview = `${(masterPrompt || '').trim()} Resolution: ${targetResolution} (Aspect ratio: ${aspectRatio}). Temperature: ${(Number(temperature) || 1.0).toFixed(2)}. 600 DPI ultra-high-resolution print quality. Seed: [Candidate Seed #1..4]. Do not include: ${DEFAULT_NEGATIVE_PROMPT}.`;
 
   const handleCopyFullPrompt = async () => {
     try {
@@ -205,6 +239,80 @@ export default function PromptReviewSection({
             />
           </div>
 
+          {/* Conflict Warning Alert Box (Positioned above Master Prompt) */}
+          {conflicts && conflicts.length > 0 && (
+            <div className="prompt-conflict-alert-box" role="alert">
+              <div className="prompt-conflict-header">
+                <div className="prompt-conflict-title-group">
+                  <div className="prompt-conflict-icon-wrap">
+                    <AlertTriangle size={16} className="text-warning" />
+                  </div>
+                  <div>
+                    <h3 className="prompt-conflict-title">
+                      Contradictory Visual Directives Detected ({conflicts.length})
+                    </h3>
+                    <p className="prompt-conflict-subtitle">
+                      The vision model identified conflicting instructions that will confuse the Imagen model or fight for scene dominance:
+                    </p>
+                  </div>
+                </div>
+                {onCheckConflicts && (
+                  <button
+                    type="button"
+                    className="btn-recheck-conflicts"
+                    onClick={onCheckConflicts}
+                    disabled={isCheckingConflicts || isResyncing}
+                    title="Re-scan prompt and visual levers for conflicts"
+                  >
+                    {isCheckingConflicts ? (
+                      <>
+                        <Loader2 size={12} className="spin-animation" />
+                        <span>Scanning...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Search size={12} />
+                        <span>Re-scan</span>
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
+
+              <div className="prompt-conflict-list">
+                {conflicts.map((conflict, idx) => (
+                  <div key={conflict.id || idx} className="prompt-conflict-item">
+                    <div className="prompt-conflict-item-top">
+                      <div className="prompt-conflict-elements">
+                        {(conflict.conflicting_elements || []).map((elem, eIdx) => (
+                          <React.Fragment key={eIdx}>
+                            {eIdx > 0 && <span className="conflict-vs-tag">vs</span>}
+                            <span className="conflict-element-chip">{elem}</span>
+                          </React.Fragment>
+                        ))}
+                      </div>
+                      {conflict.categories && conflict.categories.length > 0 && (
+                        <div className="conflict-category-badges">
+                          {conflict.categories.map((cat, cIdx) => (
+                            <span key={cIdx} className="conflict-cat-badge">
+                              {cat}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <p className="prompt-conflict-explanation">{conflict.explanation}</p>
+                    {conflict.recommendation && (
+                      <p className="prompt-conflict-recommendation">
+                        <strong>Director Recommendation:</strong> {conflict.recommendation}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Master Generation Prompt Textarea */}
           <div className="prompt-textarea-box">
             <div className="prompt-textarea-header">
@@ -216,6 +324,28 @@ export default function PromptReviewSection({
               </div>
 
               <div className="prompt-textarea-actions">
+                {onCheckConflicts && (
+                  <button
+                    type="button"
+                    className="btn-prompt-action btn-scan-conflicts"
+                    onClick={onCheckConflicts}
+                    disabled={isCheckingConflicts || isResyncing || isGeneratingBaselines}
+                    title="Scan current master prompt & visual levers for contradictions"
+                  >
+                    {isCheckingConflicts ? (
+                      <>
+                        <Loader2 size={12} className="spin-animation" />
+                        <span>Checking Conflicts...</span>
+                      </>
+                    ) : (
+                      <>
+                        <AlertTriangle size={12} className={conflicts.length > 0 ? "text-warning" : ""} />
+                        <span>Scan for Conflicts</span>
+                      </>
+                    )}
+                  </button>
+                )}
+
                 <button
                   type="button"
                   className="btn-resync-prompt"
@@ -325,17 +455,22 @@ export default function PromptReviewSection({
                     </div>
 
                     <div className="prompt-cat-tags-wrap">
-                      {tagList.map((chip) => (
-                        <TagChip
-                          key={chip.id}
-                          chip={{
-                            ...chip,
-                            category: cat.key,
-                          }}
-                          onUpdate={(id, updates) => handleUpdateChip(cat.key, id, updates)}
-                          onDelete={(id) => handleDeleteChip(cat.key, id)}
-                        />
-                      ))}
+                      {tagList.map((chip) => {
+                        const conflictInfo = checkChipConflicted(chip.label);
+                        return (
+                          <TagChip
+                            key={chip.id}
+                            chip={{
+                              ...chip,
+                              category: cat.key,
+                            }}
+                            isConflicted={conflictInfo.isConflicted}
+                            conflictReason={conflictInfo.reason}
+                            onUpdate={(id, updates) => handleUpdateChip(cat.key, id, updates)}
+                            onDelete={(id) => handleDeleteChip(cat.key, id)}
+                          />
+                        );
+                      })}
 
                       {tagList.length === 0 && !isAdding && (
                         <span className="prompt-cat-empty">No tags in this category</span>
@@ -396,7 +531,7 @@ export default function PromptReviewSection({
                   Full Prompt Submitted to API (Baseline Generation Preview)
                 </span>
                 <span className="baseline-prompt-tag">
-                  {targetResolution} ({aspectRatio})
+                  {targetResolution} ({aspectRatio}) • Temp {(Number(temperature) || 1.0).toFixed(2)}
                 </span>
               </div>
 
@@ -449,14 +584,46 @@ export default function PromptReviewSection({
           {/* Primary Baseline Generation Action Bar */}
           <div className="prompt-action-bar">
             <div className="prompt-action-info">
-              <div className="prompt-aspect-tag">
-                <Ratio size={14} className="text-accent" />
-                <span>
-                  Aspect Ratio: <strong>{aspectRatio}</strong> ({targetResolution})
-                </span>
+              <div className="prompt-meta-controls">
+                <div className="prompt-aspect-tag">
+                  <Ratio size={14} className="text-accent" />
+                  <span>
+                    Aspect Ratio: <strong>{aspectRatio}</strong> ({targetResolution})
+                  </span>
+                </div>
+
+                {/* Step 1 Temperature Slider Control */}
+                <div className="prompt-temp-control" title="Generation Temperature: Controls creative randomness across 4 candidate seeds. Lower = Strict / Deterministic, Higher = Creative Variance.">
+                  <div className="prompt-temp-header">
+                    <SlidersHorizontal size={13} className="text-accent" />
+                    <span className="prompt-temp-label">
+                      Temperature: <strong className="prompt-temp-val">{(Number(temperature) || 1.0).toFixed(2)}</strong>
+                    </span>
+                    <span className="prompt-temp-hint">
+                      {temperature < 0.6
+                        ? 'Strict Fidelity'
+                        : temperature > 1.3
+                        ? 'High Variance'
+                        : 'Balanced Editorial'}
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    id="step1-temperature-slider"
+                    aria-label="Seed generation temperature"
+                    min="0.0"
+                    max="2.0"
+                    step="0.05"
+                    value={temperature}
+                    onChange={(e) => onTemperatureChange && onTemperatureChange(parseFloat(e.target.value))}
+                    className="prompt-temp-slider"
+                    disabled={isGeneratingBaselines || isResyncing}
+                  />
+                </div>
               </div>
+
               <span className="prompt-action-note">
-                Renders 4 unique baseline candidates across 4 distinct seeds concurrently at {targetResolution}.
+                Renders 4 unique baseline candidates across 4 distinct seeds concurrently at {targetResolution} (Temp {(Number(temperature) || 1.0).toFixed(2)}).
               </span>
             </div>
 
@@ -489,3 +656,4 @@ export default function PromptReviewSection({
     </div>
   );
 }
+

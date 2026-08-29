@@ -80,8 +80,11 @@ class WardrobeService:
             text = "\n".join(lines).strip()
         return text
 
-    async def _generate_content_async(self, contents: List[Any], config: Optional[Any] = None) -> Any:
-        kwargs = {"model": self.vision_model, "contents": contents}
+    async def _generate_content_async(
+        self, contents: List[Any], config: Optional[Any] = None, vision_model: Optional[str] = None
+    ) -> Any:
+        active_model = vision_model or self.vision_model
+        kwargs = {"model": active_model, "contents": contents}
         if config is not None:
             kwargs["config"] = config
         return await asyncio.to_thread(
@@ -158,14 +161,16 @@ class WardrobeService:
         self,
         image_bytes: bytes,
         original_filename: str = "wardrobe_sheet.png",
+        vision_model: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Ingests a multi-garment sheet image, runs Gemini vision to detect bounding boxes
         for each item, crops them with PIL, persists to DB, and returns garment cards.
         """
+        active_model = vision_model or self.vision_model
         sheet_id = f"sheet_{uuid.uuid4().hex[:8]}"
         request_id = f"seg_{uuid.uuid4().hex}"
-        logger.info(f"Segmenting wardrobe sheet {sheet_id} ({len(image_bytes)} bytes)")
+        logger.info(f"Segmenting wardrobe sheet {sheet_id} ({len(image_bytes)} bytes) using vision model '{active_model}'")
 
         # Save original source sheet
         safe_ext = os.path.splitext(original_filename)[1] or ".png"
@@ -187,17 +192,17 @@ class WardrobeService:
             "wardrobe_segmentation_request",
             request_id,
             sheet_id=sheet_id,
-            model=self.vision_model,
+            model=active_model,
             bytes=len(image_bytes),
         )
 
         try:
-            response = await self._generate_content_async(contents, config=config)
+            response = await self._generate_content_async(contents, config=config, vision_model=active_model)
             raw_text = getattr(response, "text", "") or ""
             logger.info(f"Gemini vision response received for sheet {sheet_id}: {raw_text[:200]}...")
         except Exception as exc:
             logger.error(f"Gemini vision segmentation error: {exc}", exc_info=True)
-            self._audit("wardrobe_segmentation_error", request_id, error=str(exc))
+            self._audit("wardrobe_segmentation_error", request_id, model=active_model, error=str(exc))
             raw_text = "{}"
 
         # Parse detected items
@@ -293,17 +298,21 @@ class WardrobeService:
             "wardrobe_segmentation_response",
             request_id,
             sheet_id=sheet_id,
+            model=active_model,
             items_extracted=len(created_cards),
         )
 
         return created_cards
 
-    async def detect_clothing_regions(self, image_bytes: bytes) -> List[Dict[str, Any]]:
+    async def detect_clothing_regions(
+        self, image_bytes: bytes, vision_model: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         """
         Analyzes a generated image to detect subject clothing regions with bounding boxes.
         Used for auto-mask overlay preview.
         """
-        logger.info("Detecting clothing regions for auto-mask preview...")
+        active_model = vision_model or self.vision_model
+        logger.info(f"Detecting clothing regions for auto-mask preview using {active_model}...")
         image_part = to_image_part(image_bytes)
         contents = [image_part, CLOTHING_REGION_DETECTION_PROMPT]
         config = types.GenerateContentConfig(
@@ -316,7 +325,7 @@ class WardrobeService:
         img_w, img_h = base_img.size
 
         try:
-            response = await self._generate_content_async(contents, config=config)
+            response = await self._generate_content_async(contents, config=config, vision_model=active_model)
             raw_text = getattr(response, "text", "") or ""
             cleaned = self._clean_json_text(raw_text)
             parsed = json.loads(cleaned)
@@ -421,6 +430,7 @@ class WardrobeService:
         self,
         image_bytes: bytes,
         assignments: List[Dict[str, Any]],
+        vision_model: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Vision-Assisted Subject Grounding (Pre-pass).
@@ -433,6 +443,7 @@ class WardrobeService:
                 "unmodified_subjects_guardrail": "Preserve all subjects and background elements exactly as shown.",
             }
 
+        active_model = vision_model or self.vision_model
         fallback_result = self._heuristic_spatial_grounding(assignments)
         request_id = f"ground_{uuid.uuid4().hex}"
         started = time.perf_counter()
@@ -462,11 +473,11 @@ class WardrobeService:
             "wardrobe_grounding_request",
             request_id,
             pins_count=len(assignments),
-            model=self.vision_model,
+            model=active_model,
         )
 
         try:
-            response = await self._generate_content_async(contents)
+            response = await self._generate_content_async(contents, vision_model=active_model)
             raw_text = getattr(response, "text", "") or ""
             cleaned = self._clean_json_text(raw_text)
             parsed = json.loads(cleaned)

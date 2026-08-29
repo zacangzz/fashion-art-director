@@ -15,6 +15,7 @@ import {
   ChevronUp,
   Eye,
   Crosshair,
+  Cpu,
 } from 'lucide-react';
 
 export default function HistoryDrawer({
@@ -104,6 +105,10 @@ export default function HistoryDrawer({
               const maskCoverage = inpaintMeta?.mask_stats?.coverage_percentage;
               const isShowingMask = viewingMaskId === item.id && Boolean(maskUrl);
 
+              const rawModel = item.model_name || item.schema_json?.imagen_model || item.schema_json?.model_name || inpaintMeta?.model;
+              const isUpload = item.id?.startsWith('gen_upload_') || item.schema_json?.source === 'direct_upload';
+              const modelDisplay = !isUpload && rawModel ? rawModel : 'N/A';
+
               return (
                 <div
                   key={item.id}
@@ -148,6 +153,12 @@ export default function HistoryDrawer({
                           Area: {maskCoverage}%
                         </span>
                       )}
+                    </div>
+
+                    <div className="history-card-model" title={`Generation Model: ${modelDisplay}`}>
+                      <Cpu size={11} className="history-model-icon" />
+                      <span className="history-model-label">Model:</span>
+                      <span className="history-model-name">{modelDisplay}</span>
                     </div>
 
                     <div className="history-prompt-block">

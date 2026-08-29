@@ -18,8 +18,9 @@ logger = get_logger("export_service")
 
 DEFAULT_UPSCALE_PROMPT = (
     "Restore, de-noise, and enhance the provided reference image as an authentic raw photo. "
-    "Maximize optical resolution, fine film grain, and crisp focus while strictly preserving original facial structures, "
-    "visible skin pores, natural skin texture, stray hairs, minor skin blemishes, natural light, and overall composition. "
+    "Maximize optical resolution and crisp focus while strictly preserving original facial structures, "
+    "visible skin pores, natural skin texture, realistic teeth texture, natural tooth alignment, authentic gum line, subtle dental translucency, "
+    "minor skin blemishes, natural light, and overall composition. "
     "Focus on ensuring that all clothing, garments, fabric weaves, seams, and material textures are clear, tactile, and richly detailed."
 )
 

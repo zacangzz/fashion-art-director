@@ -34,6 +34,7 @@ export default function WardrobePanel({
   onCompose,
   isComposing = false,
   activeGenerationId = null,
+  visionModel = null,
 }) {
   const [items, setItems] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -71,7 +72,7 @@ export default function WardrobePanel({
     try {
       setIsUploading(true);
       setErrorMessage(null);
-      const res = await uploadWardrobeSheet(file);
+      const res = await uploadWardrobeSheet(file, visionModel);
       if (res.items && res.items.length > 0) {
         setItems((prev) => [...res.items, ...prev]);
       }

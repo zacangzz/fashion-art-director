@@ -1,1 +1,2 @@
-Do not include: {NEGATIVE_PROMPT}. Do not change anything outside the white mask region.
+Resolution: {RESOLUTION} (Aspect ratio: {ASPECT_RATIO}). Do not include: {NEGATIVE_PROMPT}. Do not change anything outside the white mask region.
+

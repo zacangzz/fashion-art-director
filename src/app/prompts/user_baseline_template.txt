@@ -3,5 +3,7 @@ USER CREATIVE BASELINE & INTENT:
 {USER_PROMPT}
 </user_requirements>
 
-Analyze the moodboard images in conjunction with the user's creative requirements. Synthesize the optimal Master Generation Prompt with raw photo authenticity, fine film grain, visible skin pores, natural skin texture, stray hairs, minor skin blemishes, natural light, and authentic physical materials, breaking down its core visual levers across all 9 categories.
+Analyze the moodboard images in conjunction with the user's creative requirements. Synthesize the optimal Master Generation Prompt with raw photo authenticity, visible skin pores, natural skin texture, realistic teeth texture, natural tooth alignment, authentic gum line, subtle dental translucency, minor skin blemishes, natural light, and authentic physical materials, breaking down its core visual levers across all 9 categories.
+
+
 

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Lock, Unlock, X, Edit2 } from 'lucide-react';
+import { Lock, Unlock, X, Edit2, AlertTriangle } from 'lucide-react';
 
 const CATEGORY_COLORS = {
   subject_details: '#06b6d4',
@@ -14,7 +14,8 @@ const CATEGORY_COLORS = {
   custom: '#64748b',
 };
 
-export default function TagChip({ chip, onUpdate, onDelete }) {
+export default function TagChip({ chip, onUpdate, onDelete, isConflicted = false, conflictReason = '' }) {
+
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(chip.label);
 
@@ -55,13 +56,24 @@ export default function TagChip({ chip, onUpdate, onDelete }) {
 
   return (
     <div
-      className={`tag-chip enabled ${chip.locked ? 'locked' : ''}`}
+      className={`tag-chip enabled ${chip.locked ? 'locked' : ''} ${isConflicted ? 'tag-chip-conflicted' : ''}`}
       style={{
-        '--chip-color': accentColor,
-        '--chip-bg': `${accentColor}1F`,
+        '--chip-color': isConflicted ? '#f59e0b' : accentColor,
+        '--chip-bg': isConflicted ? '#f59e0b24' : `${accentColor}1F`,
         cursor: 'default',
       }}
     >
+      {/* Conflict Warning Indicator */}
+      {isConflicted && (
+        <span
+          className="tag-conflict-icon"
+          title={conflictReason || 'This tag is part of a detected prompt conflict'}
+          style={{ color: '#f59e0b', display: 'flex', alignItems: 'center' }}
+        >
+          <AlertTriangle size={12} />
+        </span>
+      )}
+
       {/* Lock Button */}
       <button
         type="button"

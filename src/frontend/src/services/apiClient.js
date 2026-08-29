@@ -49,14 +49,34 @@ async function handleApiResponse(response, defaultMessage) {
 }
 
 /**
+ * Fetches model configuration including available vision & imagen models and server defaults.
+ * @returns {Promise<{available_vision_models: string[], available_imagen_models: string[], default_vision_model: string, default_imagen_model: string, inpaint_model: string}>}
+ */
+export async function fetchModelConfig() {
+  const response = await fetch('/api/models/config');
+  return handleApiResponse(response, 'Failed to fetch model configuration');
+}
+
+/**
  * Uploads 1-5 image files + optional text prompt for moodboard analysis & concurrent 4-baseline generation.
  * @param {File[]} files
  * @param {string} [prompt]
  * @param {string[]} [lockedSections]
  * @param {Object} [existingSchema]
+ * @param {string} [aspectRatio]
+ * @param {string} [visionModel]
+ * @param {string} [imagenModel]
  * @returns {Promise<{moodboard_id: string, schema: Object, baselines: Array}>}
  */
-export async function analyzeAndGenerateBaselines(files, prompt = '', lockedSections = null, existingSchema = null, aspectRatio = '1.8:1') {
+export async function analyzeAndGenerateBaselines(
+  files,
+  prompt = '',
+  lockedSections = null,
+  existingSchema = null,
+  aspectRatio = '1.8:1',
+  visionModel = null,
+  imagenModel = null
+) {
   const formData = new FormData();
   files.forEach((file) => {
     formData.append('files', file);
@@ -72,6 +92,12 @@ export async function analyzeAndGenerateBaselines(files, prompt = '', lockedSect
   }
   if (aspectRatio && typeof aspectRatio === 'string') {
     formData.append('aspect_ratio', aspectRatio);
+  }
+  if (visionModel) {
+    formData.append('vision_model', visionModel);
+  }
+  if (imagenModel) {
+    formData.append('imagen_model', imagenModel);
   }
 
   const response = await fetch('/api/moodboard/analyze-and-baselines', {
@@ -112,6 +138,7 @@ export async function uploadDirectPhoto(file, aspectRatio = null) {
  * @param {string[]} [lockedCategories]
  * @param {Object} [existingSchema]
  * @param {string} [aspectRatio]
+ * @param {string} [visionModel]
  * @returns {Promise<{moodboard_id: string, master_prompt: string, narrative: string, categories: Object, schema_data: Object}>}
  */
 export async function analyzeMoodboard(
@@ -119,7 +146,8 @@ export async function analyzeMoodboard(
   prompt = '',
   lockedCategories = null,
   existingSchema = null,
-  aspectRatio = '1.8:1'
+  aspectRatio = '1.8:1',
+  visionModel = null
 ) {
   const formData = new FormData();
   files.forEach((file) => {
@@ -137,6 +165,9 @@ export async function analyzeMoodboard(
   if (aspectRatio && typeof aspectRatio === 'string') {
     formData.append('aspect_ratio', aspectRatio);
   }
+  if (visionModel) {
+    formData.append('vision_model', visionModel);
+  }
 
   const response = await fetch('/api/moodboard/analyze', {
     method: 'POST',
@@ -148,7 +179,7 @@ export async function analyzeMoodboard(
 
 /**
  * Spawns 4 concurrent baseline image candidate generations from customized Master Prompt (Step 1B).
- * @param {Object} payload { moodboard_id, master_prompt, narrative, categories, aspect_ratio, prompt_override }
+ * @param {Object} payload { moodboard_id, master_prompt, narrative, categories, aspect_ratio, prompt_override, imagen_model }
  * @returns {Promise<{moodboard_id: string, baselines: Array}>}
  */
 export async function generateBaselines(payload) {
@@ -165,8 +196,8 @@ export async function generateBaselines(payload) {
 
 /**
  * Re-synthesizes fluid directorial Master Prompt prose from user-updated visual levers on demand.
- * @param {Object} payload { narrative, categories, previous_master_prompt }
- * @returns {Promise<{master_prompt: string, narrative: string}>}
+ * @param {Object} payload { narrative, categories, previous_master_prompt, vision_model }
+ * @returns {Promise<{master_prompt: string, narrative: string, conflicts: Array}>}
  */
 export async function resyncMasterPrompt(payload) {
   const response = await fetch('/api/moodboard/resync-prompt', {
@@ -178,6 +209,23 @@ export async function resyncMasterPrompt(payload) {
   });
 
   return handleApiResponse(response, 'Master prompt re-sync failed');
+}
+
+/**
+ * Scans Master Prompt and visual levers for conflicting or contradictory directives.
+ * @param {Object} payload { master_prompt, narrative, categories, vision_model }
+ * @returns {Promise<{conflicts: Array}>}
+ */
+export async function checkPromptConflicts(payload) {
+  const response = await fetch('/api/moodboard/check-conflicts', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  return handleApiResponse(response, 'Prompt conflict check failed');
 }
 
 /**
@@ -358,11 +406,15 @@ export async function generateImage(payload) {
 /**
  * Uploads a multi-garment lookbook sheet and auto-segments it into cards.
  * @param {File} file
+ * @param {string} [visionModel]
  * @returns {Promise<{items: Array}>}
  */
-export async function uploadWardrobeSheet(file) {
+export async function uploadWardrobeSheet(file, visionModel = null) {
   const formData = new FormData();
   formData.append('file', file);
+  if (visionModel) {
+    formData.append('vision_model', visionModel);
+  }
 
   const response = await fetch('/api/wardrobe/upload', {
     method: 'POST',
@@ -410,15 +462,20 @@ export async function deleteAllWardrobeItems() {
 /**
  * Detects clothing regions on the active generated image.
  * @param {string} generationId
+ * @param {string} [visionModel]
  * @returns {Promise<{regions: Array}>}
  */
-export async function detectClothingRegions(generationId) {
+export async function detectClothingRegions(generationId, visionModel = null) {
+  const payload = { generation_id: generationId };
+  if (visionModel) {
+    payload.vision_model = visionModel;
+  }
   const response = await fetch('/api/wardrobe/detect-regions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ generation_id: generationId }),
+    body: JSON.stringify(payload),
   });
 
   return handleApiResponse(response, 'Failed to detect clothing regions');
