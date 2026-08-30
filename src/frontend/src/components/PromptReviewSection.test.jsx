@@ -14,22 +14,19 @@ describe('PromptReviewSection', () => {
     },
   };
 
-  it('renders narrative input, master prompt textarea, and category levers', () => {
+  it('renders master prompt textarea and category levers', () => {
     render(
       <PromptReviewSection
         tagState={mockTagState}
         masterPrompt={mockTagState.master_prompt}
-        narrative={mockTagState.narrative}
         onUpdateTagState={vi.fn()}
         onMasterPromptChange={vi.fn()}
-        onNarrativeChange={vi.fn()}
         onResyncPrompt={vi.fn()}
         onGenerateBaselines={vi.fn()}
       />
     );
 
     expect(screen.getByText(/Director's Master Prompt & Visual Levers/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/Scene Narrative & Core Logline/i)).toHaveValue('A sunlit editorial scene in a modernist pavilion.');
     expect(screen.getByLabelText(/Vision Director Master Prompt/i)).toHaveValue('High fashion editorial photo with warm golden light.');
     expect(screen.getByText('striking model')).toBeInTheDocument();
     expect(screen.getByText('charcoal blazer')).toBeInTheDocument();

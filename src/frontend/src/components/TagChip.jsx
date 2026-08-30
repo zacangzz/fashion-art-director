@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Lock, Unlock, X, Edit2, AlertTriangle } from 'lucide-react';
+import { Lock, Unlock, X, AlertTriangle } from 'lucide-react';
 
 const CATEGORY_COLORS = {
   subject_details: '#06b6d4',
@@ -15,7 +15,6 @@ const CATEGORY_COLORS = {
 };
 
 export default function TagChip({ chip, onUpdate, onDelete, isConflicted = false, conflictReason = '' }) {
-
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(chip.label);
 
@@ -59,7 +58,8 @@ export default function TagChip({ chip, onUpdate, onDelete, isConflicted = false
       className={`tag-chip enabled ${chip.locked ? 'locked' : ''} ${isConflicted ? 'tag-chip-conflicted' : ''}`}
       style={{
         '--chip-color': isConflicted ? '#f59e0b' : accentColor,
-        '--chip-bg': isConflicted ? '#f59e0b24' : `${accentColor}1F`,
+        '--chip-bg': isConflicted ? 'rgba(245, 158, 11, 0.15)' : `${accentColor}1A`,
+        '--chip-border': isConflicted ? '#f59e0b' : `${accentColor}99`,
         cursor: 'default',
       }}
     >
@@ -78,21 +78,25 @@ export default function TagChip({ chip, onUpdate, onDelete, isConflicted = false
       <button
         type="button"
         aria-label={chip.locked ? 'Unlock tag' : 'Lock tag'}
-        className="btn-icon"
-        style={{
-          background: 'none',
-          border: 'none',
-          color: 'inherit',
-          cursor: 'pointer',
-          padding: 0,
-          display: 'flex',
-          opacity: chip.locked ? 1 : 0.4,
-        }}
+        className={`tag-chip-btn lock-btn ${chip.locked ? 'locked' : ''}`}
         onClick={handleToggleLock}
         title={chip.locked ? 'Locked: preserved during re-analysis' : 'Click to lock tag'}
       >
         {chip.locked ? <Lock size={12} /> : <Unlock size={12} />}
       </button>
+
+      {/* Category Indicator Dot */}
+      <span
+        style={{
+          width: '6px',
+          height: '6px',
+          borderRadius: '50%',
+          backgroundColor: isConflicted ? '#f59e0b' : accentColor,
+          boxShadow: `0 0 6px ${isConflicted ? '#f59e0b' : accentColor}`,
+          display: 'inline-block',
+          flexShrink: 0,
+        }}
+      />
 
       {/* Label / Inline Edit Input */}
       {isEditing ? (
@@ -108,9 +112,9 @@ export default function TagChip({ chip, onUpdate, onDelete, isConflicted = false
         />
       ) : (
         <span
+          className="tag-chip-label"
           onClick={handleStartEdit}
           title="Click to edit tag text"
-          style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
         >
           {chip.label}
         </span>
@@ -120,15 +124,7 @@ export default function TagChip({ chip, onUpdate, onDelete, isConflicted = false
       <button
         type="button"
         aria-label="Delete tag"
-        style={{
-          background: 'none',
-          border: 'none',
-          color: 'inherit',
-          cursor: 'pointer',
-          padding: 0,
-          display: 'flex',
-          opacity: 0.6,
-        }}
+        className="tag-chip-btn delete-btn"
         onClick={handleDeleteClick}
         title="Remove tag"
       >

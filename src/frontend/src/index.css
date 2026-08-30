@@ -6529,15 +6529,113 @@ textarea:focus-visible,
   border-left: 2px solid #f59e0b;
 }
 
+/* ==========================================================================
+   Tag Studio & Tag Chip High-Contrast UI/UX Design System
+   ========================================================================== */
+
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 10px;
+  border-radius: 7px;
+  background: var(--chip-bg, rgba(15, 23, 42, 0.85));
+  border: 1.5px solid var(--chip-border, var(--chip-color, rgba(255, 255, 255, 0.25)));
+  color: #f8fafc;
+  font-size: 0.8rem;
+  font-weight: 500;
+  line-height: 1.35;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+  position: relative;
+  backdrop-filter: blur(8px);
+}
+
+.tag-chip:hover {
+  transform: translateY(-1px);
+  border-color: var(--chip-color);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5), 0 0 10px var(--chip-color);
+  background: linear-gradient(135deg, rgba(30, 41, 59, 0.95) 0%, rgba(15, 23, 42, 0.95) 100%);
+}
+
+.tag-chip-label {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #f8fafc;
+  font-weight: 500;
+  transition: color 0.15s ease;
+}
+
+.tag-chip-label:hover {
+  color: #ffffff;
+  text-decoration: underline;
+  text-decoration-color: var(--chip-color);
+  text-underline-offset: 2px;
+}
+
+.tag-chip.locked {
+  border: 1.5px solid var(--chip-color) !important;
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.9) 0%, rgba(30, 41, 59, 0.8) 100%) !important;
+  box-shadow: 0 0 0 1px var(--chip-color), 0 2px 8px rgba(0, 0, 0, 0.5), 0 0 12px var(--chip-color) !important;
+}
+
 .tag-chip-conflicted {
-  border: 1px dashed #f59e0b !important;
-  box-shadow: 0 0 6px rgba(245, 158, 11, 0.3);
+  border: 1.5px dashed #f59e0b !important;
+  background: rgba(245, 158, 11, 0.15) !important;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.35) !important;
 }
 
 .tag-conflict-icon {
   display: inline-flex;
   align-items: center;
   margin-right: 2px;
+}
+
+.tag-chip-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary, #cbd5e1);
+  cursor: pointer;
+  padding: 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+  opacity: 0.75;
+}
+
+.tag-chip-btn:hover {
+  opacity: 1;
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.tag-chip-btn.delete-btn:hover {
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.2);
+}
+
+.tag-chip-btn.lock-btn.locked {
+  opacity: 1;
+  color: var(--chip-color);
+}
+
+.tag-chip-edit-input {
+  background: rgba(0, 0, 0, 0.6);
+  border: 1.5px solid var(--chip-color);
+  border-radius: 4px;
+  color: #ffffff;
+  font-size: 0.8rem;
+  font-family: inherit;
+  font-weight: 500;
+  padding: 1px 6px;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.1);
+  min-width: 90px;
 }
 
 /* ==========================================================================

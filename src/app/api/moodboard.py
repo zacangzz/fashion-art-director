@@ -127,6 +127,16 @@ async def analyze_and_baselines(
     except Exception as exc:
         parse_and_raise_http_error(exc, model_name=eff_vision_model, context="Vision Tag & Narrative Extraction")
 
+    # Record upstream vision extraction cost on the moodboard record
+    if tag_state and moodboard_id:
+        v_cost = float(tag_state.get("cost_usd") or 0.0)
+        v_tokens_raw = tag_state.get("tokens")
+        v_tokens = int(v_tokens_raw.get("total_token_count", 0) if isinstance(v_tokens_raw, dict) else (v_tokens_raw or 0))
+        try:
+            await db_manager.add_moodboard_cost(moodboard_id, v_cost, v_tokens)
+        except Exception as err:
+            logger.warning(f"Could not update moodboard cost: {err}")
+
     # 2. Concurrently Generate 4 Baselines
     eff_aspect_ratio = aspect_ratio or "1.8:1"
     try:
@@ -226,6 +236,16 @@ async def analyze_moodboard(
         )
     except Exception as exc:
         parse_and_raise_http_error(exc, model_name=eff_vision_model, context="Vision Tag & Master Prompt Extraction")
+
+    # Record upstream vision extraction cost on the moodboard record
+    if tag_state and moodboard_id:
+        v_cost = float(tag_state.get("cost_usd") or 0.0)
+        v_tokens_raw = tag_state.get("tokens")
+        v_tokens = int(v_tokens_raw.get("total_token_count", 0) if isinstance(v_tokens_raw, dict) else (v_tokens_raw or 0))
+        try:
+            await db_manager.add_moodboard_cost(moodboard_id, v_cost, v_tokens)
+        except Exception as err:
+            logger.warning(f"Could not update moodboard cost: {err}")
 
     categories_resp = {}
     all_chips: List[TagChip] = []

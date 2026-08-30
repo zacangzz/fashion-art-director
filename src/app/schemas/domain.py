@@ -475,6 +475,9 @@ class CompositionPinAssignment(BaseModel):
     drop_position: Optional[Dict[str, float]] = None
     target_description: Optional[str] = None
     region_bbox: Optional[List[float]] = None
+    grounded_subject: Optional[str] = None
+    item_label: Optional[str] = None
+    category: Optional[str] = None
 
 
 class WardrobeComposeRequest(BaseModel):

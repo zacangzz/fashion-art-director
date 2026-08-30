@@ -3,7 +3,4 @@ USER CREATIVE BASELINE & INTENT:
 {USER_PROMPT}
 </user_requirements>
 
-Analyze the moodboard images in conjunction with the user's creative requirements. Synthesize the optimal Master Generation Prompt with raw photo authenticity, visible skin pores, natural skin texture, realistic teeth texture, natural tooth alignment, authentic gum line, subtle dental translucency, minor skin blemishes, natural light, and authentic physical materials, breaking down its core visual levers across all 9 categories.
-
-
-
+Analyze the moodboard images in conjunction with the user's creative requirements. Synthesize the optimal Master Generation Prompt for Google's multimodal Gemini Image models ("Nano Banana" / gemini-3.1-flash-image family), following the 4-phase structured sequential prose: (1) Creative Intent & Scene Context, (2) Hyper-specific Subject & Styling, (3) Spatial Environment & Props, and (4) Exact Lighting & Optical Physics. Prioritize raw photo authenticity, visible skin pores, natural skin texture, realistic teeth texture, natural tooth alignment, authentic gum line, subtle dental translucency, minor skin blemishes, natural light, and authentic physical materials, breaking down its core visual levers into hyper-specific tags across all 9 categories.

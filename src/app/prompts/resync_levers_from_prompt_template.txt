@@ -1,11 +1,7 @@
-The user has updated the Master Generation Prompt for this scene. Analyze and deconstruct this prompt into the 9-category visual levers, extracting precise descriptive tags for each category, and distill the core narrative.
+The user has updated the Master Generation Prompt (crafted for Google's multimodal Gemini Image models / "Nano Banana") for this scene. Analyze and deconstruct this prompt into the 9-category visual levers, extracting precise, hyper-specific descriptive tags across context/intent, subject, styling, environment, and optical physics.
 
 <master_prompt>
 {MASTER_PROMPT}
 </master_prompt>
 
-<scene_narrative>
-{CURRENT_NARRATIVE}
-</scene_narrative>
-
-Extract comprehensive 9-category visual levers and refined scene narrative reflecting the master prompt above.
+Extract comprehensive, hyper-specific 9-category visual levers reflecting the master prompt above.

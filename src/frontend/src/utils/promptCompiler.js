@@ -67,16 +67,40 @@ export function getModifiedCategories(
 }
 
 /**
- * Compiles 9-category visual tags and narrative summary into a unified, high-fidelity prompt.
+ * Compiles 9-category visual tags into a unified, high-fidelity prompt.
+ * Supports both compileModularPrompt(categories, customTags, promptOverride) and legacy compileModularPrompt(narrative, categories, ...).
  */
-export function compileModularPrompt(narrative = '', categories = {}, customTags = [], promptOverride = null) {
-  if (promptOverride && promptOverride.trim()) {
-    return promptOverride.trim();
+export function compileModularPrompt(
+  categoriesOrNarrative = {},
+  customTagsOrCategories = [],
+  promptOverrideOrCustomTags = null,
+  promptOverride = null
+) {
+  let categories = {};
+  let customTags = [];
+  let override = null;
+  let legacyNarrative = '';
+
+  if (typeof categoriesOrNarrative === 'string') {
+    // Legacy invocation: (narrative, categories, customTags, promptOverride)
+    legacyNarrative = categoriesOrNarrative.trim();
+    categories = customTagsOrCategories || {};
+    customTags = Array.isArray(promptOverrideOrCustomTags) ? promptOverrideOrCustomTags : [];
+    override = promptOverride;
+  } else {
+    // Standard invocation: (categories, customTags, promptOverride)
+    categories = categoriesOrNarrative || {};
+    customTags = Array.isArray(customTagsOrCategories) ? customTagsOrCategories : [];
+    override = promptOverrideOrCustomTags;
+  }
+
+  if (override && typeof override === 'string' && override.trim()) {
+    return override.trim();
   }
 
   const sections = [];
-  if (narrative && narrative.trim()) {
-    sections.push(narrative.trim());
+  if (legacyNarrative) {
+    sections.push(legacyNarrative);
   }
 
   const cats = categories || {};
@@ -130,7 +154,7 @@ export function compileModularPrompt(narrative = '', categories = {}, customTags
   }
 
   const compiled = sections.join(' ').trim();
-  return compiled || (narrative.trim() ? narrative.trim() : 'A high-fashion cinematic scene with exquisite detail.');
+  return compiled || (legacyNarrative ? legacyNarrative : 'A high-fashion cinematic scene with exquisite detail.');
 }
 
 /**
@@ -139,13 +163,13 @@ export function compileModularPrompt(narrative = '', categories = {}, customTags
  * while directing targeted adjustments only to edited tags.
  */
 export function compileDeltaPrompt({
-  narrative = '',
   categories = {},
-  baselineNarrative = '',
   baselineCategories = null,
   lockedCategories = [],
   customTags = [],
   promptOverride = null,
+  narrative = '',
+  baselineNarrative = '',
 }) {
   if (promptOverride && promptOverride.trim()) {
     return promptOverride.trim();
@@ -153,7 +177,7 @@ export function compileDeltaPrompt({
 
   // If no baseline categories provided, fall back to standard modular scene prompt
   if (!baselineCategories || typeof baselineCategories !== 'object') {
-    return compileModularPrompt(narrative, categories, customTags, promptOverride);
+    return compileModularPrompt(categories, customTags, promptOverride);
   }
 
   const diff = getModifiedCategories(categories, baselineCategories, narrative, baselineNarrative);

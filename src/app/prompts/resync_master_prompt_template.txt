@@ -1,8 +1,4 @@
-The user has updated the visual direction (prompt, narrative, or visual lever tags) for this scene. Re-harmonize and update the Master Generation Prompt, core narrative, and 9-category visual levers accordingly.
-
-<scene_narrative>
-{CURRENT_NARRATIVE}
-</scene_narrative>
+The user has updated the visual direction (prompt or visual lever tags) for this scene. Re-harmonize and update the Master Generation Prompt and 9-category visual levers accordingly for Google's multimodal Gemini Image models ("Nano Banana" / gemini-3.1-flash-image family).
 
 <master_prompt>
 {PREVIOUS_MASTER_PROMPT}
@@ -12,4 +8,4 @@ The user has updated the visual direction (prompt, narrative, or visual lever ta
 {UPDATED_CATEGORIES_JSON}
 </visual_levers>
 
-Synthesize the definitive updated Master Generation Prompt, core narrative, and comprehensive 9-category visual levers reflecting all active creative directives above.
+Synthesize the definitive updated Master Generation Prompt following the 4-phase structured sequential flow ((1) Intent & Context, (2) Subject & Styling, (3) Environment & Props, (4) Lighting & Optics) alongside comprehensive, hyper-specific 9-category visual levers reflecting all active creative directives above.

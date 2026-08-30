@@ -1,9 +1,11 @@
 import os
 import io
 import json
+import base64
 import pytest
 import aiosqlite
 from unittest.mock import MagicMock, AsyncMock, patch
+from httpx import AsyncClient, ASGITransport
 from PIL import Image
 from fastapi.testclient import TestClient
 
@@ -11,6 +13,7 @@ from app.main import app
 from app.db.database import DatabaseManager
 from app.services.wardrobe_service import WardrobeService
 from app.services.generation_service import GenerationService
+from app.schemas.domain import CompositionPinAssignment
 
 
 @pytest.fixture
@@ -691,6 +694,284 @@ async def test_wardrobe_service_interactions_api(test_db, dummy_image_bytes, tmp
     assert details["garment_type"] == "Silk Evening Gown"
     assert details["primary_color"] == "Crimson"
     assert service.client.interactions.create.called
+
+
+@pytest.mark.asyncio
+async def test_compose_wardrobe_with_conversation_and_custom_instruction(test_db, dummy_image_bytes, tmp_path):
+    storage_dir = str(tmp_path / "storage")
+    os.makedirs(os.path.join(storage_dir, "generations"), exist_ok=True)
+
+    parent_img_path = os.path.join(storage_dir, "generations", "parent_gen_01_master.png")
+    with open(parent_img_path, "wb") as f:
+        f.write(dummy_image_bytes)
+
+    await test_db.create_generation({
+        "id": "gen_parent_conv_01",
+        "master_image_path": parent_img_path,
+        "aspect_ratio": "2:3",
+        "seed": 12345,
+        "is_baseline": True,
+        "accumulated_cost_usd": 0.05,
+        "accumulated_tokens": 1000,
+    })
+
+    garment_path = os.path.join(storage_dir, "crop_garment.png")
+    with open(garment_path, "wb") as f:
+        f.write(dummy_image_bytes)
+
+    await test_db.create_wardrobe_item({
+        "id": "wd_conv_item_01",
+        "source_image_path": garment_path,
+        "label": "Leather Bomber Jacket",
+        "category": "outerwear",
+        "cropped_image_path": garment_path,
+    })
+
+    wardrobe_service = WardrobeService(db_manager=test_db, api_key="fake-key", storage_dir=storage_dir)
+    wardrobe_service.ground_wardrobe_pins = AsyncMock(return_value={
+        "grounded_pins": [{
+            "pin_number": 1,
+            "target_subject": "The model on left",
+            "body_location": "torso",
+            "spatial_anchor": "left center",
+        }],
+        "unmodified_subjects_guardrail": "Preserve right model untouched.",
+    })
+
+    gen_service = GenerationService(
+        db_manager=test_db,
+        api_key="fake-key",
+        storage_dir=storage_dir,
+        wardrobe_service=wardrobe_service,
+    )
+    gen_service._call_multi_image_model = AsyncMock(return_value=dummy_image_bytes)
+
+    # Test passing Pydantic CompositionPinAssignment model objects
+    pydantic_asgn = CompositionPinAssignment(
+        wardrobe_item_id="wd_conv_item_01",
+        pin_number=1,
+        drop_position={"x": 0.3, "y": 0.4},
+        target_description="Leather Jacket",
+    )
+
+    result = await gen_service.compose_wardrobe(
+        parent_id="gen_parent_conv_01",
+        assignments=[pydantic_asgn],
+        conversation_id="conv_custom_123",
+        custom_instruction="Make the jacket look distressed with vintage patina.",
+        imagen_model="gemini-3.1-flash-image",
+        vision_model="gemini-3.7-flash",
+    )
+
+    assert result["generation_id"].startswith("gen_wardrobe_")
+    assert result["conversation_id"] == "conv_custom_123"
+    assert "ADDITIONAL USER INSTRUCTION:\nMake the jacket look distressed with vintage patina." in result["compiled_prompt"]
+    assert "Leather Bomber Jacket" in result["compiled_prompt"]
+    assert len(result["assignments"]) == 1
+    assert result["assignments"][0]["grounded_subject"] == "The model on left"
+
+    # Verify DB record stored conversation_id and schema_json correctly
+    record = await test_db.get_generation(result["generation_id"])
+    assert record is not None
+    assert record["conversation_id"] == "conv_custom_123"
+    assert record["schema_json"]["custom_instruction"] == "Make the jacket look distressed with vintage patina."
+    assert record["schema_json"]["wardrobe_composition"] is True
+
+    # Verify vision_model was passed to ground_wardrobe_pins
+    wardrobe_service.ground_wardrobe_pins.assert_called_once()
+    _, kwargs = wardrobe_service.ground_wardrobe_pins.call_args
+    assert kwargs.get("vision_model") == "gemini-3.7-flash"
+
+
+@pytest.mark.asyncio
+async def test_wardrobe_compose_api_endpoint(test_db):
+    mock_result = {
+        "generation_id": "gen_wardrobe_mock99",
+        "parent_id": "gen_parent_test",
+        "conversation_id": "conv_api_test",
+        "seed": 4289102,
+        "compiled_prompt": "Compose Leather Jacket",
+        "negative_prompt": "blurry",
+        "image_url": "/api/images/gen_wardrobe_mock99_master.png",
+        "created_at": "2026-08-30T12:00:00Z",
+        "aspect_ratio": "2:3",
+        "resolution": {"width": 1024, "height": 1536},
+        "assignments": [
+            {
+                "wardrobe_item_id": "wd_item_01",
+                "pin_number": 1,
+                "drop_position": {"x": 0.5, "y": 0.5},
+                "target_description": "jacket",
+                "grounded_subject": "Subject A",
+            }
+        ],
+        "cost_usd": 0.04,
+        "tokens": 1200,
+        "accumulated_cost_usd": 0.08,
+        "accumulated_tokens": 2200,
+    }
+
+    with patch("app.api.wardrobe.generation_service.compose_wardrobe", new_callable=AsyncMock) as mock_compose:
+        mock_compose.return_value = mock_result
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            payload = {
+                "parent_id": "gen_parent_test",
+                "assignments": [
+                    {
+                        "wardrobe_item_id": "wd_item_01",
+                        "pin_number": 1,
+                        "drop_position": {"x": 0.5, "y": 0.5},
+                        "target_description": "jacket",
+                    }
+                ],
+                "seed": 4289102,
+                "seed_mode": "locked",
+                "aspect_ratio": "2:3",
+                "conversation_id": "conv_api_test",
+                "custom_instruction": "Add warm studio lighting",
+                "imagen_model": "gemini-3.1-flash-image",
+                "vision_model": "gemini-3.7-flash",
+            }
+            response = await client.post("/api/wardrobe/compose", json=payload)
+            assert response.status_code == 200
+            data = response.json()
+            assert data["generation_id"] == "gen_wardrobe_mock99"
+            assert data["conversation_id"] == "conv_api_test"
+            assert data["compiled_prompt"] == "Compose Leather Jacket"
+            assert len(data["assignments"]) == 1
+            assert data["assignments"][0]["grounded_subject"] == "Subject A"
+
+            # Check that compose_wardrobe was called with expected kwargs
+            mock_compose.assert_called_once()
+            _, call_kwargs = mock_compose.call_args
+            assert call_kwargs["parent_id"] == "gen_parent_test"
+            assert call_kwargs["conversation_id"] == "conv_api_test"
+            assert call_kwargs["custom_instruction"] == "Add warm studio lighting"
+            assert call_kwargs["imagen_model"] == "gemini-3.1-flash-image"
+            assert call_kwargs["vision_model"] == "gemini-3.7-flash"
+
+
+@pytest.mark.asyncio
+async def test_wardrobe_composition_white_balance_lock_and_multi_turn_lineage(test_db, dummy_image_bytes, tmp_path):
+    """
+    Verifies that wardrobe composition prompts include the Color Constancy & White Balance Lock,
+    and progressive multi-turn generations include the root-anchored chromatic continuity section.
+    """
+    from app.utils.prompt_loader import WARDROBE_COMPOSITION_SYSTEM_PROMPT
+    from app.utils.image_utils import optimize_reference_image
+
+    # 1. Verify prompt contains White Balance Lock
+    assert "Color Constancy & Calibrated White Balance Lock" in WARDROBE_COMPOSITION_SYSTEM_PROMPT
+    assert "Kelvin color temperature" in WARDROBE_COMPOSITION_SYSTEM_PROMPT
+
+    # 2. Verify reference image optimization
+    opt_bytes, mime = optimize_reference_image(dummy_image_bytes, max_dimension=2048, target_format="PNG")
+    assert mime == "image/png"
+    assert len(opt_bytes) > 0
+
+    # 3. Create Root Baseline Generation in DB
+    base_file = tmp_path / "base_img.png"
+    base_file.write_bytes(dummy_image_bytes)
+    await test_db.create_generation({
+        "id": "gen_root_base_001",
+        "parent_id": None,
+        "moodboard_id": None,
+        "is_baseline": True,
+        "created_at": "2026-08-30T10:00:00Z",
+        "schema_json": {},
+        "compiled_prompt": "Initial baseline scene",
+        "negative_prompt": "blurry",
+        "seed": 12345,
+        "master_image_path": str(base_file),
+        "aspect_ratio": "2:3",
+        "resolution_width": 2560,
+        "resolution_height": 3840,
+        "model_name": "gemini-3.1-flash-image",
+        "cost_usd": 0.04,
+        "tokens": 1000,
+        "accumulated_cost_usd": 0.04,
+        "accumulated_tokens": 1000,
+    })
+
+    # Create Turn 1 Generation in DB
+    turn1_file = tmp_path / "turn1_img.png"
+    turn1_file.write_bytes(dummy_image_bytes)
+    await test_db.create_generation({
+        "id": "gen_turn1_wardrobe",
+        "parent_id": "gen_root_base_001",
+        "moodboard_id": None,
+        "is_baseline": False,
+        "created_at": "2026-08-30T10:05:00Z",
+        "schema_json": {"wardrobe_composition": True},
+        "compiled_prompt": "Turn 1 shirt swap",
+        "negative_prompt": "blurry",
+        "seed": 12345,
+        "master_image_path": str(turn1_file),
+        "aspect_ratio": "2:3",
+        "resolution_width": 2560,
+        "resolution_height": 3840,
+        "model_name": "gemini-3.1-flash-image",
+        "cost_usd": 0.04,
+        "tokens": 1000,
+        "accumulated_cost_usd": 0.08,
+        "accumulated_tokens": 2000,
+    })
+
+    # Create garment item in DB
+    item_file = tmp_path / "trousers.png"
+    item_file.write_bytes(dummy_image_bytes)
+    await test_db.create_wardrobe_item({
+        "id": "wd_trouser_item",
+        "source_image_path": str(item_file),
+        "label": "Linen Trousers",
+        "category": "bottoms",
+        "cropped_image_path": str(item_file),
+        "created_at": "2026-08-30T10:00:00Z",
+    })
+
+    # Setup GenerationService with mocks
+    mock_client = MagicMock()
+    mock_interaction = MagicMock()
+    mock_interaction.output_image.data = base64.b64encode(dummy_image_bytes).decode("utf-8")
+    mock_interaction.usage.total_tokens = 500
+    mock_interaction.usage.prompt_tokens = 250
+    mock_interaction.usage.candidates_tokens = 250
+    mock_client.interactions.create.return_value = mock_interaction
+
+    wardrobe_service = WardrobeService(db_manager=test_db, api_key="dummy", storage_dir=str(tmp_path), client=mock_client)
+    wardrobe_service.ground_wardrobe_pins = AsyncMock(return_value={
+        "grounded_pins": [{"pin_number": 1, "target_subject": "Subject A", "body_location": "lower body", "spatial_anchor": "lower-center"}],
+        "unmodified_subjects_guardrail": "Preserve all other subjects.",
+    })
+
+    gen_service = GenerationService(
+        db_manager=test_db,
+        api_key="dummy",
+        storage_dir=str(tmp_path),
+        client=mock_client,
+        wardrobe_service=wardrobe_service,
+    )
+
+    # Perform Turn 2 Wardrobe Composition (Parent = Turn 1)
+    asgn = {
+        "wardrobe_item_id": "wd_trouser_item",
+        "pin_number": 1,
+        "drop_position": {"x": 0.5, "y": 0.7},
+        "item_label": "Linen Trousers",
+    }
+
+    result = await gen_service.compose_wardrobe(
+        parent_id="gen_turn1_wardrobe",
+        assignments=[asgn],
+    )
+
+    # Verify that Turn 2's prompt includes progressive turn anchor and white balance lock
+    compiled_p = result["compiled_prompt"]
+    assert "PROGRESSIVE STYLING TURN #2 CHROMATIC ANCHOR" in compiled_p
+    assert "Color Constancy & Calibrated White Balance Lock" in compiled_p
+    assert "Maintain absolute color temperature and neutral white balance" in compiled_p
+
 
 
 

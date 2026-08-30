@@ -179,10 +179,7 @@ export default function BaselineSelector({
     if (!tagState) return;
     try {
       let text = '';
-      if (tagState.narrative) {
-        text += `[Scene Narrative]\n${tagState.narrative}\n\n`;
-      }
-      if (tagState.master_prompt && tagState.master_prompt !== tagState.narrative) {
+      if (tagState.master_prompt) {
         text += `[Master Prompt]\n${tagState.master_prompt}\n\n`;
       }
       if (tagState.categories) {
@@ -209,8 +206,7 @@ export default function BaselineSelector({
   // Calculate stats for moodboard info
   const hasMoodboardInfo = Boolean(
     tagState &&
-      (tagState.narrative ||
-        tagState.master_prompt ||
+      (tagState.master_prompt ||
         (tagState.categories && Object.keys(tagState.categories).length > 0))
   );
 

@@ -104,18 +104,22 @@ class GenerationService:
         self, image_bytes: bytes, output_path: str, aspect_ratio: str
     ) -> tuple[int, int]:
         """
-        Saves raw 4K bytes directly to disk with PNG format and 600 DPI print metadata.
+        Saves raw 4K bytes directly to disk with PNG format, preserved ICC profiles, and 600 DPI print metadata.
         """
         pil_img = Image.open(io.BytesIO(image_bytes))
         width, height = pil_img.size
+        icc_profile = pil_img.info.get("icc_profile")
 
-        if pil_img.format == "PNG":
+        if pil_img.format == "PNG" and not icc_profile:
             with open(output_path, "wb") as f:
                 f.write(image_bytes)
         else:
             if pil_img.mode not in ("RGB", "RGBA"):
                 pil_img = pil_img.convert("RGB")
-            pil_img.save(output_path, format="PNG", dpi=(600, 600))
+            save_kwargs: Dict[str, Any] = {"format": "PNG", "dpi": (600, 600)}
+            if icc_profile:
+                save_kwargs["icc_profile"] = icc_profile
+            pil_img.save(output_path, **save_kwargs)
 
         return width, height
 
@@ -228,6 +232,32 @@ class GenerationService:
         call_cost = float(metrics.get("cost_usd", 0.0))
         call_tokens = int(metrics.get("total_token_count", 0))
 
+        # Apportion upstream moodboard extraction and prompt ideation costs
+        mb_acc_cost = 0.0
+        mb_acc_tokens = 0
+        if moodboard_id and self.db:
+            mb_data = await self.db.get_moodboard(moodboard_id)
+            if mb_data:
+                mb_acc_cost = float(mb_data.get("accumulated_cost_usd") or 0.0)
+                mb_acc_tokens = int(mb_data.get("accumulated_tokens") or 0)
+
+        # Distribute upstream moodboard ideation/vision costs across baseline candidate slots
+        apportioned_mb_cost = round(mb_acc_cost / 4.0, 6)
+        apportioned_mb_tokens = int(mb_acc_tokens / 4)
+        acc_cost = round(call_cost + apportioned_mb_cost, 6)
+        acc_tokens = call_tokens + apportioned_mb_tokens
+
+        cost_breakdown = {
+            "direct_image_cost_usd": call_cost,
+            "direct_image_tokens": call_tokens,
+            "upstream_moodboard_cost_usd": apportioned_mb_cost,
+            "upstream_moodboard_tokens": apportioned_mb_tokens,
+            "accumulated_cost_usd": acc_cost,
+            "accumulated_tokens": acc_tokens,
+            "call_metrics": metrics.get("cost_breakdown", {}),
+        }
+        state_payload["cost_breakdown"] = cost_breakdown
+
         record = {
             "id": gen_id,
             "parent_id": None,
@@ -245,8 +275,8 @@ class GenerationService:
             "model_name": active_model,
             "cost_usd": call_cost,
             "tokens": call_tokens,
-            "accumulated_cost_usd": call_cost,
-            "accumulated_tokens": call_tokens,
+            "accumulated_cost_usd": acc_cost,
+            "accumulated_tokens": acc_tokens,
         }
         await self.db.create_generation(record)
 
@@ -262,6 +292,9 @@ class GenerationService:
             "temperature": temperature,
             "cost_usd": call_cost,
             "tokens": call_tokens,
+            "accumulated_cost_usd": acc_cost,
+            "accumulated_tokens": acc_tokens,
+            "cost_breakdown": cost_breakdown,
         }
 
     async def generate_4_baselines(
@@ -437,11 +470,22 @@ class GenerationService:
         acc_cost = round(parent_acc_cost + call_cost, 6)
         acc_tokens = parent_acc_tokens + call_tokens
 
+        cost_breakdown = {
+            "direct_image_cost_usd": call_cost,
+            "direct_image_tokens": call_tokens,
+            "parent_accumulated_cost_usd": parent_acc_cost,
+            "parent_accumulated_tokens": parent_acc_tokens,
+            "accumulated_cost_usd": acc_cost,
+            "accumulated_tokens": acc_tokens,
+            "call_metrics": metrics.get("cost_breakdown", {}),
+        }
+
         schema_payload = state if isinstance(state, dict) else {
             "narrative": eff_narr,
             "categories": eff_cats,
             "locked_categories": locked_categories or [],
         }
+        schema_payload["cost_breakdown"] = cost_breakdown
 
         record = {
             "id": child_id,
@@ -479,6 +523,7 @@ class GenerationService:
             "tokens": call_tokens,
             "accumulated_cost_usd": acc_cost,
             "accumulated_tokens": acc_tokens,
+            "cost_breakdown": cost_breakdown,
         }
 
     async def refine_generation(
@@ -536,6 +581,16 @@ class GenerationService:
         acc_cost = round(parent_acc_cost + call_cost, 6)
         acc_tokens = parent_acc_tokens + call_tokens
 
+        cost_breakdown = {
+            "direct_image_cost_usd": call_cost,
+            "direct_image_tokens": call_tokens,
+            "parent_accumulated_cost_usd": parent_acc_cost,
+            "parent_accumulated_tokens": parent_acc_tokens,
+            "accumulated_cost_usd": acc_cost,
+            "accumulated_tokens": acc_tokens,
+            "call_metrics": metrics.get("cost_breakdown", {}),
+        }
+
         record = {
             "id": child_id,
             "parent_id": parent_id,
@@ -543,7 +598,7 @@ class GenerationService:
             "conversation_id": conversation_id,
             "is_baseline": False,
             "created_at": created_at,
-            "schema_json": {"refinement_prompt": prompt, "parent_id": parent_id},
+            "schema_json": {"refinement_prompt": prompt, "parent_id": parent_id, "cost_breakdown": cost_breakdown},
             "compiled_prompt": refine_instruction,
             "negative_prompt": eff_neg_prompt,
             "seed": seed,
@@ -575,6 +630,7 @@ class GenerationService:
             "tokens": call_tokens,
             "accumulated_cost_usd": acc_cost,
             "accumulated_tokens": acc_tokens,
+            "cost_breakdown": cost_breakdown,
         }
 
     async def inpaint_region(
@@ -644,6 +700,16 @@ class GenerationService:
         acc_cost = round(parent_acc_cost + call_cost, 6)
         acc_tokens = parent_acc_tokens + call_tokens
 
+        cost_breakdown = {
+            "direct_image_cost_usd": call_cost,
+            "direct_image_tokens": call_tokens,
+            "parent_accumulated_cost_usd": parent_acc_cost,
+            "parent_accumulated_tokens": parent_acc_tokens,
+            "accumulated_cost_usd": acc_cost,
+            "accumulated_tokens": acc_tokens,
+            "call_metrics": metrics.get("cost_breakdown", {}),
+        }
+
         inpaint_meta = {
             "mask_path": mask_path,
             "mask_url": f"/api/images/{mask_filename}",
@@ -659,7 +725,7 @@ class GenerationService:
             "moodboard_id": parent_gen.get("moodboard_id") if parent_gen else None,
             "is_baseline": False,
             "created_at": created_at,
-            "schema_json": {"inpaint_metadata": inpaint_meta, "inpaint_model": self.inpaint_model_name},
+            "schema_json": {"inpaint_metadata": inpaint_meta, "inpaint_model": self.inpaint_model_name, "cost_breakdown": cost_breakdown},
             "compiled_prompt": spatial_prompt,
             "negative_prompt": eff_neg_prompt,
             "seed": eff_seed,
@@ -701,21 +767,26 @@ class GenerationService:
             "tokens": call_tokens,
             "accumulated_cost_usd": acc_cost,
             "accumulated_tokens": acc_tokens,
+            "cost_breakdown": cost_breakdown,
         }
 
     async def compose_wardrobe(
         self,
         parent_id: str,
-        assignments: List[Dict[str, Any]],
+        assignments: List[Union[Dict[str, Any], Any]],
         aspect_ratio: Optional[str] = None,
         model_name: Optional[str] = None,
         seed: Optional[int] = None,
         negative_prompt: Optional[str] = None,
+        conversation_id: Optional[str] = None,
+        custom_instruction: Optional[str] = None,
+        imagen_model: Optional[str] = None,
+        vision_model: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Multimodal wardrobe composition preserving subject identity and applying assigned garments.
         """
-        active_model = model_name or self.model_name
+        active_model = imagen_model or model_name or self.model_name
         req_id = f"compose_{uuid.uuid4().hex[:8]}"
         created_at = datetime.now(timezone.utc).isoformat()
         child_id = f"gen_wardrobe_{uuid.uuid4().hex[:8]}"
@@ -734,12 +805,24 @@ class GenerationService:
         eff_aspect = aspect_ratio or parent_gen.get("aspect_ratio", "2:3")
         eff_seed = seed if seed is not None else parent_gen.get("seed", 4289102)
 
+        normalized_assignments: List[Dict[str, Any]] = []
+        for asgn in assignments:
+            if hasattr(asgn, "model_dump"):
+                normalized_assignments.append(asgn.model_dump())
+            elif hasattr(asgn, "dict"):
+                normalized_assignments.append(asgn.dict())
+            elif isinstance(asgn, dict):
+                normalized_assignments.append(dict(asgn))
+            else:
+                normalized_assignments.append(getattr(asgn, "__dict__", {}))
+
         grounded_data = {}
         if self.wardrobe_service is not None:
             try:
                 grounded_data = await self.wardrobe_service.ground_wardrobe_pins(
                     image_bytes=parent_image_bytes,
-                    assignments=assignments,
+                    assignments=normalized_assignments,
+                    vision_model=vision_model,
                 )
             except Exception as e:
                 logger.warning(f"Could not run wardrobe subject grounding: {e}")
@@ -755,7 +838,7 @@ class GenerationService:
         assignment_prompts: List[str] = []
         graphic_locks_required = False
 
-        for asgn in assignments:
+        for asgn in normalized_assignments:
             item_id = asgn.get("wardrobe_item_id")
             pin_num = asgn.get("pin_number", 1)
             item = await self.db.get_wardrobe_item(item_id) if item_id else None
@@ -795,11 +878,35 @@ class GenerationService:
 
                 assignment_prompts.append(asgn_text)
 
-        composition_prompt = (
-            f"{WARDROBE_COMPOSITION_SYSTEM_PROMPT}\n\n"
-            f"MULTI-SUBJECT INVARIANCE GUARDRAIL:\n{guardrail_text}\n\n"
-            f"ASSIGNED GARMENT MODIFICATIONS:\n" + "\n\n".join(assignment_prompts)
-        )
+        # Trace lineage to detect progressive turn depth and anchor root white balance
+        lineage_depth = 0
+        curr_p = parent_gen
+        visited_lineage = set()
+        while curr_p and curr_p.get("parent_id") and curr_p.get("id") not in visited_lineage:
+            visited_lineage.add(curr_p.get("id"))
+            next_p = await self.db.get_generation(curr_p["parent_id"])
+            if not next_p:
+                break
+            curr_p = next_p
+            lineage_depth += 1
+
+        composition_parts = [
+            WARDROBE_COMPOSITION_SYSTEM_PROMPT,
+            f"MULTI-SUBJECT INVARIANCE GUARDRAIL:\n{guardrail_text}",
+        ]
+        if lineage_depth >= 1:
+            turn_num = lineage_depth + 1
+            composition_parts.append(
+                f"PROGRESSIVE STYLING TURN #{turn_num} CHROMATIC ANCHOR:\n"
+                "- Maintain absolute color temperature and neutral white balance fidelity matching the original root scene.\n"
+                "- Do NOT accumulate or amplify warm ambient color bounce from prior turns. Keep all background elements, neutral whites, sky tones, and un-targeted skin undertones strictly aligned with the pristine base scene."
+            )
+        composition_parts.append("ASSIGNED GARMENT MODIFICATIONS:\n" + "\n\n".join(assignment_prompts))
+
+        if custom_instruction and custom_instruction.strip():
+            composition_parts.append(f"ADDITIONAL USER INSTRUCTION:\n{custom_instruction.strip()}")
+
+        composition_prompt = "\n\n".join(composition_parts)
 
         base_neg_prompt = negative_prompt or parent_gen.get("negative_prompt") or DEFAULT_NEGATIVE_PROMPT
         if graphic_locks_required:
@@ -822,21 +929,59 @@ class GenerationService:
         width, height = self._process_and_save_image(image_bytes_out, file_path, eff_aspect)
 
         metrics = self.image_generator.last_call_metrics
-        call_cost = float(metrics.get("cost_usd", 0.0))
-        call_tokens = int(metrics.get("total_token_count", 0))
+        image_call_cost = float(metrics.get("cost_usd", 0.0))
+        image_call_tokens = int(metrics.get("total_token_count", 0))
+
+        # Roll in grounding vision sub-call costs
+        grounding_cost = float(grounded_data.get("cost_usd") or 0.0)
+        grounding_toks_raw = grounded_data.get("tokens")
+        grounding_tokens = int(
+            grounding_toks_raw.get("total_token_count", 0)
+            if isinstance(grounding_toks_raw, dict)
+            else (grounding_toks_raw or 0)
+        )
+
+        turn_cost = round(image_call_cost + grounding_cost, 6)
+        turn_tokens = image_call_tokens + grounding_tokens
 
         parent_acc_cost = float(parent_gen.get("accumulated_cost_usd", 0.0)) if parent_gen else 0.0
         parent_acc_tokens = int(parent_gen.get("accumulated_tokens", 0)) if parent_gen else 0
-        acc_cost = round(parent_acc_cost + call_cost, 6)
-        acc_tokens = parent_acc_tokens + call_tokens
+        acc_cost = round(parent_acc_cost + turn_cost, 6)
+        acc_tokens = parent_acc_tokens + turn_tokens
+
+        cost_breakdown = {
+            "image_model_cost_usd": image_call_cost,
+            "image_model_tokens": image_call_tokens,
+            "grounding_cost_usd": grounding_cost,
+            "grounding_tokens": grounding_tokens,
+            "turn_cost_usd": turn_cost,
+            "turn_tokens": turn_tokens,
+            "parent_accumulated_cost_usd": parent_acc_cost,
+            "parent_accumulated_tokens": parent_acc_tokens,
+            "accumulated_cost_usd": acc_cost,
+            "accumulated_tokens": acc_tokens,
+            "call_metrics": metrics.get("cost_breakdown", {}),
+        }
+
+        schema_data = {
+            "wardrobe_assignments": normalized_assignments,
+            "grounded_pins": grounded_pins_list,
+            "wardrobe_composition": True,
+            "cost_breakdown": cost_breakdown,
+        }
+        if custom_instruction and custom_instruction.strip():
+            schema_data["custom_instruction"] = custom_instruction.strip()
+        if conversation_id:
+            schema_data["conversation_id"] = conversation_id
 
         record = {
             "id": child_id,
             "parent_id": parent_id,
             "moodboard_id": parent_gen.get("moodboard_id"),
+            "conversation_id": conversation_id,
             "is_baseline": False,
             "created_at": created_at,
-            "schema_json": {"wardrobe_assignments": assignments, "grounded_pins": grounded_pins_list},
+            "schema_json": schema_data,
             "compiled_prompt": composition_prompt,
             "negative_prompt": comp_neg_prompt,
             "seed": eff_seed,
@@ -845,8 +990,8 @@ class GenerationService:
             "resolution_width": width,
             "resolution_height": height,
             "model_name": active_model,
-            "cost_usd": call_cost,
-            "tokens": call_tokens,
+            "cost_usd": turn_cost,
+            "tokens": turn_tokens,
             "accumulated_cost_usd": acc_cost,
             "accumulated_tokens": acc_tokens,
         }
@@ -855,6 +1000,7 @@ class GenerationService:
         return {
             "generation_id": child_id,
             "parent_id": parent_id,
+            "conversation_id": conversation_id,
             "seed": eff_seed,
             "compiled_prompt": composition_prompt,
             "negative_prompt": comp_neg_prompt,
@@ -867,12 +1013,13 @@ class GenerationService:
                     **asgn,
                     "grounded_subject": grounded_by_pin.get(asgn.get("pin_number", 1), {}).get("target_subject", "Subject"),
                 }
-                for asgn in assignments
+                for asgn in normalized_assignments
             ],
-            "cost_usd": call_cost,
-            "tokens": call_tokens,
+            "cost_usd": turn_cost,
+            "tokens": turn_tokens,
             "accumulated_cost_usd": acc_cost,
             "accumulated_tokens": acc_tokens,
+            "cost_breakdown": cost_breakdown,
         }
 
     async def generate_image(

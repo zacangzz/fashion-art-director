@@ -37,34 +37,29 @@ export default function TagStudio({
   const [copiedPrompt, setCopiedPrompt] = useState(false);
   const [previewTab, setPreviewTab] = useState('auto'); // 'auto', 'delta', 'full'
 
-  const narrative = tagState.narrative || '';
   const categories = tagState.categories || {};
 
   // Detect differences against baseline snapshot
   const diffInfo = useMemo(() => {
     return getModifiedCategories(
       categories,
-      baselineTagSnapshot?.categories,
-      narrative,
-      baselineTagSnapshot?.narrative
+      baselineTagSnapshot?.categories
     );
-  }, [categories, baselineTagSnapshot, narrative]);
+  }, [categories, baselineTagSnapshot]);
 
   // Live compiled delta prompt
   const deltaPrompt = useMemo(() => {
     return compileDeltaPrompt({
-      narrative,
       categories,
-      baselineNarrative: baselineTagSnapshot?.narrative || '',
       baselineCategories: baselineTagSnapshot?.categories || null,
       lockedCategories,
     });
-  }, [narrative, categories, baselineTagSnapshot, lockedCategories]);
+  }, [categories, baselineTagSnapshot, lockedCategories]);
 
   // Live compiled full modular prompt
   const fullModularPrompt = useMemo(() => {
-    return compileModularPrompt(narrative, categories);
-  }, [narrative, categories]);
+    return compileModularPrompt(categories);
+  }, [categories]);
 
   // Active compiled prompt based on mode and settings
   const compiledPrompt = useMemo(() => {
@@ -81,13 +76,6 @@ export default function TagStudio({
 
   const toggleCollapse = (catKey) => {
     setCollapsedCategories((prev) => ({ ...prev, [catKey]: !prev[catKey] }));
-  };
-
-  const handleNarrativeChange = (e) => {
-    onUpdateTagState({
-      ...tagState,
-      narrative: e.target.value,
-    });
   };
 
   const handleUpdateChip = (catKey, chipId, updates) => {
@@ -239,61 +227,6 @@ export default function TagStudio({
         </div>
       </div>
 
-      {/* Narrative Section */}
-      <div
-        style={{
-          flexShrink: 0,
-          background: 'rgba(0, 0, 0, 0.25)',
-          border: `1px solid ${diffInfo.narrative ? 'rgba(245, 158, 11, 0.5)' : 'var(--border-color)'}`,
-          borderRadius: 'var(--radius-md)',
-          padding: '12px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '8px',
-          transition: 'border-color 0.2s ease',
-        }}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <Sparkles size={14} color="#f59e0b" />
-            Core Scene Narrative
-            {diffInfo.narrative && (
-              <span
-                style={{
-                  fontSize: '0.66rem',
-                  background: 'rgba(245, 158, 11, 0.2)',
-                  color: '#f59e0b',
-                  padding: '1px 6px',
-                  borderRadius: '6px',
-                  fontWeight: 700,
-                  marginLeft: '4px',
-                }}
-              >
-                Modified
-              </span>
-            )}
-          </label>
-          <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Foundational scene direction</span>
-        </div>
-        <textarea
-          value={narrative}
-          onChange={handleNarrativeChange}
-          placeholder="Describe the primary scene vision, characters, action, and atmosphere..."
-          rows={2}
-          style={{
-            width: '100%',
-            background: 'rgba(255, 255, 255, 0.04)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
-            borderRadius: 'var(--radius-sm)',
-            color: 'var(--text-primary)',
-            padding: '8px 10px',
-            fontSize: '0.84rem',
-            lineHeight: 1.4,
-            resize: 'vertical',
-            fontFamily: 'inherit',
-          }}
-        />
-      </div>
 
       {/* 9 Categories Accordion List */}
       <div

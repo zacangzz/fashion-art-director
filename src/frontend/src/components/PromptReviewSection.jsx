@@ -228,27 +228,6 @@ export default function PromptReviewSection({
 
       {isSectionExpanded && (
         <div className="prompt-review-body">
-          {/* Scene Narrative Box */}
-          <div className="prompt-narrative-box">
-            <div className="prompt-narrative-header">
-              <div className="prompt-narrative-label-group">
-                <FileText size={13} className="text-accent" />
-                <label htmlFor="scene-narrative-input" className="prompt-narrative-label">
-                  Scene Narrative & Core Logline
-                </label>
-              </div>
-            </div>
-            <input
-              id="scene-narrative-input"
-              type="text"
-              className="prompt-narrative-input"
-              value={narrative}
-              onChange={(e) => onNarrativeChange && onNarrativeChange(e.target.value)}
-              placeholder="1-2 sentence core creative scene logline..."
-              disabled={isGeneratingBaselines || isAnyResyncing}
-            />
-          </div>
-
           {/* Conflict Warning Alert Box (Positioned above Master Prompt) */}
           {conflicts && conflicts.length > 0 && (
             <div className="prompt-conflict-alert-box" role="alert">

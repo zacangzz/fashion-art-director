@@ -225,3 +225,116 @@ async def test_vision_service_interactions_api_execution():
         }
 
 
+@pytest.mark.asyncio
+async def test_resync_prompt_from_levers_interactions_api():
+    mock_client = MagicMock()
+    payload = {
+        "master_prompt": "A stylish model in emerald green couture.",
+        "narrative": "Milan fashion week editorial.",
+        "conflicts": [],
+    }
+    mock_interaction = MagicMock()
+    mock_interaction.output_text = json.dumps(payload)
+    mock_interaction.usage.prompt_tokens = 50
+    mock_interaction.usage.candidates_tokens = 30
+    mock_interaction.usage.total_tokens = 80
+    mock_client.interactions.create.return_value = mock_interaction
+
+    with patch("app.services.vision_service.genai.Client", return_value=mock_client):
+        service = VisionService(api_key="fake_key")
+        result = await service.resync_prompt_from_levers(
+            narrative="Milan fashion",
+            categories={
+                "wardrobe_hair": [{"label": "emerald green couture", "enabled": True}],
+            },
+        )
+
+        assert result["master_prompt"] == "A stylish model in emerald green couture."
+        assert result["narrative"] == "Milan fashion week editorial."
+        assert mock_client.interactions.create.called
+        _, kwargs = mock_client.interactions.create.call_args
+        assert isinstance(kwargs["input"], str)
+        assert len(kwargs["input"]) > 0
+        assert "emerald green couture" in kwargs["input"]
+        assert kwargs["response_format"] == {
+            "type": "text",
+            "mime_type": "application/json",
+        }
+
+
+@pytest.mark.asyncio
+async def test_resync_levers_from_prompt_interactions_api():
+    mock_client = MagicMock()
+    payload = {
+        "categories": {
+            "wardrobe_hair": ["emerald green couture"],
+        },
+        "narrative": "Milan fashion week editorial.",
+        "conflicts": [],
+    }
+    mock_interaction = MagicMock()
+    mock_interaction.output_text = json.dumps(payload)
+    mock_interaction.usage.prompt_tokens = 50
+    mock_interaction.usage.candidates_tokens = 30
+    mock_interaction.usage.total_tokens = 80
+    mock_client.interactions.create.return_value = mock_interaction
+
+    with patch("app.services.vision_service.genai.Client", return_value=mock_client):
+        service = VisionService(api_key="fake_key")
+        result = await service.resync_levers_from_prompt(
+            master_prompt="A stylish model in emerald green couture.",
+            narrative="Milan fashion",
+        )
+
+        assert "categories" in result
+        assert "wardrobe_hair" in result["categories"]
+        assert mock_client.interactions.create.called
+        _, kwargs = mock_client.interactions.create.call_args
+        assert isinstance(kwargs["input"], str)
+        assert len(kwargs["input"]) > 0
+        assert "emerald green couture" in kwargs["input"]
+        assert kwargs["response_format"] == {
+            "type": "text",
+            "mime_type": "application/json",
+        }
+
+
+@pytest.mark.asyncio
+async def test_check_prompt_conflicts_interactions_api():
+    mock_client = MagicMock()
+    payload = {
+        "conflicts": [
+            {
+                "id": "conflict_1",
+                "severity": "warning",
+                "conflicting_elements": ["sunlight", "night"],
+                "categories": ["lighting", "environment"],
+                "explanation": "Direct sunlight at night is contradictory.",
+            }
+        ]
+    }
+    mock_interaction = MagicMock()
+    mock_interaction.output_text = json.dumps(payload)
+    mock_interaction.usage.prompt_tokens = 40
+    mock_interaction.usage.candidates_tokens = 20
+    mock_interaction.usage.total_tokens = 60
+    mock_client.interactions.create.return_value = mock_interaction
+
+    with patch("app.services.vision_service.genai.Client", return_value=mock_client):
+        service = VisionService(api_key="fake_key")
+        conflicts = await service.check_prompt_conflicts(
+            master_prompt="Night photoshoot with direct sunlight.",
+            narrative="Night photoshoot",
+            categories={"lighting": [{"label": "direct sunlight", "enabled": True}]},
+        )
+
+        assert len(conflicts) == 1
+        assert conflicts[0]["id"] == "conflict_1"
+        assert mock_client.interactions.create.called
+        _, kwargs = mock_client.interactions.create.call_args
+        assert isinstance(kwargs["input"], str)
+        assert len(kwargs["input"]) > 0
+        assert "Night photoshoot" in kwargs["input"]
+
+
+

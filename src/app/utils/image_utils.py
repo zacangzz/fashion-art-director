@@ -105,12 +105,12 @@ def normalize_interaction_aspect_ratio(aspect_ratio: Optional[str]) -> str:
 def optimize_reference_image(
     image_bytes: bytes,
     max_dimension: int = 2048,
-    target_format: str = "WEBP",
-    quality: int = 90,
+    target_format: str = "PNG",
+    quality: int = 95,
 ) -> tuple[bytes, str]:
     """
     Optimizes a conditioning reference image prior to network transmission.
-    Resizes oversized images to max_dimension and encodes to high-quality WebP.
+    Resizes oversized images to max_dimension and preserves full chromatic fidelity and ICC profile.
     """
     if not image_bytes:
         return image_bytes, "image/png"
@@ -121,21 +121,38 @@ def optimize_reference_image(
     try:
         pil_img = Image.open(io.BytesIO(image_bytes))
         orig_w, orig_h = pil_img.size
+        icc_profile = pil_img.info.get("icc_profile")
 
-        if orig_w > max_dimension or orig_h > max_dimension:
+        needs_resize = orig_w > max_dimension or orig_h > max_dimension
+        if needs_resize:
             pil_img.thumbnail((max_dimension, max_dimension), Image.Resampling.LANCZOS)
 
-        if target_format.upper() == "JPEG" and pil_img.mode in ("RGBA", "LA", "P"):
+        # Standardize color mode while preserving transparency if present
+        if pil_img.mode not in ("RGB", "RGBA"):
             pil_img = pil_img.convert("RGB")
-        elif pil_img.mode not in ("RGB", "RGBA"):
-            pil_img = pil_img.convert("RGB")
+
+        eff_format = target_format.upper()
+        if eff_format not in ("PNG", "WEBP", "JPEG"):
+            eff_format = "PNG"
 
         buf = io.BytesIO()
-        pil_img.save(buf, format=target_format.upper(), quality=quality)
+        save_kwargs: Dict[str, Any] = {"format": eff_format}
+        if icc_profile:
+            save_kwargs["icc_profile"] = icc_profile
+
+        if eff_format == "WEBP":
+            save_kwargs["lossless"] = True
+        elif eff_format == "JPEG":
+            if pil_img.mode == "RGBA":
+                pil_img = pil_img.convert("RGB")
+            save_kwargs["quality"] = quality
+
+        pil_img.save(buf, **save_kwargs)
         optimized_bytes = buf.getvalue()
 
-        if len(optimized_bytes) < len(image_bytes):
-            mime = f"image/{target_format.lower()}"
+        # If image was resized or converted to a cleaner format, return optimized bytes
+        if len(optimized_bytes) < len(image_bytes) or needs_resize or icc_profile:
+            mime = f"image/{eff_format.lower()}"
             return optimized_bytes, mime
         else:
             return image_bytes, detect_image_mime_type(image_bytes)
@@ -184,6 +201,68 @@ def to_interaction_image_input(
         "data": base64.b64encode(bytes_to_send).decode("utf-8"),
         "mime_type": eff_mime,
     }
+
+
+def prepare_interaction_input(
+    contents: List[Any],
+    fallback_prompt: str = "Analyze the visual direction and generate the structured schema.",
+) -> Union[str, List[Dict[str, Any]]]:
+    """
+    Normalizes any sequence of text strings, image bytes, dictionaries, types.Part,
+    or types.Content objects into valid client.interactions.create `input` format.
+    Guarantees no empty text payloads to prevent Google AI 400 Bad Request errors.
+    """
+    interaction_input: List[Dict[str, Any]] = []
+
+    def _process_item(item: Any):
+        if item is None:
+            return
+        if isinstance(item, str):
+            if item.strip():
+                interaction_input.append({"type": "text", "text": item})
+        elif isinstance(item, bytes):
+            if item:
+                interaction_input.append(to_interaction_image_input(item, optimize=True))
+        elif isinstance(item, dict):
+            t = item.get("type")
+            if t == "text":
+                txt = item.get("text")
+                if txt and isinstance(txt, str) and txt.strip():
+                    interaction_input.append({"type": "text", "text": txt})
+            elif t == "image":
+                interaction_input.append(item)
+            elif "text" in item and item["text"]:
+                txt = str(item["text"])
+                if txt.strip():
+                    interaction_input.append({"type": "text", "text": txt})
+            elif "data" in item and "mime_type" in item:
+                interaction_input.append({"type": "image", "data": item["data"], "mime_type": item["mime_type"]})
+            else:
+                interaction_input.append(item)
+        elif hasattr(item, "parts") and getattr(item, "parts", None) is not None:
+            for p in item.parts:
+                _process_item(p)
+        elif hasattr(item, "text") and getattr(item, "text", None):
+            txt = getattr(item, "text")
+            if isinstance(txt, str) and txt.strip():
+                interaction_input.append({"type": "text", "text": txt})
+        elif hasattr(item, "inline_data") and getattr(item, "inline_data", None):
+            raw_d = item.inline_data.data
+            mime_t = getattr(item.inline_data, "mime_type", "image/png")
+            b64_d = base64.b64encode(raw_d).decode("utf-8") if isinstance(raw_d, bytes) else str(raw_d)
+            interaction_input.append({"type": "image", "data": b64_d, "mime_type": mime_t})
+        elif isinstance(item, (list, tuple)):
+            for sub in item:
+                _process_item(sub)
+
+    for item in contents:
+        _process_item(item)
+
+    if len(interaction_input) == 1 and interaction_input[0].get("type") == "text":
+        return interaction_input[0]["text"]
+    elif len(interaction_input) > 0:
+        return interaction_input
+    return fallback_prompt
 
 
 def analyze_mask_bytes(mask_bytes: bytes) -> Dict[str, Any]:

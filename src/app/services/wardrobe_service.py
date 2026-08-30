@@ -27,6 +27,7 @@ from app.utils.json_utils import clean_json_text, parse_json_safely
 from app.utils.image_utils import (
     to_image_part,
     to_interaction_image_input,
+    prepare_interaction_input,
     normalize_bounding_box,
 )
 from app.utils.prompt_loader import (
@@ -127,27 +128,7 @@ class WardrobeService:
                 use_interactions = True
 
         if use_interactions:
-            interaction_input: List[Any] = []
-            for item in contents:
-                if isinstance(item, str):
-                    interaction_input.append({"type": "text", "text": item})
-                elif isinstance(item, bytes):
-                    interaction_input.append(to_interaction_image_input(item, optimize=True))
-                elif isinstance(item, dict):
-                    interaction_input.append(item)
-                elif hasattr(item, "text") and getattr(item, "text", None):
-                    interaction_input.append({"type": "text", "text": item.text})
-                elif hasattr(item, "inline_data") and getattr(item, "inline_data", None):
-                    raw_d = item.inline_data.data
-                    mime_t = getattr(item.inline_data, "mime_type", "image/png")
-                    b64_d = base64.b64encode(raw_d).decode("utf-8") if isinstance(raw_d, bytes) else str(raw_d)
-                    interaction_input.append({"type": "image", "data": b64_d, "mime_type": mime_t})
-
-            api_input = (
-                interaction_input[0]["text"]
-                if len(interaction_input) == 1 and interaction_input[0].get("type") == "text"
-                else (interaction_input if len(interaction_input) > 0 else "")
-            )
+            api_input = prepare_interaction_input(contents)
 
             kwargs: Dict[str, Any] = {
                 "model": active_model,
@@ -939,8 +920,14 @@ class WardrobeService:
             return {
                 "grounded_pins": final_grounded,
                 "unmodified_subjects_guardrail": guardrail,
+                "cost_usd": float(cost_info["cost_usd"]),
+                "tokens": usage_dict,
+                "cost_breakdown": cost_info.get("breakdown", {}),
             }
         except Exception as exc:
             logger.warning(f"Vision subject grounding pre-pass failed ({exc}); using fallback heuristic.", exc_info=True)
             self._audit("wardrobe_grounding_error", request_id, error=str(exc))
-            return fallback_result
+            fallback_dict = dict(fallback_result)
+            fallback_dict["cost_usd"] = 0.0
+            fallback_dict["tokens"] = {"prompt_token_count": 0, "candidates_token_count": 0, "total_token_count": 0}
+            return fallback_dict

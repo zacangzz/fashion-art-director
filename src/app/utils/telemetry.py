@@ -75,6 +75,7 @@ class TelemetryLogger:
         metrics: Optional[Dict[str, Any]] = None,
         tokens: Optional[Dict[str, Any]] = None,
         cost_usd: Optional[float] = None,
+        cost_breakdown: Optional[Dict[str, Any]] = None,
         cumulative_cost_usd: Optional[float] = None,
         cumulative_tokens: Optional[int] = None,
         generation_id: Optional[str] = None,
@@ -116,6 +117,8 @@ class TelemetryLogger:
             record["tokens"] = tokens
         if cost_usd is not None:
             record["cost_usd"] = round(float(cost_usd), 6)
+        if cost_breakdown is not None:
+            record["cost_breakdown"] = cost_breakdown
         if cumulative_cost_usd is not None:
             record["cumulative_cost_usd"] = round(float(cumulative_cost_usd), 6)
         if cumulative_tokens is not None:

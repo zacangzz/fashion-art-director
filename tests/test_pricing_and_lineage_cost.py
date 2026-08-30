@@ -39,23 +39,51 @@ def test_calculate_cost_text_model():
         prompt_tokens=1000,
         candidates_tokens=1000,
     )
-    # gemini-3.7-flash: prompt = $0.10/M tokens, candidates = $0.40/M tokens
-    # 1000 * 0.0000001 = 0.0001, 1000 * 0.0000004 = 0.0004 -> total 0.0005
-    assert cost_info["breakdown"]["prompt_cost_usd"] == 0.0001
-    assert cost_info["breakdown"]["candidates_cost_usd"] == 0.0004
-    assert cost_info["cost_usd"] == 0.0005
+    # gemini-3.7-flash: prompt = $0.75/M tokens, candidates = $3.75/M tokens
+    # 1000 * 0.00000075 = 0.00075, 1000 * 0.00000375 = 0.00375 -> total 0.0045
+    assert cost_info["breakdown"]["prompt_cost_usd"] == 0.00075
+    assert cost_info["breakdown"]["candidates_cost_usd"] == 0.00375
+    assert cost_info["cost_usd"] == 0.0045
     assert cost_info["total_tokens"] == 2000
 
 
 def test_calculate_cost_image_model():
-    cost_info = calculate_cost(
+    cost_info_4k = calculate_cost(
         model="gemini-3-pro-image",
         prompt_tokens=100,
         candidates_tokens=0,
         images_count=1,
+        image_size="4K",
     )
-    assert cost_info["breakdown"]["images_cost_usd"] == 0.04
-    assert cost_info["cost_usd"] >= 0.04
+    assert cost_info_4k["breakdown"]["images_cost_usd"] == 0.24
+    assert cost_info_4k["cost_usd"] >= 0.24
+
+    cost_info_1k = calculate_cost(
+        model="gemini-3-pro-image",
+        prompt_tokens=100,
+        candidates_tokens=0,
+        images_count=1,
+        image_size="1K",
+    )
+    assert cost_info_1k["breakdown"]["images_cost_usd"] == 0.134
+
+    flash_cost_4k = calculate_cost(
+        model="gemini-3.1-flash-image",
+        prompt_tokens=100,
+        candidates_tokens=0,
+        images_count=1,
+        image_size="4K",
+    )
+    assert flash_cost_4k["breakdown"]["images_cost_usd"] == 0.151
+
+    flash_cost_1k = calculate_cost(
+        model="gemini-3.1-flash-image",
+        prompt_tokens=100,
+        candidates_tokens=0,
+        images_count=1,
+        image_size="1K",
+    )
+    assert flash_cost_1k["breakdown"]["images_cost_usd"] == 0.067
 
 
 @pytest.mark.asyncio
@@ -148,3 +176,22 @@ async def test_db_multi_step_lineage_accumulation(tmp_path):
     assert lineage["ancestors"][0]["accumulated_cost_usd"] == 0.0401
     assert lineage["ancestors"][1]["id"] == "gen_iter_200"
     assert lineage["ancestors"][1]["accumulated_cost_usd"] == 0.0803
+
+
+@pytest.mark.asyncio
+async def test_moodboard_cost_tracking_and_attribution(tmp_path):
+    db_file = str(tmp_path / "test_mb_cost.db")
+    db = DatabaseManager(db_file)
+    await db.init_db()
+
+    mb_id = "mb_test_99"
+    await db.create_moodboard(mb_id, ["/tmp/img1.png", "/tmp/img2.png"])
+
+    # Simulate moodboard extraction vision call cost
+    await db.add_moodboard_cost(mb_id, cost_usd=0.08, tokens=1500)
+
+    mb = await db.get_moodboard(mb_id)
+    assert mb["cost_usd"] == 0.08
+    assert mb["accumulated_cost_usd"] == 0.08
+    assert mb["tokens"] == 1500
+    assert mb["accumulated_tokens"] == 1500

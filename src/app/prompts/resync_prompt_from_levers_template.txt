@@ -1,11 +1,7 @@
-The user has updated the 9-category visual levers and scene narrative for this scene. Synthesize a definitive Master Generation Prompt and refined core narrative reflecting these active creative directives.
-
-<scene_narrative>
-{CURRENT_NARRATIVE}
-</scene_narrative>
+The user has updated the 9-category visual levers for this scene. Synthesize a definitive Master Generation Prompt reflecting these active creative directives for Google's multimodal Gemini Image models ("Nano Banana" / gemini-3.1-flash-image family).
 
 <visual_levers>
 {CATEGORIES_JSON}
 </visual_levers>
 
-Synthesize the definitive updated Master Generation Prompt and core narrative reflecting all active visual levers above.
+Synthesize the definitive updated Master Generation Prompt following the 4-phase structured sequential flow ((1) Intent & Context, (2) Subject & Styling, (3) Environment & Props, (4) Lighting & Optics) reflecting all active visual levers above.

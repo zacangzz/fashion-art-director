@@ -225,3 +225,56 @@ async def test_compose_wardrobe_preserves_parent_aspect_ratio_and_returns_it(tmp
         "aspect_ratio": "16:9",
         "image_size": "4K",
     }
+
+
+def test_resolve_model_image_size():
+    from app.services.image_generator import resolve_model_image_size
+
+    assert resolve_model_image_size("gemini-3.1-flash-lite-image", "4K") == "1K"
+    assert resolve_model_image_size("gemini-3.1-flash-lite-image", "2K") == "1K"
+    assert resolve_model_image_size("gemini-3.1-flash-lite-image", "1K") == "1K"
+    assert resolve_model_image_size("gemini-3.1-flash-lite-image", None) is None
+
+    assert resolve_model_image_size("gemini-3.1-flash-image", "4K") == "4K"
+    assert resolve_model_image_size("gemini-3.1-flash-image", "2K") == "2K"
+    assert resolve_model_image_size("gemini-3-pro-image", "4K") == "4K"
+
+
+@pytest.mark.asyncio
+async def test_lite_model_generation_clamps_to_1k(tmp_path):
+    storage_dir = str(tmp_path / "storage")
+    db_mgr = MagicMock()
+
+    mock_client = MagicMock()
+    mock_interaction = MagicMock()
+    img_1k = Image.new("RGB", (1024, 1024), color=(0, 0, 255))
+    buf = io.BytesIO()
+    img_1k.save(buf, format="PNG")
+    raw_bytes = buf.getvalue()
+
+    mock_interaction.output_image.data = base64.b64encode(raw_bytes).decode("utf-8")
+    mock_client.interactions.create.return_value = mock_interaction
+
+    service = GenerationService(
+        db_manager=db_mgr,
+        api_key="fake",
+        storage_dir=storage_dir,
+        client=mock_client,
+    )
+
+    result_bytes = await service._call_image_model(
+        prompt="A high fashion model in Milan",
+        aspect_ratio="1:1",
+        model_name="gemini-3.1-flash-lite-image",
+    )
+
+    assert result_bytes == raw_bytes
+    mock_client.interactions.create.assert_called_once()
+    _, kwargs = mock_client.interactions.create.call_args
+    assert kwargs["model"] == "gemini-3.1-flash-lite-image"
+    assert kwargs["response_format"] == {
+        "type": "image",
+        "aspect_ratio": "1:1",
+        "image_size": "1K",
+    }
+

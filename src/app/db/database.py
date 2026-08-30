@@ -9,7 +9,11 @@ CREATE_MOODBOARDS_TABLE = """
 CREATE TABLE IF NOT EXISTS moodboards (
     id TEXT PRIMARY KEY,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    image_paths TEXT NOT NULL
+    image_paths TEXT NOT NULL,
+    cost_usd REAL DEFAULT 0.0,
+    tokens INTEGER DEFAULT 0,
+    accumulated_cost_usd REAL DEFAULT 0.0,
+    accumulated_tokens INTEGER DEFAULT 0
 );
 """
 
@@ -100,6 +104,21 @@ class DatabaseManager:
             await db.execute(CREATE_COMPOSITION_ASSIGNMENTS_TABLE)
 
             # Check for column migrations if table already exists with legacy columns
+            async with db.execute("PRAGMA table_info(moodboards)") as cursor:
+                mb_cols = [row[1] for row in await cursor.fetchall()]
+                if "cost_usd" not in mb_cols:
+                    logger.info("Migrating DB: adding column 'cost_usd' to moodboards")
+                    await db.execute("ALTER TABLE moodboards ADD COLUMN cost_usd REAL DEFAULT 0.0")
+                if "tokens" not in mb_cols:
+                    logger.info("Migrating DB: adding column 'tokens' to moodboards")
+                    await db.execute("ALTER TABLE moodboards ADD COLUMN tokens INTEGER DEFAULT 0")
+                if "accumulated_cost_usd" not in mb_cols:
+                    logger.info("Migrating DB: adding column 'accumulated_cost_usd' to moodboards")
+                    await db.execute("ALTER TABLE moodboards ADD COLUMN accumulated_cost_usd REAL DEFAULT 0.0")
+                if "accumulated_tokens" not in mb_cols:
+                    logger.info("Migrating DB: adding column 'accumulated_tokens' to moodboards")
+                    await db.execute("ALTER TABLE moodboards ADD COLUMN accumulated_tokens INTEGER DEFAULT 0")
+
             async with db.execute("PRAGMA table_info(generations)") as cursor:
                 columns = [row[1] for row in await cursor.fetchall()]
                 if "is_baseline" not in columns:
@@ -165,8 +184,24 @@ class DatabaseManager:
         logger.info(f"Creating moodboard record {moodboard_id} with {len(image_paths)} images")
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute(
-                "INSERT INTO moodboards (id, image_paths) VALUES (?, ?)",
+                "INSERT INTO moodboards (id, image_paths, cost_usd, tokens, accumulated_cost_usd, accumulated_tokens) VALUES (?, ?, 0.0, 0, 0.0, 0)",
                 (moodboard_id, json.dumps(image_paths)),
+            )
+            await db.commit()
+
+    async def add_moodboard_cost(self, moodboard_id: str, cost_usd: float, tokens: int = 0) -> None:
+        """Adds extraction and ideation costs and tokens to the moodboard record."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                """
+                UPDATE moodboards
+                SET cost_usd = cost_usd + ?,
+                    tokens = tokens + ?,
+                    accumulated_cost_usd = accumulated_cost_usd + ?,
+                    accumulated_tokens = accumulated_tokens + ?
+                WHERE id = ?
+                """,
+                (cost_usd, tokens, cost_usd, tokens, moodboard_id),
             )
             await db.commit()
 
@@ -182,6 +217,10 @@ class DatabaseManager:
                             data["image_paths"] = json.loads(data["image_paths"])
                         except Exception:
                             data["image_paths"] = []
+                    data["cost_usd"] = float(data.get("cost_usd") or 0.0)
+                    data["tokens"] = int(data.get("tokens") or 0)
+                    data["accumulated_cost_usd"] = float(data.get("accumulated_cost_usd") or 0.0)
+                    data["accumulated_tokens"] = int(data.get("accumulated_tokens") or 0)
                     return data
                 return None
 

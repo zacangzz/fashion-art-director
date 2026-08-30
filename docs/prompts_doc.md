@@ -1,6 +1,6 @@
 # Comprehensive Prompt & API Payload Registry
 
-This document provides an exhaustive, production-accurate, verbatim reference of **every prompt, system directive, user template, dynamic compiler, and multimodal API payload** transmitted to Google GenAI / Gemini / Imagen APIs across every stage of the application lifecycle.
+This document provides an exhaustive, production-accurate, verbatim reference of **every prompt, system directive, user template, dynamic compiler, and multimodal API payload** transmitted to Google GenAI / Gemini APIs across every stage of the application lifecycle.
 
 ---
 
@@ -48,7 +48,7 @@ The application operates across a **4-Step Sequential Studio Architecture** with
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **1A** | **Moodboard & Intent Extraction** | `src/app/prompts/extraction_system.txt`<br>`src/app/prompts/user_baseline_template.txt` | `generate_content`<br>`gemini-3.5-flash-lite` | `system_instruction`: `EXTRACTION_SYSTEM_PROMPT`<br>`contents`: `[ImagePart(1..5), USER_BASELINE_TEMPLATE]` | Structured JSON (`application/json`): `master_prompt`, `narrative`, 9-category visual levers |
 | **1B** | **Re-sync Master Prompt** | `src/app/prompts/resync_master_prompt_system.txt`<br>`src/app/prompts/resync_master_prompt_template.txt` | `generate_content`<br>`gemini-3.5-flash-lite` | `system_instruction`: `RESYNC_MASTER_PROMPT_SYSTEM`<br>`contents`: `[RESYNC_MASTER_PROMPT_TEMPLATE]` | Structured JSON: updated `master_prompt`, `narrative` |
-| **1C** | **4-Candidate Baseline Generation** | `src/app/prompts/image_generation_suffix.txt`<br>`src/app/prompts/defaults.json`<br>`src/app/services/generation_service.py` | `generate_content` / `generate_images`<br>`gemini-3-pro-image` / `imagen` | Gemini: `contents = [f"{master_prompt} {suffix}"]`<br>Imagen: `prompt = master_prompt`, `config = GenerateImagesConfig` | Image bytes (4 parallel calls across 4 distinct random seeds) |
+| **1C** | **4-Candidate Baseline Generation** | `src/app/prompts/image_generation_suffix.txt`<br>`src/app/prompts/defaults.json`<br>`src/app/services/generation_service.py` | `generate_content`<br>`gemini-3.1-flash-image` / `gemini-3-pro-image` | Gemini Image: `contents = [f"{master_prompt} {suffix}"]` | Image bytes (4 parallel calls across 4 distinct random seeds) |
 | **1D** | **Direct Photo Upload Baseline** | `src/app/services/generation_service.py` | N/A (Direct Registration) | Analyzes local image dimensions, detects aspect ratio, embeds 600 DPI, stores baseline DB record | Direct Image URL + baseline generation ID |
 | **2A** | **Conversational Refinement** | `src/app/prompts/refinement_system.txt`<br>`src/app/prompts/image_generation_suffix.txt` | `generate_content`<br>`gemini-3-pro-image` | `contents = [ImagePart(parent_bytes), f"{REFINEMENT_SYSTEM_PROMPT} {suffix}"]` | Single refined image bytes with seed lock |
 | **2B** | **Tag Delta Fine-Tuning** | `src/app/services/generation_service.py`<br>`src/frontend/src/utils/promptCompiler.js` | `generate_content`<br>`gemini-3-pro-image` | `contents = [ImagePart(parent_bytes), f"{compile_delta_prompt()} {suffix}"]` | Single fine-tuned image bytes with locked category anchors |
@@ -70,10 +70,9 @@ The platform supports dynamic, user-selected Google GenAI models configurable vi
   - `gemini-3.5-flash-lite` (Default: ultra-fast multimodal reasoning, tag extraction, segmentation, and subject grounding)
   - `gemini-3.7-flash` (Advanced visual reasoning and complex character disambiguation)
 * **Available Image Generation / Editing Models**:
-  - `gemini-3-pro-image` (Default: state-of-the-art multimodal image generation, reference conditioning, and multi-image composition)
-  - `gemini-3.1-flash-image` (High-speed multimodal image generation & inpainting)
+  - `gemini-3.1-flash-image` (Default: high-speed multimodal "Nano Banana" image generation & editing)
+  - `gemini-3-pro-image` (State-of-the-art multimodal image generation, reference conditioning, and multi-image composition)
   - `gemini-3.1-flash-lite-image` (Lightweight generation)
-  - `imagen-3.0-capability-001` (Legacy text-to-image pipeline via `client.models.generate_images`)
 * **Dedicated Inpainting Model**: `gemini-3-pro-image` (Fixed high-precision spatial inpainting).
 
 ---
@@ -104,10 +103,12 @@ contents = [
 You are an executive visual director, master cinematographer, and elite image generation prompt architect.
 Your mission is to analyze the reference moodboard images and user creative requirements, then synthesize the OPTIMAL, highest-fidelity generation prompt alongside its constituent visual levers.
 
+TARGET MODEL AWARENESS:
+You are crafting the `master_prompt` specifically for Google's multimodal Gemini Image models ("Nano Banana" / gemini-3.1-flash-image family). These models excel at natural language comprehension, analog photographic physics, coherent spatial relationships, and rich descriptive storytelling. They respond best to rich, complete descriptive prose rather than disconnected keyword soup or synthetic buzzwords.
+
 You must return a single, valid JSON object with EXACTLY this structure:
 {
-  "master_prompt": "A complete, highly polished, evocative Master Generation Prompt designed to produce the definitive image matching the moodboard and requirements. Synthesize the scene, subject, wardrobe, environment, lighting, optics, color profile, and artistic aesthetic into a cohesive, cinematic description.",
-  "narrative": "A concise 1-2 sentence core creative scene logline capturing the primary subject, action, setting, and emotional tone.",
+  "master_prompt": "A complete, highly polished, evocative Master Generation Prompt designed to produce the definitive image matching the moodboard and requirements. Follow a clear, structured sequential flow: (1) Creative Intent & Scene Context, (2) Hyper-specific Subject & Styling, (3) Spatial Environment & Props, and (4) Exact Lighting & Optical Physics.",
   "categories": {
     "subject_details": [
       {"label": "<specific visual descriptor inferred from moodboard>"}
@@ -136,14 +137,30 @@ You must return a single, valid JSON object with EXACTLY this structure:
     "mood_era": [
       {"label": "<specific visual descriptor inferred from moodboard>"}
     ]
-  }
+  },
+  "conflicts": [
+    {
+      "id": "conflict_1",
+      "severity": "warning",
+      "conflicting_elements": ["harsh afternoon sunlight", "soft diffuse studio lighting"],
+      "categories": ["lighting"],
+      "explanation": "Opposing lighting conditions detected.",
+      "recommendation": "Harmonize lighting directives."
+    }
+  ]
 }
 
 Directives:
-1. MASTER PROMPT EXCELLENCE: The `master_prompt` must be rich, concrete, evocative, and free of vague synthetic buzzwords. Strictly NEVER use "photorealistic", "photorealism", "hyperrealistic", or "4K". Instead, prioritize authentic analog cues ("raw photo", "subtle dust and scratches", "visible skin pores", "natural skin texture", "realistic teeth texture", "natural tooth alignment", "authentic gum line", "subtle dental translucency", "minor skin blemishes", "slight motion blur", "natural light"), specific camera optics with exact numeric aperture stops (such as 35mm f/1.4, 50mm f/1.8, 85mm f/1.4, f/2.8, f/4, f/8) to dictate depth and optical rendering instead of vague generic phrases like "shallow depth of field", realistic lighting behavior, physical materials, and atmospheric depth inspired by the moodboard files.
-2. RAW PHOTOGRAPHIC FIDELITY: Synthesize instructions that prioritize 600 DPI museum-grade optical definition, visible skin pores, natural skin texture, realistic teeth texture, natural tooth alignment, authentic gum line, subtle dental translucency, minor epidermal blemishes, and clean edge contrast. Strictly avoid plastic skin, over-smoothing, waxy softening, artificial airbrushing, or unnatural dentures/teeth.
-3. MODULAR LEVERS: Extract 1 to 5 specific, high-value visual keyword descriptors directly inferred from the moodboard images for each of the 9 categories so the user can perform high-level macro adjustments in the Tag Studio. Never reuse placeholder example text.
-4. COMPLETENESS: Never omit categories. Always provide relevant visual tags across all 9 dimensions.
+1. STRUCTURED SEQUENTIAL PROSE: Synthesize the `master_prompt` as cohesive, fluid natural prose organized methodically into four sequential layers:
+   - Layer 1 (Context & Creative Intent): Establish the overarching scene purpose, editorial tone, narrative situation, and emotional atmosphere.
+   - Layer 2 (Hyper-Specific Subject & Styling): Describe the subject's physical features, facial expression, posture, detailed wardrobe fabrics/weaves, and hair styling with extreme specificity.
+   - Layer 3 (Spatial Environment & Props): Detail tangible architectural/natural setting elements, surface textures, material finishes, and relevant foreground/midground props.
+   - Layer 4 (Lighting Physics & Optics): Define exact lighting sources, directions, soft/hard qualities, color temperatures (Kelvin/tone), camera lens focal length, and exact numeric aperture f-stops (such as 35mm f/1.4, 50mm f/1.8, 85mm f/1.4, f/2.8, f/4, f/8).
+2. HYPER-SPECIFICITY & PHYSICAL REALISM: Be hyper-specific in all visual descriptions. Prioritize concrete physical details and authentic analog cues ("raw photo", "subtle dust and scratches", "visible skin pores", "natural skin texture", "realistic teeth texture", "natural tooth alignment", "authentic gum line", "subtle dental translucency", "minor skin blemishes", "slight motion blur", "natural light", "600 DPI museum-grade optical definition"). Strictly avoid plastic skin, over-smoothing, waxy softening, artificial airbrushing, or unnatural dentures/teeth.
+3. ZERO SYNTHETIC BUZZWORDS: Strictly NEVER use "photorealistic", "photorealism", "hyperrealistic", or "4K". Instead, let concrete optical parameters, material textures, and light physics establish the realism.
+4. MODULAR LEVERS EXTRACTION: Extract 1 or more descriptive, hyper-specific visual keyword descriptors (2-6 words each) directly inferred from the moodboard images for each of the 9 categories. Provide as many tags as necessary to thoroughly capture the visual attributes without artificial limits. Never output vague single words or placeholder text.
+5. COMPLETENESS: Never omit categories. Always provide relevant visual tags across all 9 dimensions.
+6. CONFLICT AUDIT: Check extracted visual levers and the user prompt baseline for conflicting instructions that fight for visual dominance or confuse the Google Gemini Image model. If any are detected, report them in `conflicts`. If none exist, return `"conflicts": []`.
 ```
 
 #### Verbatim User Content Template (`user_baseline_template.txt`):
@@ -153,8 +170,7 @@ USER CREATIVE BASELINE & INTENT:
 {USER_PROMPT}
 </user_requirements>
 
-Analyze the moodboard images in conjunction with the user's creative requirements. Synthesize the optimal Master Generation Prompt with raw photo authenticity, visible skin pores, natural skin texture, realistic teeth texture, natural tooth alignment, authentic gum line, subtle dental translucency, minor skin blemishes, natural light, and authentic physical materials, breaking down its core visual levers across all 9 categories.
-
+Analyze the moodboard images in conjunction with the user's creative requirements. Synthesize the optimal Master Generation Prompt for Google's multimodal Gemini Image models ("Nano Banana" / gemini-3.1-flash-image family), following the 4-phase structured sequential prose: (1) Creative Intent & Scene Context, (2) Hyper-specific Subject & Styling, (3) Spatial Environment & Props, and (4) Exact Lighting & Optical Physics. Prioritize raw photo authenticity, visible skin pores, natural skin texture, realistic teeth texture, natural tooth alignment, authentic gum line, subtle dental translucency, minor skin blemishes, natural light, and authentic physical materials, breaking down its core visual levers into hyper-specific tags across all 9 categories.
 ```
 
 #### Fallback Category Defaults (`DEFAULT_FALLBACK_TAGS`):
@@ -187,39 +203,67 @@ When the user toggles, adds, or edits tags in the Tag Studio UI, `VisionService.
 #### Verbatim System Prompt (`resync_master_prompt_system.txt`):
 ```text
 You are an executive visual director, master cinematographer, and elite image generation prompt architect.
-Your mission is to re-synthesize and harmonize the Master Generation Prompt and core scene narrative after the user has edited, added, or removed specific visual levers across the 9 creative categories.
+Your mission is to re-synthesize and harmonize the Master Generation Prompt and 9-category visual levers in a bidirectional feedback loop after the user has edited the prompt or specific visual levers across the 9 creative categories.
+
+TARGET MODEL AWARENESS:
+You are crafting the `master_prompt` specifically for Google's multimodal Gemini Image models ("Nano Banana" / gemini-3.1-flash-image family). These models excel at natural language comprehension, analog photographic physics, coherent spatial relationships, and rich descriptive storytelling. They respond best to rich, complete descriptive prose rather than disconnected keyword soup or synthetic buzzwords.
 
 You must return a single, valid JSON object with EXACTLY this structure:
 {
-  "master_prompt": "A complete, highly polished, evocative Master Generation Prompt designed to produce the definitive image matching the updated visual levers. Fluidly integrate all scene elements, subject details, wardrobe, environment, lighting, optics, color profile, and artistic aesthetic into a cohesive, cinematic description.",
-  "narrative": "A concise 1-2 sentence core creative scene logline capturing the updated primary subject, action, setting, and emotional tone."
+  "master_prompt": "A complete, highly polished, evocative Master Generation Prompt designed to produce the definitive image matching the updated visual direction. Follow a clear, structured sequential flow: (1) Creative Intent & Scene Context, (2) Hyper-specific Subject & Styling, (3) Spatial Environment & Props, and (4) Exact Lighting & Optical Physics.",
+  "categories": {
+    "subject_details": ["character traits", "facial features", "pose"],
+    "wardrobe_hair": ["garment specifics", "fabrics", "hairstyle"],
+    "objects_props": ["key props", "held items", "furniture"],
+    "environment": ["location", "architectural details", "weather"],
+    "layout_framing": ["shot type", "angle", "framing rule"],
+    "camera_optics": ["lens focal length", "exact numeric f-stop aperture like f/1.4 or f/2.8", "sensor format"],
+    "lighting": ["key light type", "fill ratio", "direction", "color temperature"],
+    "color_profile": ["tonal balance", "palette", "grading"],
+    "mood_era": ["artistic style", "era", "emotional tone"],
+    "custom": ["any unique fine-grained user parameters"]
+  },
+  "conflicts": [
+    {
+      "id": "conflict_1",
+      "severity": "warning",
+      "conflicting_elements": ["harsh afternoon sunlight", "soft diffuse studio lighting"],
+      "categories": ["lighting"],
+      "explanation": "Direct midday sun creates high-contrast hard shadows which directly contradicts soft diffuse studio strobe lighting.",
+      "recommendation": "Choose either natural outdoor afternoon sunlight or controlled studio lighting for consistent scene illumination."
+    }
+  ]
 }
 
 Directives:
-1. HARMONIOUS SYNTHESIS: Weave all updated category tags into natural, evocative directorial prose. Avoid generating a mechanical comma-separated tag list or keyword prefixes (never use 'Subject:', 'Environment:', 'Composition:', or 'Lighting & Color:').
-2. PRESERVE INTENT: Keep the original creative tone and spirit intact while seamlessly incorporating all newly added, edited, or modified tags.
-3. RAW PHOTOGRAPHIC FIDELITY: Prioritize authentic analog cues ("raw photo", "visible skin pores", "natural skin texture", "realistic teeth texture", "natural tooth alignment", "authentic gum line", "subtle dental translucency", "minor skin blemishes", "natural light", "optical lens characteristics"). Specify concrete camera optics with exact numeric aperture stops (such as f/1.4, f/1.8, f/2.8, f/4, f/8) to control optical depth rather than vague generic terms like "shallow depth of field".
-4. ZERO SYNTHETIC BUZZWORDS: Strictly NEVER use "photorealistic", "photorealism", "hyperrealistic", or "4K".
-5. CONCISENESS & PRECISION: Keep the prompt dense, purposeful, and free of filler phrases.
+1. BIDIRECTIONAL HARMONIZATION:
+   - If the user modified the Master Generation Prompt directly, extract and update the active tags in the `categories` object so all 9 visual lever categories accurately reflect the user's prompt modifications with hyper-specific descriptors.
+   - If the user modified, added, or removed specific category tags, weave them seamlessly into the synthesized `master_prompt`.
+2. STRUCTURED SEQUENTIAL PROSE: Synthesize the `master_prompt` as cohesive, fluid natural prose organized methodically into four sequential layers:
+   - Layer 1 (Context & Creative Intent): Establish the overarching scene purpose, editorial tone, narrative situation, and emotional atmosphere.
+   - Layer 2 (Hyper-Specific Subject & Styling): Describe the subject's physical features, facial expression, posture, detailed wardrobe fabrics/weaves, and hair styling with extreme specificity.
+   - Layer 3 (Spatial Environment & Props): Detail tangible architectural/natural setting elements, surface textures, material finishes, and relevant foreground/midground props.
+   - Layer 4 (Lighting Physics & Optics): Define exact lighting sources, directions, soft/hard qualities, color temperatures (Kelvin/tone), camera lens focal length, and exact numeric aperture f-stops (such as 35mm f/1.4, 50mm f/1.8, 85mm f/1.4, f/2.8, f/4, f/8).
+   Avoid generating a mechanical comma-separated tag list or keyword prefixes in the master_prompt (never use 'Subject:', 'Environment:', 'Composition:', or 'Lighting & Color:').
+3. CONFLICT ANALYSIS: Carefully inspect all tags across and within the 9 visual lever categories and the prompt. If you detect mutually exclusive, contradictory, or competing visual instructions that will confuse the Google Gemini Image model or fight for visual dominance, identify each conflict in the `conflicts` array. If no conflicts exist, return `"conflicts": []`.
+4. RAW PHOTOGRAPHIC FIDELITY & HYPER-SPECIFICITY: Prioritize authentic analog cues ("raw photo", "visible skin pores", "natural skin texture", "realistic teeth texture", "natural tooth alignment", "authentic gum line", "subtle dental translucency", "minor skin blemishes", "natural light", "optical lens characteristics", "600 DPI museum-grade optical definition"). Specify concrete camera optics with exact numeric aperture stops (such as f/1.4, f/1.8, f/2.8, f/4, f/8) to control optical depth rather than vague generic terms like "shallow depth of field". Strictly avoid plastic skin, over-smoothing, waxy softening, artificial airbrushing, or unnatural dentures/teeth.
+5. ZERO SYNTHETIC BUZZWORDS: Strictly NEVER use "photorealistic", "photorealism", "hyperrealistic", or "4K".
+6. CATEGORY EXTRACTION PRECISION: Ensure each extracted tag string in `categories` is concise (2-6 words), descriptive, hyper-specific, and directly relevant to that category. Do not output empty category arrays; extract 1 or more relevant tags per category as necessary without arbitrary upper limits.
 ```
 
 #### Verbatim User Content Template (`resync_master_prompt_template.txt`):
 ```text
-The user has updated the visual direction and tags for this scene. Re-harmonize and update the Master Generation Prompt and narrative accordingly.
+The user has updated the visual direction (prompt or visual lever tags) for this scene. Re-harmonize and update the Master Generation Prompt and 9-category visual levers accordingly for Google's multimodal Gemini Image models ("Nano Banana" / gemini-3.1-flash-image family).
 
-<scene_narrative>
-{CURRENT_NARRATIVE}
-</scene_narrative>
-
-<previous_master_prompt>
+<master_prompt>
 {PREVIOUS_MASTER_PROMPT}
-</previous_master_prompt>
+</master_prompt>
 
-<updated_visual_levers>
+<visual_levers>
 {UPDATED_CATEGORIES_JSON}
-</updated_visual_levers>
+</visual_levers>
 
-Synthesize the definitive updated Master Generation Prompt and core narrative reflecting all active tags above.
+Synthesize the definitive updated Master Generation Prompt following the 4-phase structured sequential flow ((1) Intent & Context, (2) Subject & Styling, (3) Environment & Props, (4) Lighting & Optics) alongside comprehensive, hyper-specific 9-category visual levers reflecting all active creative directives above.
 ```
 
 ---

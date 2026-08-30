@@ -11,7 +11,8 @@ Your task is to produce a single, authentic raw photo cohesive image where:
   * Render every letter and word with 100% correct spelling, font styling, and proportions.
   * Drape graphics realistically across fabric folds and body curves in accurate 3D perspective without scrambling words, altering logos, or hallucinating generic replacement designs.
 - Texture & Material Transfer: Fabric texture, weave, weight, material details, stitch lines, patterns, and folds from each reference garment are accurately transferred.
-- Environmental Harmonization: Lighting, cast shadows, specular highlights, reflections, and ambient color bounce are realistically harmonized with the base scene's lighting environment.
+- Environmental Harmonization: Lighting, cast shadows, specular highlights, and reflections are realistically harmonized with the base scene's lighting environment.
+- Color Constancy & Calibrated White Balance Lock: Strictly preserve the exact Kelvin color temperature, neutral white balance, background chromaticity, neutral gray tones, and authentic skin undertones of the reference base image. Harmonize lighting on the newly added garments WITHOUT shifting the overall scene white balance, and strictly prevent cumulative warm color casts, magenta/reddish tinting, yellow-magenta color drift, or unnatural warming filters across the rest of the image, subjects, and background.
 - Background & Composition: Surrounding environment, background props, camera angle, and unmentioned elements remain strictly identical.
 - Fidelity & Sharpness Lock: Maintain 1:1 original source sharpness, raw photo fidelity, crisp focus, visible skin pores, natural skin texture, realistic teeth texture, natural tooth alignment, authentic gum line, subtle dental translucency, minor skin blemishes, natural light, and authentic micro-textures. Strictly prevent plastic skin, airbrushed textures, waxy smoothing, or unnatural dentures/teeth on subjects and scene elements.
 

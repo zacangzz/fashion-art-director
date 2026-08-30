@@ -25,7 +25,11 @@ from app.utils.prompt_loader import (
     RESYNC_LEVERS_FROM_PROMPT_TEMPLATE,
     CHECK_CONFLICTS_SYSTEM_PROMPT,
 )
-from app.utils.image_utils import to_image_part, to_interaction_image_input
+from app.utils.image_utils import (
+    to_image_part,
+    to_interaction_image_input,
+    prepare_interaction_input,
+)
 
 logger = get_logger("vision_service")
 
@@ -133,27 +137,7 @@ class VisionService:
                 use_interactions = True
 
         if use_interactions:
-            interaction_input: List[Any] = []
-            for item in contents:
-                if isinstance(item, str):
-                    interaction_input.append({"type": "text", "text": item})
-                elif isinstance(item, bytes):
-                    interaction_input.append(to_interaction_image_input(item, optimize=True))
-                elif isinstance(item, dict):
-                    interaction_input.append(item)
-                elif hasattr(item, "text") and getattr(item, "text", None):
-                    interaction_input.append({"type": "text", "text": item.text})
-                elif hasattr(item, "inline_data") and getattr(item, "inline_data", None):
-                    raw_d = item.inline_data.data
-                    mime_t = getattr(item.inline_data, "mime_type", "image/png")
-                    b64_d = base64.b64encode(raw_d).decode("utf-8") if isinstance(raw_d, bytes) else str(raw_d)
-                    interaction_input.append({"type": "image", "data": b64_d, "mime_type": mime_t})
-
-            api_input = (
-                interaction_input[0]["text"]
-                if len(interaction_input) == 1 and interaction_input[0].get("type") == "text"
-                else (interaction_input if len(interaction_input) > 0 else "")
-            )
+            api_input = prepare_interaction_input(contents)
 
             kwargs: Dict[str, Any] = {
                 "model": active_model,
@@ -461,16 +445,10 @@ class VisionService:
 
         user_content = (
             RESYNC_PROMPT_FROM_LEVERS_TEMPLATE
-            .replace("{CURRENT_NARRATIVE}", narrative.strip() if narrative else "Editorial portrait scene")
             .replace("{CATEGORIES_JSON}", cats_json_str)
         )
 
-        contents = [
-            types.Content(
-                role="user",
-                parts=[types.Part.from_text(text=user_content)],
-            )
-        ]
+        contents = [user_content]
 
         config = types.GenerateContentConfig(
             system_instruction=RESYNC_PROMPT_FROM_LEVERS_SYSTEM,
@@ -482,7 +460,6 @@ class VisionService:
             "resync_prompt_from_levers_request",
             request_id,
             model=active_model,
-            narrative=narrative,
             categories_count={k: len(v) for k, v in clean_cats.items()},
         )
 
@@ -519,7 +496,6 @@ class VisionService:
             request_id,
             model=active_model,
             master_prompt=master_prompt,
-            narrative=updated_narrative,
             conflicts_count=len(conflicts_result),
             tokens=usage_dict,
             cost_usd=cost_info["cost_usd"],
@@ -551,15 +527,9 @@ class VisionService:
         user_content = (
             RESYNC_LEVERS_FROM_PROMPT_TEMPLATE
             .replace("{MASTER_PROMPT}", master_prompt.strip())
-            .replace("{CURRENT_NARRATIVE}", narrative.strip() if narrative else "Editorial scene")
         )
 
-        contents = [
-            types.Content(
-                role="user",
-                parts=[types.Part.from_text(text=user_content)],
-            )
-        ]
+        contents = [user_content]
 
         config = types.GenerateContentConfig(
             system_instruction=RESYNC_LEVERS_FROM_PROMPT_SYSTEM,
@@ -722,17 +692,11 @@ class VisionService:
 
         user_content = (
             RESYNC_MASTER_PROMPT_TEMPLATE
-            .replace("{CURRENT_NARRATIVE}", narrative.strip() if narrative else "Editorial portrait scene")
             .replace("{PREVIOUS_MASTER_PROMPT}", previous_master_prompt.strip() if previous_master_prompt else "None")
             .replace("{UPDATED_CATEGORIES_JSON}", cats_json_str)
         )
 
-        contents = [
-            types.Content(
-                role="user",
-                parts=[types.Part.from_text(text=user_content)],
-            )
-        ]
+        contents = [user_content]
 
         config = types.GenerateContentConfig(
             system_instruction=RESYNC_MASTER_PROMPT_SYSTEM,
@@ -744,7 +708,6 @@ class VisionService:
             "resync_prompt_request",
             request_id,
             model=active_model,
-            narrative=narrative,
             categories_count={k: len(v) for k, v in clean_cats.items()},
         )
 
@@ -850,7 +813,6 @@ class VisionService:
             request_id,
             model=active_model,
             master_prompt=master_prompt,
-            narrative=updated_narrative,
             categories_count={k: len(v) for k, v in categories_result.items()},
             conflicts_count=len(conflicts_result),
             tokens=usage_dict,
@@ -874,7 +836,7 @@ class VisionService:
         model_name: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
-        Reviews master prompt, narrative, and visual lever tags for contradictory directives.
+        Reviews master prompt and visual lever tags for contradictory directives.
         """
         active_model = model_name or self.model_name
         request_id = get_current_request_id() or f"conflicts_{uuid.uuid4().hex}"
@@ -901,17 +863,11 @@ class VisionService:
         cats_json_str = json.dumps(clean_cats, indent=2)
         user_content = (
             f"Please review the following visual direction for conflicts:\n\n"
-            f"SCENE NARRATIVE:\n{narrative.strip() if narrative else 'None'}\n\n"
             f"MASTER GENERATION PROMPT:\n{master_prompt.strip() if master_prompt else 'None'}\n\n"
             f"9-CATEGORY VISUAL LEVERS (JSON):\n{cats_json_str}"
         )
 
-        contents = [
-            types.Content(
-                role="user",
-                parts=[types.Part.from_text(text=user_content)],
-            )
-        ]
+        contents = [user_content]
 
         config = types.GenerateContentConfig(
             system_instruction=CHECK_CONFLICTS_SYSTEM_PROMPT,

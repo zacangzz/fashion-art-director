@@ -11,12 +11,15 @@ def parse_and_raise_http_error(exc: Exception, model_name: str = "", context: st
     logger.error(f"Error in {context}: {err_str}", exc_info=True)
 
     if "404" in err_str or "NOT_FOUND" in err_str:
+        extra_note = ""
+        if "lite" in (model_name or "").lower():
+            extra_note = " Note: Lite image models only support standard 1K resolution."
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=(
                 f"Google AI Model Not Found (404): The model '{model_name}' was not found "
                 f"or is not enabled for your API key. Please check your VISION_MODEL / IMAGEN_MODEL "
-                f"settings in .env and verify model access in Google AI Studio (https://aistudio.google.com). "
+                f"settings in .env and verify model access in Google AI Studio (https://aistudio.google.com).{extra_note} "
                 f"Raw details: {err_str}"
             ),
         )

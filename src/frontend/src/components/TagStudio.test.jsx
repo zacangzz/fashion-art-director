@@ -16,7 +16,6 @@ describe('TagStudio component', () => {
     );
 
     expect(screen.getByText(/Macro Studio \(Visual Levers & Prompt Compiler\)/i)).toBeInTheDocument();
-    expect(screen.getByText(/Core Scene Narrative/i)).toBeInTheDocument();
     expect(screen.getByText(/Subject & Character Details/i)).toBeInTheDocument();
     expect(screen.getByText(/Environment & Setting/i)).toBeInTheDocument();
     expect(screen.getByText(/Wardrobe & Hairstyle/i)).toBeInTheDocument();
@@ -63,12 +62,16 @@ describe('TagStudio component', () => {
   it('displays Modified indicator and allows reset to baseline', () => {
     const handleReset = vi.fn();
     const baselineSnapshot = {
-      narrative: 'Original narrative',
-      categories: DEFAULT_TAG_STATE.categories,
+      categories: {
+        ...DEFAULT_TAG_STATE.categories,
+        subject_details: [{ id: 's1', label: 'original model', enabled: true, locked: false, isCustom: false }],
+      },
     };
     const modifiedState = {
-      narrative: 'Changed narrative',
-      categories: DEFAULT_TAG_STATE.categories,
+      categories: {
+        ...DEFAULT_TAG_STATE.categories,
+        subject_details: [{ id: 's1', label: 'modified model', enabled: true, locked: false, isCustom: false }],
+      },
     };
 
     render(
@@ -84,7 +87,7 @@ describe('TagStudio component', () => {
       />
     );
 
-    expect(screen.getByText(/Modified/i)).toBeInTheDocument();
+    expect(screen.getByText('Modified')).toBeInTheDocument();
     const resetBtn = screen.getByRole('button', { name: /Reset to Base/i });
     expect(resetBtn).toBeInTheDocument();
     fireEvent.click(resetBtn);

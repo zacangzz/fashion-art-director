@@ -72,7 +72,6 @@ export default function App() {
   const [isResyncingLevers, setIsResyncingLevers] = useState(false);
   const [moodboardId, setMoodboardId] = useState(null);
   const [masterPrompt, setMasterPrompt] = useState('');
-  const [sceneNarrative, setSceneNarrative] = useState('');
   const [baselines, setBaselines] = useState([]);
   const [activeBaseline, setActiveBaseline] = useState(null);
 
@@ -244,14 +243,12 @@ export default function App() {
 
       const nextState = {
         master_prompt: response.master_prompt || null,
-        narrative: response.narrative || promptToSend || tagState.narrative,
         categories: response.categories || {},
         locked_categories: lockedCategories,
       };
       setTagState(nextState);
       setBaselineTagSnapshot(JSON.parse(JSON.stringify(nextState)));
       setMasterPrompt(response.master_prompt || '');
-      setSceneNarrative(response.narrative || promptToSend || '');
       setPromptConflicts(response.conflicts || []);
     } catch (err) {
       setErrorMessage(err.message || 'Failed to analyze moodboard references.');
@@ -278,7 +275,6 @@ export default function App() {
       const payload = {
         moodboard_id: moodboardId || `mb_${Date.now()}`,
         master_prompt: masterPrompt.trim(),
-        narrative: sceneNarrative.trim(),
         categories: tagState.categories,
         aspect_ratio: aspectRatio,
         prompt_override: masterPrompt.trim(),
@@ -308,7 +304,6 @@ export default function App() {
 
     try {
       const response = await resyncPromptFromLevers({
-        narrative: sceneNarrative,
         categories: tagState.categories,
         previous_master_prompt: masterPrompt,
         vision_model: visionModel,
@@ -317,9 +312,6 @@ export default function App() {
       if (response.master_prompt) {
         setMasterPrompt(response.master_prompt);
       }
-      if (response.narrative) {
-        setSceneNarrative(response.narrative);
-      }
       if (response.conflicts) {
         setPromptConflicts(response.conflicts);
       }
@@ -327,7 +319,6 @@ export default function App() {
       setTagState((prev) => ({
         ...prev,
         master_prompt: response.master_prompt || prev.master_prompt,
-        narrative: response.narrative || prev.narrative,
       }));
     } catch (err) {
       setErrorMessage(err.message || 'Failed to re-sync master prompt from visual levers.');
@@ -345,14 +336,10 @@ export default function App() {
     try {
       const response = await resyncLeversFromPrompt({
         master_prompt: masterPrompt,
-        narrative: sceneNarrative,
         categories: tagState.categories,
         vision_model: visionModel,
       });
 
-      if (response.narrative) {
-        setSceneNarrative(response.narrative);
-      }
       if (response.conflicts) {
         setPromptConflicts(response.conflicts);
       }
@@ -360,7 +347,6 @@ export default function App() {
       if (response.categories && Object.keys(response.categories).length > 0) {
         setTagState((prev) => ({
           ...prev,
-          narrative: response.narrative || prev.narrative,
           categories: response.categories,
         }));
       }
@@ -376,12 +362,11 @@ export default function App() {
 
   // On-Demand Scan for Contradictory Instructions & Conflicts
   const handleCheckConflicts = async () => {
-    if (!masterPrompt && !sceneNarrative) return;
+    if (!masterPrompt) return;
     setIsCheckingConflicts(true);
     try {
       const response = await checkPromptConflicts({
         master_prompt: masterPrompt,
-        narrative: sceneNarrative,
         categories: tagState.categories,
         vision_model: visionModel,
       });
@@ -406,7 +391,7 @@ export default function App() {
       setActiveSeed(baseline.seed);
       setPreviousGenerationResult(null);
 
-      const compiled = baseline.compiled_prompt || masterPrompt || compileModularPrompt(tagState.narrative, tagState.categories);
+      const compiled = baseline.compiled_prompt || masterPrompt || compileModularPrompt(tagState.categories);
       const effRatio = baseline.aspect_ratio || aspectRatio;
       const initialGen = {
         generation_id: baseline.id,
@@ -948,8 +933,6 @@ export default function App() {
                     onUpdateTagState={setTagState}
                     masterPrompt={masterPrompt}
                     onMasterPromptChange={setMasterPrompt}
-                    narrative={sceneNarrative}
-                    onNarrativeChange={setSceneNarrative}
                     aspectRatio={aspectRatio}
                     temperature={temperature}
                     onTemperatureChange={setTemperature}

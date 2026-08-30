@@ -25,10 +25,33 @@ from app.utils.prompt_loader import (
 logger = get_logger("image_generator")
 
 
+LITE_IMAGE_MODELS = {
+    "gemini-3.1-flash-lite-image",
+}
+
+
+def resolve_model_image_size(model_name: str, requested_size: Optional[str] = "4K") -> Optional[str]:
+    """
+    Returns the appropriate image_size for the given model.
+    Lite models only support standard 1K (and 512px) resolution; requesting 2K or 4K causes Google API 404 Entity Not Found.
+    Standard/Pro models (gemini-3.1-flash-image, gemini-3-pro-image) support 1K, 2K, 4K.
+    """
+    if not requested_size:
+        return None
+
+    clean_model = model_name.lower().strip()
+    if clean_model in LITE_IMAGE_MODELS or "lite" in clean_model:
+        # Lite model tier only supports 1K (or 512px); clamp to 1K if 2K/4K requested
+        if requested_size in ("2K", "4K"):
+            return "1K"
+        return requested_size
+    return requested_size
+
+
 class ImageGenerator:
     """
     Independent component responsible for executing Google GenAI Interactions API calls
-    to generate, edit, and inpaint ultra-high-resolution 4K images.
+    to generate, edit, and inpaint ultra-high-resolution images.
     """
 
     def __init__(
@@ -100,9 +123,11 @@ class ImageGenerator:
         audit_request_id: Optional[str] = None,
     ) -> bytes:
         """
-        Generates or edits a 4K image using Google GenAI Interactions API.
+        Generates or edits an image using Google GenAI Interactions API.
+        Automatically negotiates resolution capability (e.g. 1K for lite models, 4K for pro/flash).
         """
         active_model = model or self.default_model
+        effective_image_size = resolve_model_image_size(active_model, image_size)
         norm_aspect = normalize_interaction_aspect_ratio(aspect_ratio)
         res_tuple = ASPECT_RATIO_RESOLUTIONS.get(aspect_ratio or "2:3", (2560, 3840))
         res_str = f"{res_tuple[0]}x{res_tuple[1]}"
@@ -126,11 +151,12 @@ class ImageGenerator:
         input_items.append({"type": "text", "text": full_prompt})
         api_input = input_items if len(input_items) > 1 else full_prompt
 
-        response_format = {
+        response_format: Dict[str, Any] = {
             "type": "image",
             "aspect_ratio": norm_aspect,
-            "image_size": image_size,
         }
+        if effective_image_size:
+            response_format["image_size"] = effective_image_size
 
         kwargs: Dict[str, Any] = {
             "model": active_model,
@@ -142,7 +168,7 @@ class ImageGenerator:
 
         logger.info(
             f"ImageGenerator calling Interactions API for '{active_model}' "
-            f"(aspect={aspect_ratio} -> {norm_aspect}, size={image_size}, seed={seed}, temp={temperature}, refs={len(reference_images or [])})"
+            f"(aspect={aspect_ratio} -> {norm_aspect}, size={effective_image_size}, seed={seed}, temp={temperature}, refs={len(reference_images or [])})"
         )
 
         started = time.perf_counter()
@@ -154,7 +180,7 @@ class ImageGenerator:
                 model=active_model,
                 config={
                     "aspect_ratio": norm_aspect,
-                    "image_size": image_size,
+                    "image_size": effective_image_size,
                     "seed": seed,
                     "negative_prompt": negative_prompt,
                     "temperature": temperature,
@@ -227,30 +253,37 @@ class ImageGenerator:
 
         usage_dict = extract_usage_metadata(interaction)
         ref_count = len(reference_images or [])
-        estimated_prompt_tokens = 258 * ref_count + max(len(full_prompt) // 4, 80)
+        # Official Google GenAI token specification: 560 tokens per input reference image
+        estimated_prompt_tokens = 560 * ref_count + max(len(full_prompt) // 4, 80)
         if usage_dict["total_token_count"] == 0:
             usage_dict = {
                 "prompt_token_count": estimated_prompt_tokens,
                 "candidates_token_count": 0,
                 "total_token_count": estimated_prompt_tokens,
             }
+        elif usage_dict["prompt_token_count"] == 0 and ref_count > 0:
+            usage_dict["prompt_token_count"] = max(usage_dict["prompt_token_count"], estimated_prompt_tokens)
+            usage_dict["total_token_count"] = usage_dict["prompt_token_count"] + usage_dict["candidates_token_count"]
 
         cost_info = calculate_cost(
             active_model,
             prompt_tokens=usage_dict["prompt_token_count"],
             candidates_tokens=usage_dict["candidates_token_count"],
             images_count=1,
+            image_size=effective_image_size or "4K",
         )
         self.last_call_metrics = {
             "cost_usd": cost_info["cost_usd"],
             "total_token_count": usage_dict["total_token_count"],
             "prompt_tokens": usage_dict["prompt_token_count"],
             "candidates_tokens": usage_dict["candidates_token_count"],
+            "cost_breakdown": cost_info.get("breakdown", {}),
+            "image_size": effective_image_size or "4K",
         }
 
         duration_ms = round((time.perf_counter() - started) * 1000, 1)
         logger.info(
-            f"ImageGenerator received {len(image_bytes)} bytes ({duration_ms}ms, cost=${cost_info['cost_usd']:.4f})"
+            f"ImageGenerator received {len(image_bytes)} bytes ({duration_ms}ms, size={effective_image_size}, cost=${cost_info['cost_usd']:.4f})"
         )
 
         if self.telemetry and audit_request_id:
@@ -263,9 +296,11 @@ class ImageGenerator:
                 duration_ms=duration_ms,
                 tokens=usage_dict,
                 cost_usd=cost_info["cost_usd"],
+                cost_breakdown=cost_info.get("breakdown", {}),
                 outputs={
                     "bytes": len(image_bytes),
                     "sha256": hashlib.sha256(image_bytes).hexdigest(),
+                    "image_size": effective_image_size or "4K",
                 },
             )
 

@@ -63,7 +63,14 @@ describe('promptCompiler', () => {
   });
 
   describe('compileModularPrompt', () => {
-    it('compiles full 9-category structured prompt', () => {
+    it('compiles directly from 9-category visual levers without narrative', () => {
+      const compiled = compileModularPrompt(baseCategories);
+      expect(compiled).toContain('Subject: chic model, wearing black leather jacket.');
+      expect(compiled).toContain('Environment: set in brutalist concrete alley.');
+      expect(compiled).toContain('Lighting & Color: illuminated with golden hour rim light.');
+    });
+
+    it('compiles full 9-category structured prompt with legacy narrative if provided', () => {
       const compiled = compileModularPrompt('A dramatic editorial portrait.', baseCategories);
       expect(compiled).toContain('A dramatic editorial portrait.');
       expect(compiled).toContain('Subject: chic model, wearing black leather jacket.');
@@ -72,7 +79,7 @@ describe('promptCompiler', () => {
     });
 
     it('honors prompt override', () => {
-      const compiled = compileModularPrompt('Narrative', baseCategories, [], 'Custom forced prompt');
+      const compiled = compileModularPrompt(baseCategories, [], 'Custom forced prompt');
       expect(compiled).toBe('Custom forced prompt');
     });
   });

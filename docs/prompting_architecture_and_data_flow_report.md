@@ -64,10 +64,10 @@ The application provides two complementary levels of creative control:
 ## 3. Step 1: AI Vision Director & Master Prompt Synthesis
 
 ### 3.1. The Role of the Vision Model
-In Step 1, Gemini 3.1 Flash Lite acts as an **Executive Visual Director & Prompt Architect**. It analyzes the moodboard imagery in combination with the user's creative prompt to:
-1. Synthesize the **Optimal Master Prompt**: A definitive, high-fidelity prompt with natural phrasing, camera optics, physical materials, and lighting descriptors that best produces the moodboard look.
-2. Formulate the **Core Creative Narrative**: A concise 1-2 sentence scene logline.
-3. Extract **Visual Levers**: Structured keyword descriptors across 9 visual taxonomy dimensions.
+In Step 1, Gemini 3.5 Flash Lite (or 3.7 Flash) acts as an **Executive Visual Director & Prompt Architect**. It analyzes the moodboard imagery in combination with the user's creative prompt to:
+1. Synthesize the **Optimal Master Prompt**: A definitive, hyper-specific prompt formatted in 4-phase structured sequential prose (Context & Intent -> Subject & Styling -> Spatial Environment & Props -> Lighting & Optical Physics) crafted specifically for Google's multimodal Gemini Image models ("Nano Banana" / `gemini-3.1-flash-image` family).
+2. Formulate the **Core Creative Intent**: Explicit scene context, editorial purpose, and mood.
+3. Extract **Visual Levers**: Hyper-specific, granular keyword descriptors across 9 visual taxonomy dimensions with conflict QA auditing.
 
 ### 3.2. Extraction Prompt Templates
 
@@ -76,12 +76,8 @@ In Step 1, Gemini 3.1 Flash Lite acts as an **Executive Visual Director & Prompt
 You are an executive visual director, master cinematographer, and elite image generation prompt architect.
 Your mission is to analyze the reference moodboard images and user creative requirements, then synthesize the OPTIMAL, highest-fidelity generation prompt alongside its constituent visual levers.
 
-You must return a single, valid JSON object with EXACTLY this structure:
-{
-  "master_prompt": "A complete, highly polished, evocative Master Generation Prompt...",
-  "narrative": "A concise 1-2 sentence core creative scene logline...",
-  "categories": { ... }
-}
+TARGET MODEL AWARENESS:
+You are crafting the `master_prompt` specifically for Google's multimodal Gemini Image models ("Nano Banana" / gemini-3.1-flash-image family)...
 ```
 
 #### B. User Baseline Template (`src/app/prompts/user_baseline_template.txt`)
@@ -91,7 +87,7 @@ USER CREATIVE BASELINE & INTENT:
 {USER_PROMPT}
 </user_requirements>
 
-Analyze the moodboard images in conjunction with the user's creative requirements. Synthesize the optimal Master Generation Prompt and break down its core visual levers across all 9 categories.
+Analyze the moodboard images in conjunction with the user's creative requirements. Synthesize the optimal Master Generation Prompt for Google's multimodal Gemini Image models ("Nano Banana" / gemini-3.1-flash-image family), following the 4-phase structured sequential prose: (1) Creative Intent & Scene Context, (2) Hyper-specific Subject & Styling, (3) Spatial Environment & Props, and (4) Exact Lighting & Optical Physics...
 ```
 
 ---

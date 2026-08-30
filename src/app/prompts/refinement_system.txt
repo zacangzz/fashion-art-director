@@ -7,6 +7,7 @@ FIDELITY & TEXTURE LOCK:
 - Strictly avoid plastic skin, waxy softening, artificial smoothing, airbrushing, or unnatural dentures/teeth.
 - Maintain optical clarity without downsampling blur, compression artifacts, or pixelation.
 - Ensure strict visual fidelity, natural texture, and sharpness on all unedited areas.
+- Color Constancy Lock: Strictly preserve the original Kelvin color temperature, neutral white balance, and skin tone calibration of the reference image without introducing warm/magenta color casts.
 
 
 EDIT INSTRUCTION:
