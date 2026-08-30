@@ -16,6 +16,10 @@ from app.schemas.domain import (
     PromptConflict,
     ResyncMasterPromptRequest,
     ResyncMasterPromptResponse,
+    ResyncPromptFromLeversRequest,
+    ResyncPromptFromLeversResponse,
+    ResyncLeversFromPromptRequest,
+    ResyncLeversFromPromptResponse,
     TagChip,
 )
 from app.utils.error_handler import parse_and_raise_http_error
@@ -300,15 +304,16 @@ async def generate_baselines(request: GenerateBaselinesRequest):
 @router.post("/resync-prompt", response_model=ResyncMasterPromptResponse)
 async def resync_prompt(request: ResyncMasterPromptRequest):
     """
-    On-Demand Re-Sync: Calls Gemini Vision/Language model to re-synthesize fluid,
-    high-fashion directorial Master Prompt prose from user-updated visual levers.
+    On-Demand Levers -> Master Prompt Re-Sync: Synthesizes fluid, high-fashion directorial
+    Master Prompt prose and updated narrative from active 9-category visual levers.
     """
     eff_vision_model = request.vision_model or settings.VISION_MODEL
+    eff_prompt = request.master_prompt or request.previous_master_prompt or ""
     try:
-        result = await vision_service.resync_master_prompt(
+        result = await vision_service.resync_prompt_from_levers(
             narrative=request.narrative,
             categories=request.categories,
-            previous_master_prompt=request.previous_master_prompt,
+            previous_master_prompt=eff_prompt,
             model_name=eff_vision_model,
         )
         raw_conflicts = result.get("conflicts", [])
@@ -316,13 +321,54 @@ async def resync_prompt(request: ResyncMasterPromptRequest):
             PromptConflict(**c) if isinstance(c, dict) else c
             for c in raw_conflicts
         ]
+        categories_dict = result.get("categories", {})
+        parsed_categories = {
+            k: [TagChip(**item) if isinstance(item, dict) else item for item in v]
+            for k, v in categories_dict.items()
+        } if categories_dict else {}
+
         return ResyncMasterPromptResponse(
             master_prompt=result.get("master_prompt", ""),
+            narrative=result.get("narrative", ""),
+            categories=parsed_categories,
+            conflicts=parsed_conflicts,
+        )
+    except Exception as exc:
+        parse_and_raise_http_error(exc, model_name=eff_vision_model, context="Master Prompt Re-Sync from Levers")
+
+
+@router.post("/resync-levers", response_model=ResyncLeversFromPromptResponse)
+async def resync_levers(request: ResyncLeversFromPromptRequest):
+    """
+    On-Demand Master Prompt -> Levers Re-Sync: Deconstructs user-provided Master Generation Prompt
+    and extracts structured 9-category visual levers and updated narrative.
+    """
+    eff_vision_model = request.vision_model or settings.VISION_MODEL
+    try:
+        result = await vision_service.resync_levers_from_prompt(
+            master_prompt=request.master_prompt,
+            narrative=request.narrative,
+            categories=request.categories,
+            model_name=eff_vision_model,
+        )
+        raw_conflicts = result.get("conflicts", [])
+        parsed_conflicts = [
+            PromptConflict(**c) if isinstance(c, dict) else c
+            for c in raw_conflicts
+        ]
+        categories_dict = result.get("categories", {})
+        parsed_categories = {
+            k: [TagChip(**item) if isinstance(item, dict) else item for item in v]
+            for k, v in categories_dict.items()
+        } if categories_dict else {}
+
+        return ResyncLeversFromPromptResponse(
+            categories=parsed_categories,
             narrative=result.get("narrative", ""),
             conflicts=parsed_conflicts,
         )
     except Exception as exc:
-        parse_and_raise_http_error(exc, model_name=eff_vision_model, context="Master Prompt Re-Sync")
+        parse_and_raise_http_error(exc, model_name=eff_vision_model, context="Visual Levers Re-Sync from Prompt")
 
 
 @router.post("/check-conflicts", response_model=CheckConflictsResponse)

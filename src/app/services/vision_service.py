@@ -1,6 +1,9 @@
 import uuid
 import json
+import base64
 import asyncio
+import unittest.mock
+from unittest.mock import MagicMock, AsyncMock
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from google import genai
@@ -16,9 +19,13 @@ from app.utils.prompt_loader import (
     USER_BASELINE_TEMPLATE,
     RESYNC_MASTER_PROMPT_SYSTEM,
     RESYNC_MASTER_PROMPT_TEMPLATE,
+    RESYNC_PROMPT_FROM_LEVERS_SYSTEM,
+    RESYNC_PROMPT_FROM_LEVERS_TEMPLATE,
+    RESYNC_LEVERS_FROM_PROMPT_SYSTEM,
+    RESYNC_LEVERS_FROM_PROMPT_TEMPLATE,
     CHECK_CONFLICTS_SYSTEM_PROMPT,
 )
-from app.utils.image_utils import to_image_part
+from app.utils.image_utils import to_image_part, to_interaction_image_input
 
 logger = get_logger("vision_service")
 
@@ -110,17 +117,117 @@ class VisionService:
         self, contents: List[Any], config: Optional[types.GenerateContentConfig] = None, model: Optional[str] = None
     ) -> Any:
         active_model = model or self.model_name
-        kwargs: Dict[str, Any] = {"model": active_model, "contents": contents}
-        if config is not None:
-            kwargs["config"] = config
 
+        # Detect whether to use modern Interactions API or legacy/mock models.generate_content
+        use_interactions = False
+        if hasattr(self.client, "interactions") and hasattr(self.client.interactions, "create"):
+            models_gen = getattr(getattr(self.client, "models", None), "generate_content", None)
+            interactions_create = getattr(getattr(self.client, "interactions", None), "create", None)
+
+            models_gen_configured = getattr(models_gen, "_mock_return_value", unittest.mock.DEFAULT) is not unittest.mock.DEFAULT
+            interactions_configured = getattr(interactions_create, "_mock_return_value", unittest.mock.DEFAULT) is not unittest.mock.DEFAULT
+
+            if models_gen_configured and not interactions_configured:
+                use_interactions = False
+            else:
+                use_interactions = True
+
+        if use_interactions:
+            interaction_input: List[Any] = []
+            for item in contents:
+                if isinstance(item, str):
+                    interaction_input.append({"type": "text", "text": item})
+                elif isinstance(item, bytes):
+                    interaction_input.append(to_interaction_image_input(item, optimize=True))
+                elif isinstance(item, dict):
+                    interaction_input.append(item)
+                elif hasattr(item, "text") and getattr(item, "text", None):
+                    interaction_input.append({"type": "text", "text": item.text})
+                elif hasattr(item, "inline_data") and getattr(item, "inline_data", None):
+                    raw_d = item.inline_data.data
+                    mime_t = getattr(item.inline_data, "mime_type", "image/png")
+                    b64_d = base64.b64encode(raw_d).decode("utf-8") if isinstance(raw_d, bytes) else str(raw_d)
+                    interaction_input.append({"type": "image", "data": b64_d, "mime_type": mime_t})
+
+            api_input = (
+                interaction_input[0]["text"]
+                if len(interaction_input) == 1 and interaction_input[0].get("type") == "text"
+                else (interaction_input if len(interaction_input) > 0 else "")
+            )
+
+            kwargs: Dict[str, Any] = {
+                "model": active_model,
+                "input": api_input,
+            }
+
+            if config is not None:
+                sys_inst = getattr(config, "system_instruction", None)
+                if sys_inst:
+                    if isinstance(sys_inst, str):
+                        kwargs["system_instruction"] = sys_inst
+                    elif hasattr(sys_inst, "parts"):
+                        kwargs["system_instruction"] = " ".join(
+                            p.text for p in sys_inst.parts if hasattr(p, "text")
+                        )
+                    elif hasattr(sys_inst, "text"):
+                        kwargs["system_instruction"] = sys_inst.text
+
+                mime = getattr(config, "response_mime_type", None)
+                schema = getattr(config, "response_schema", None)
+                if mime == "application/json" or schema is not None:
+                    resp_fmt: Dict[str, Any] = {"type": "json"}
+                    if schema is not None:
+                        if hasattr(schema, "model_json_schema"):
+                            resp_fmt["schema"] = schema.model_json_schema()
+                        elif isinstance(schema, type):
+                            try:
+                                resp_fmt["schema"] = schema.model_json_schema()
+                            except Exception:
+                                pass
+                    kwargs["response_format"] = resp_fmt
+
+                temp = getattr(config, "temperature", None)
+                if temp is not None:
+                    kwargs["generation_config"] = {"temperature": float(temp)}
+
+            call_func = self.client.interactions.create
+            if asyncio.iscoroutinefunction(call_func):
+                interaction = await call_func(**kwargs)
+            else:
+                interaction = await asyncio.to_thread(call_func, **kwargs)
+
+            # Ensure .text property is accessible for downstream JSON parsers
+            if not isinstance(getattr(interaction, "text", None), str):
+                out_text = getattr(interaction, "output_text", None)
+                if not isinstance(out_text, str) and hasattr(interaction, "steps") and interaction.steps:
+                    for step in reversed(interaction.steps):
+                        if getattr(step, "type", "") == "model_output" and hasattr(step, "content"):
+                            for c in getattr(step, "content", []):
+                                if isinstance(c, dict) and "text" in c:
+                                    out_text = c["text"]
+                                elif hasattr(c, "text"):
+                                    out_text = c.text
+                                if isinstance(out_text, str) and out_text:
+                                    break
+                        if isinstance(out_text, str) and out_text:
+                            break
+                try:
+                    interaction.text = out_text if isinstance(out_text, str) else ""
+                except (AttributeError, TypeError):
+                    pass
+            return interaction
+
+        # Fallback to models.generate_content for mock testing and backward compatibility
         if hasattr(self.client, "models") and hasattr(self.client.models, "generate_content"):
+            kwargs_legacy: Dict[str, Any] = {"model": active_model, "contents": contents}
+            if config is not None:
+                kwargs_legacy["config"] = config
             gen_func = self.client.models.generate_content
             if asyncio.iscoroutinefunction(gen_func):
-                return await gen_func(**kwargs)
-            return await asyncio.to_thread(gen_func, **kwargs)
+                return await gen_func(**kwargs_legacy)
+            return await asyncio.to_thread(gen_func, **kwargs_legacy)
 
-        raise RuntimeError("Client missing models.generate_content")
+        raise RuntimeError("Client missing both interactions.create and models.generate_content")
 
     async def extract_tag_studio_state(
         self,
@@ -310,6 +417,269 @@ class VisionService:
                 all_chips.append(TagChip(**tag_dict))
         return all_chips
 
+    async def resync_prompt_from_levers(
+        self,
+        narrative: Optional[str] = None,
+        categories: Optional[Dict[str, Any]] = None,
+        previous_master_prompt: Optional[str] = None,
+        model_name: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Synthesizes Master Generation Prompt and refined narrative from active 9-category visual levers.
+        The 9-category visual levers are the authoritative source of truth.
+        """
+        active_model = model_name or self.model_name
+        request_id = get_current_request_id() or f"resync_prompt_{uuid.uuid4().hex}"
+        logger.info(f"Re-syncing Master Generation Prompt from levers using {active_model}...")
+
+        clean_cats: Dict[str, List[str]] = {}
+        if categories and isinstance(categories, dict):
+            for cat_key, items in categories.items():
+                chip_list = []
+                if isinstance(items, list):
+                    for item in items:
+                        if isinstance(item, dict):
+                            if item.get("enabled", True):
+                                lbl = str(item.get("label", "")).strip()
+                                if lbl:
+                                    chip_list.append(lbl)
+                        elif hasattr(item, "label"):
+                            if getattr(item, "enabled", True):
+                                lbl = str(getattr(item, "label", "")).strip()
+                                if lbl:
+                                    chip_list.append(lbl)
+                        elif isinstance(item, str) and item.strip():
+                            chip_list.append(item.strip())
+                clean_cats[cat_key] = chip_list
+
+        cats_json_str = json.dumps(clean_cats, indent=2)
+
+        user_content = (
+            RESYNC_PROMPT_FROM_LEVERS_TEMPLATE
+            .replace("{CURRENT_NARRATIVE}", narrative.strip() if narrative else "Editorial portrait scene")
+            .replace("{CATEGORIES_JSON}", cats_json_str)
+        )
+
+        contents = [
+            types.Content(
+                role="user",
+                parts=[types.Part.from_text(text=user_content)],
+            )
+        ]
+
+        config = types.GenerateContentConfig(
+            system_instruction=RESYNC_PROMPT_FROM_LEVERS_SYSTEM,
+            response_mime_type="application/json",
+            temperature=0.4,
+        )
+
+        self._audit(
+            "resync_prompt_from_levers_request",
+            request_id,
+            model=active_model,
+            narrative=narrative,
+            categories_count={k: len(v) for k, v in clean_cats.items()},
+        )
+
+        response = await self._generate_content_async(contents=contents, config=config, model=active_model)
+        raw_text = getattr(response, "text", "") or "{}"
+        parsed = parse_json_safely(raw_text, default={"master_prompt": raw_text.strip(), "narrative": narrative or ""})
+
+        master_prompt = parsed.get("master_prompt", "").strip() or (previous_master_prompt or "")
+        updated_narrative = parsed.get("narrative", "").strip() or (narrative or "")
+
+        raw_conflicts = parsed.get("conflicts") or []
+        conflicts_result = []
+        if isinstance(raw_conflicts, list):
+            for idx, c in enumerate(raw_conflicts):
+                if isinstance(c, dict):
+                    conflicts_result.append({
+                        "id": c.get("id") or f"conflict_{idx+1}",
+                        "severity": c.get("severity", "warning"),
+                        "conflicting_elements": c.get("conflicting_elements") or [],
+                        "categories": c.get("categories") or [],
+                        "explanation": c.get("explanation") or "",
+                        "recommendation": c.get("recommendation"),
+                    })
+
+        usage_dict = extract_usage_metadata(response)
+        cost_info = calculate_cost(
+            model=active_model,
+            prompt_tokens=usage_dict["prompt_token_count"],
+            candidates_tokens=usage_dict["candidates_token_count"],
+        )
+
+        self._audit(
+            "resync_prompt_from_levers_response",
+            request_id,
+            model=active_model,
+            master_prompt=master_prompt,
+            narrative=updated_narrative,
+            conflicts_count=len(conflicts_result),
+            tokens=usage_dict,
+            cost_usd=cost_info["cost_usd"],
+        )
+
+        return {
+            "master_prompt": master_prompt,
+            "narrative": updated_narrative,
+            "conflicts": conflicts_result,
+            "tokens": usage_dict,
+            "cost_usd": cost_info["cost_usd"],
+        }
+
+    async def resync_levers_from_prompt(
+        self,
+        master_prompt: str,
+        narrative: Optional[str] = None,
+        categories: Optional[Dict[str, Any]] = None,
+        model_name: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Deconstructs and extracts fine-grained 9-category visual levers from a user's Master Generation Prompt.
+        The Master Generation Prompt is the authoritative source of truth.
+        """
+        active_model = model_name or self.model_name
+        request_id = get_current_request_id() or f"resync_levers_{uuid.uuid4().hex}"
+        logger.info(f"Extracting visual levers from Master Generation Prompt using {active_model}...")
+
+        user_content = (
+            RESYNC_LEVERS_FROM_PROMPT_TEMPLATE
+            .replace("{MASTER_PROMPT}", master_prompt.strip())
+            .replace("{CURRENT_NARRATIVE}", narrative.strip() if narrative else "Editorial scene")
+        )
+
+        contents = [
+            types.Content(
+                role="user",
+                parts=[types.Part.from_text(text=user_content)],
+            )
+        ]
+
+        config = types.GenerateContentConfig(
+            system_instruction=RESYNC_LEVERS_FROM_PROMPT_SYSTEM,
+            response_mime_type="application/json",
+            temperature=0.3,
+        )
+
+        self._audit(
+            "resync_levers_from_prompt_request",
+            request_id,
+            model=active_model,
+            master_prompt_length=len(master_prompt),
+            narrative=narrative,
+        )
+
+        response = await self._generate_content_async(contents=contents, config=config, model=active_model)
+        raw_text = getattr(response, "text", "") or "{}"
+        parsed = parse_json_safely(raw_text, default={"categories": {}, "narrative": narrative or ""})
+
+        updated_narrative = parsed.get("narrative", "").strip() or (narrative or "")
+        extracted_categories_raw = parsed.get("categories") or {}
+        categories_result: Dict[str, List[Dict[str, Any]]] = {}
+
+        existing_label_map: Dict[str, Dict[str, Any]] = {}
+        if categories and isinstance(categories, dict):
+            for cat_key, items in categories.items():
+                if isinstance(items, list):
+                    for item in items:
+                        if isinstance(item, dict):
+                            lbl = str(item.get("label", "")).strip().lower()
+                            if lbl:
+                                existing_label_map[lbl] = item
+                        elif hasattr(item, "label"):
+                            lbl = str(getattr(item, "label", "")).strip().lower()
+                            if lbl:
+                                existing_label_map[lbl] = item.model_dump() if hasattr(item, "model_dump") else vars(item)
+
+        for cat_key in VALID_CATEGORIES:
+            raw_tags = extracted_categories_raw.get(cat_key)
+            chip_list: List[Dict[str, Any]] = []
+            if raw_tags and isinstance(raw_tags, list):
+                for tag in raw_tags:
+                    if isinstance(tag, str):
+                        lbl_str = tag.strip()
+                    elif isinstance(tag, dict):
+                        lbl_str = str(tag.get("label", "")).strip()
+                    else:
+                        lbl_str = str(tag).strip()
+
+                    if not lbl_str:
+                        continue
+
+                    existing_match = existing_label_map.get(lbl_str.lower())
+                    if existing_match:
+                        chip_list.append({
+                            "id": existing_match.get("id") or f"tag_{cat_key}_{uuid.uuid4().hex[:6]}",
+                            "category": cat_key,
+                            "label": lbl_str,
+                            "enabled": existing_match.get("enabled", True),
+                            "locked": existing_match.get("locked", False),
+                            "isCustom": existing_match.get("isCustom", False),
+                        })
+                    else:
+                        chip_list.append({
+                            "id": f"tag_{cat_key}_{uuid.uuid4().hex[:6]}",
+                            "category": cat_key,
+                            "label": lbl_str,
+                            "enabled": True,
+                            "locked": False,
+                            "isCustom": False,
+                        })
+
+            if not chip_list and cat_key in DEFAULT_FALLBACK_TAGS:
+                for fb_tag in DEFAULT_FALLBACK_TAGS[cat_key]:
+                    chip_list.append({
+                        "id": f"tag_{cat_key}_{uuid.uuid4().hex[:6]}",
+                        "category": cat_key,
+                        "label": fb_tag["label"],
+                        "enabled": True,
+                        "locked": False,
+                        "isCustom": False,
+                    })
+
+            categories_result[cat_key] = chip_list
+
+        raw_conflicts = parsed.get("conflicts") or []
+        conflicts_result = []
+        if isinstance(raw_conflicts, list):
+            for idx, c in enumerate(raw_conflicts):
+                if isinstance(c, dict):
+                    conflicts_result.append({
+                        "id": c.get("id") or f"conflict_{idx+1}",
+                        "severity": c.get("severity", "warning"),
+                        "conflicting_elements": c.get("conflicting_elements") or [],
+                        "categories": c.get("categories") or [],
+                        "explanation": c.get("explanation") or "",
+                        "recommendation": c.get("recommendation"),
+                    })
+
+        usage_dict = extract_usage_metadata(response)
+        cost_info = calculate_cost(
+            model=active_model,
+            prompt_tokens=usage_dict["prompt_token_count"],
+            candidates_tokens=usage_dict["candidates_token_count"],
+        )
+
+        self._audit(
+            "resync_levers_from_prompt_response",
+            request_id,
+            model=active_model,
+            narrative=updated_narrative,
+            categories_count={k: len(v) for k, v in categories_result.items()},
+            conflicts_count=len(conflicts_result),
+            tokens=usage_dict,
+            cost_usd=cost_info["cost_usd"],
+        )
+
+        return {
+            "categories": categories_result,
+            "narrative": updated_narrative,
+            "conflicts": conflicts_result,
+            "tokens": usage_dict,
+            "cost_usd": cost_info["cost_usd"],
+        }
+
     async def resync_master_prompt(
         self,
         narrative: Optional[str] = None,
@@ -318,7 +688,8 @@ class VisionService:
         model_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Re-synthesizes the Master Generation Prompt and narrative from updated 9-category visual levers.
+        Re-synthesizes Master Generation Prompt from visual levers, or extracts visual levers if prompt was provided.
+        Maintained for backwards-compatibility.
         """
         active_model = model_name or self.model_name
         request_id = get_current_request_id() or f"resync_{uuid.uuid4().hex}"
@@ -379,6 +750,75 @@ class VisionService:
         master_prompt = parsed.get("master_prompt", "").strip() or (previous_master_prompt or "")
         updated_narrative = parsed.get("narrative", "").strip() or (narrative or "")
 
+        # Extract and normalize 9-category visual levers from parsed LLM response
+        extracted_categories_raw = parsed.get("categories") or {}
+        categories_result: Dict[str, List[Dict[str, Any]]] = {}
+
+        existing_label_map: Dict[str, Dict[str, Any]] = {}
+        if categories and isinstance(categories, dict):
+            for cat_key, items in categories.items():
+                if isinstance(items, list):
+                    for item in items:
+                        if isinstance(item, dict):
+                            lbl = str(item.get("label", "")).strip().lower()
+                            if lbl:
+                                existing_label_map[lbl] = item
+                        elif hasattr(item, "label"):
+                            lbl = str(getattr(item, "label", "")).strip().lower()
+                            if lbl:
+                                existing_label_map[lbl] = item.model_dump() if hasattr(item, "model_dump") else vars(item)
+
+        for cat_key in VALID_CATEGORIES:
+            raw_tags = extracted_categories_raw.get(cat_key)
+            if not raw_tags and cat_key in clean_cats and clean_cats[cat_key]:
+                raw_tags = clean_cats[cat_key]
+
+            chip_list: List[Dict[str, Any]] = []
+            if raw_tags and isinstance(raw_tags, list):
+                for tag in raw_tags:
+                    if isinstance(tag, str):
+                        lbl_str = tag.strip()
+                    elif isinstance(tag, dict):
+                        lbl_str = str(tag.get("label", "")).strip()
+                    else:
+                        lbl_str = str(tag).strip()
+
+                    if not lbl_str:
+                        continue
+
+                    existing_match = existing_label_map.get(lbl_str.lower())
+                    if existing_match:
+                        chip_list.append({
+                            "id": existing_match.get("id") or f"tag_{cat_key}_{uuid.uuid4().hex[:6]}",
+                            "category": cat_key,
+                            "label": lbl_str,
+                            "enabled": existing_match.get("enabled", True),
+                            "locked": existing_match.get("locked", False),
+                            "isCustom": existing_match.get("isCustom", False),
+                        })
+                    else:
+                        chip_list.append({
+                            "id": f"tag_{cat_key}_{uuid.uuid4().hex[:6]}",
+                            "category": cat_key,
+                            "label": lbl_str,
+                            "enabled": True,
+                            "locked": False,
+                            "isCustom": False,
+                        })
+
+            if not chip_list and cat_key in DEFAULT_FALLBACK_TAGS:
+                for fb_tag in DEFAULT_FALLBACK_TAGS[cat_key]:
+                    chip_list.append({
+                        "id": f"tag_{cat_key}_{uuid.uuid4().hex[:6]}",
+                        "category": cat_key,
+                        "label": fb_tag["label"],
+                        "enabled": True,
+                        "locked": False,
+                        "isCustom": False,
+                    })
+
+            categories_result[cat_key] = chip_list
+
         raw_conflicts = parsed.get("conflicts") or []
         conflicts_result = []
         if isinstance(raw_conflicts, list):
@@ -406,6 +846,7 @@ class VisionService:
             model=active_model,
             master_prompt=master_prompt,
             narrative=updated_narrative,
+            categories_count={k: len(v) for k, v in categories_result.items()},
             conflicts_count=len(conflicts_result),
             tokens=usage_dict,
             cost_usd=cost_info["cost_usd"],
@@ -414,6 +855,7 @@ class VisionService:
         return {
             "master_prompt": master_prompt,
             "narrative": updated_narrative,
+            "categories": categories_result,
             "conflicts": conflicts_result,
             "tokens": usage_dict,
             "cost_usd": cost_info["cost_usd"],

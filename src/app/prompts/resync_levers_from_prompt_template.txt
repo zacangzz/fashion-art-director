@@ -1,0 +1,11 @@
+The user has updated the Master Generation Prompt for this scene. Analyze and deconstruct this prompt into the 9-category visual levers, extracting precise descriptive tags for each category, and distill the core narrative.
+
+<master_prompt>
+{MASTER_PROMPT}
+</master_prompt>
+
+<scene_narrative>
+{CURRENT_NARRATIVE}
+</scene_narrative>
+
+Extract comprehensive 9-category visual levers and refined scene narrative reflecting the master prompt above.

@@ -55,11 +55,21 @@ export default function PromptReviewSection({
   isCheckingConflicts = false,
   onCheckConflicts,
   isResyncing = false,
+  isResyncingPrompt = false,
+  onResyncPromptFromLevers,
+  isResyncingLevers = false,
+  onResyncLeversFromPrompt,
   onResyncPrompt,
   isGeneratingBaselines = false,
   onGenerateBaselines,
   hasBaselines = false,
 }) {
+  const effectiveIsResyncingPrompt = isResyncingPrompt || (isResyncing && !isResyncingLevers);
+  const effectiveIsResyncingLevers = isResyncingLevers;
+  const effectiveOnResyncPromptFromLevers = onResyncPromptFromLevers || onResyncPrompt;
+  const effectiveOnResyncLeversFromPrompt = onResyncLeversFromPrompt;
+  const isAnyResyncing = isResyncing || effectiveIsResyncingPrompt || effectiveIsResyncingLevers;
+
   const [copiedPrompt, setCopiedPrompt] = useState(false);
   const [copiedFullPrompt, setCopiedFullPrompt] = useState(false);
   const [isPromptPreviewExpanded, setIsPromptPreviewExpanded] = useState(true);
@@ -197,7 +207,7 @@ export default function PromptReviewSection({
           </div>
           <h2 className="prompt-review-title">Director's Master Prompt & Visual Levers</h2>
           <p className="prompt-review-subtitle">
-            Review the synthesized scene direction, customize individual visual levers, or edit the master prompt directly before generating 4 baseline image candidates.
+            Review the synthesized scene direction, customize individual visual levers, or edit the master prompt directly before generating 4 baseline image candidates. Click <strong>"Re-sync Master Prompt"</strong> to bidirectionally synchronize prompt prose and visual lever tags.
           </p>
         </div>
 
@@ -235,7 +245,7 @@ export default function PromptReviewSection({
               value={narrative}
               onChange={(e) => onNarrativeChange && onNarrativeChange(e.target.value)}
               placeholder="1-2 sentence core creative scene logline..."
-              disabled={isGeneratingBaselines || isResyncing}
+              disabled={isGeneratingBaselines || isAnyResyncing}
             />
           </div>
 
@@ -261,7 +271,7 @@ export default function PromptReviewSection({
                     type="button"
                     className="btn-recheck-conflicts"
                     onClick={onCheckConflicts}
-                    disabled={isCheckingConflicts || isResyncing}
+                    disabled={isCheckingConflicts || isAnyResyncing}
                     title="Re-scan prompt and visual levers for conflicts"
                   >
                     {isCheckingConflicts ? (
@@ -329,7 +339,7 @@ export default function PromptReviewSection({
                     type="button"
                     className="btn-prompt-action btn-scan-conflicts"
                     onClick={onCheckConflicts}
-                    disabled={isCheckingConflicts || isResyncing || isGeneratingBaselines}
+                    disabled={isCheckingConflicts || isAnyResyncing || isGeneratingBaselines}
                     title="Scan current master prompt & visual levers for contradictions"
                   >
                     {isCheckingConflicts ? (
@@ -346,25 +356,27 @@ export default function PromptReviewSection({
                   </button>
                 )}
 
-                <button
-                  type="button"
-                  className="btn-resync-prompt"
-                  onClick={onResyncPrompt}
-                  disabled={isResyncing || isGeneratingBaselines}
-                  title="Re-synthesize high-fashion directorial prose from the updated visual lever tags below"
-                >
-                  {isResyncing ? (
-                    <>
-                      <Loader2 size={13} className="spin-animation" />
-                      <span>Re-syncing with AI...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles size={13} />
-                      <span>Re-sync Master Prompt</span>
-                    </>
-                  )}
-                </button>
+                {effectiveOnResyncLeversFromPrompt && (
+                  <button
+                    type="button"
+                    className="btn-resync-levers"
+                    onClick={effectiveOnResyncLeversFromPrompt}
+                    disabled={effectiveIsResyncingLevers || isGeneratingBaselines || !masterPrompt.trim()}
+                    title="Extract and update 9-category visual levers from this Master Prompt"
+                  >
+                    {effectiveIsResyncingLevers ? (
+                      <>
+                        <Loader2 size={13} className="spin-animation" />
+                        <span>Extracting Levers...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sliders size={13} />
+                        <span>Re-sync Levers from Prompt</span>
+                      </>
+                    )}
+                  </button>
+                )}
 
                 <button
                   type="button"
@@ -394,7 +406,7 @@ export default function PromptReviewSection({
               value={masterPrompt}
               onChange={(e) => onMasterPromptChange && onMasterPromptChange(e.target.value)}
               placeholder="Evocative Master Generation Prompt synthesized from moodboard references..."
-              disabled={isGeneratingBaselines || isResyncing}
+              disabled={isGeneratingBaselines || isAnyResyncing}
             />
 
             <div className="prompt-textarea-footer">
@@ -410,12 +422,36 @@ export default function PromptReviewSection({
           {/* 9-Category Extracted Visual Levers Grid */}
           <div className="prompt-levers-section">
             <div className="prompt-levers-header">
-              <div className="prompt-levers-title-group">
-                <Layers size={14} className="text-accent" />
-                <span className="prompt-levers-title">Extracted 9-Category Visual Levers</span>
+              <div className="prompt-levers-header-top">
+                <div className="prompt-levers-title-group">
+                  <Layers size={14} className="text-accent" />
+                  <span className="prompt-levers-title">Extracted 9-Category Visual Levers</span>
+                </div>
+
+                {effectiveOnResyncPromptFromLevers && (
+                  <button
+                    type="button"
+                    className="btn-resync-prompt"
+                    onClick={effectiveOnResyncPromptFromLevers}
+                    disabled={effectiveIsResyncingPrompt || isGeneratingBaselines}
+                    title="Re-synthesize Master Generation Prompt prose from active visual levers"
+                  >
+                    {effectiveIsResyncingPrompt ? (
+                      <>
+                        <Loader2 size={13} className="spin-animation" />
+                        <span>Re-syncing Prompt...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles size={13} />
+                        <span>Re-sync Master Prompt from Levers</span>
+                      </>
+                    )}
+                  </button>
+                )}
               </div>
               <span className="prompt-levers-subtitle">
-                Click tag to inline-edit, delete, or add new levers. Click <strong>"Re-sync Master Prompt"</strong> above to integrate edits into prose.
+                Click a tag to inline-edit, delete, or add new levers. After adjusting levers, click <strong>"Re-sync Master Prompt from Levers"</strong> to regenerate the master prompt above. Or edit the prompt directly and click <strong>"Re-sync Levers from Prompt"</strong> to extract updated tags.
               </span>
             </div>
 
@@ -617,7 +653,7 @@ export default function PromptReviewSection({
                     value={temperature}
                     onChange={(e) => onTemperatureChange && onTemperatureChange(parseFloat(e.target.value))}
                     className="prompt-temp-slider"
-                    disabled={isGeneratingBaselines || isResyncing}
+                    disabled={isGeneratingBaselines || isAnyResyncing}
                   />
                 </div>
               </div>
@@ -631,7 +667,7 @@ export default function PromptReviewSection({
               type="button"
               className="btn-primary btn-generate-baselines"
               onClick={onGenerateBaselines}
-              disabled={isGeneratingBaselines || isResyncing || !masterPrompt.trim()}
+              disabled={isGeneratingBaselines || isAnyResyncing || !masterPrompt.trim()}
             >
               {isGeneratingBaselines ? (
                 <>

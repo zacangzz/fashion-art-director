@@ -5975,6 +5975,32 @@ textarea:focus-visible,
   cursor: not-allowed;
 }
 
+.btn-resync-levers {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  padding: 5px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-resync-levers:hover:not(:disabled) {
+  background: rgba(56, 189, 248, 0.24);
+  border-color: rgba(56, 189, 248, 0.55);
+  color: #7dd3fc;
+}
+
+.btn-resync-levers:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .prompt-master-textarea {
   width: 100%;
   background: var(--bg-input, #0f1117);
@@ -6022,7 +6048,15 @@ textarea:focus-visible,
 .prompt-levers-header {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
+}
+
+.prompt-levers-header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .prompt-levers-title-group {

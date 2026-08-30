@@ -199,7 +199,7 @@ export async function generateBaselines(payload) {
  * @param {Object} payload { narrative, categories, previous_master_prompt, vision_model }
  * @returns {Promise<{master_prompt: string, narrative: string, conflicts: Array}>}
  */
-export async function resyncMasterPrompt(payload) {
+export async function resyncPromptFromLevers(payload) {
   const response = await fetch('/api/moodboard/resync-prompt', {
     method: 'POST',
     headers: {
@@ -208,8 +208,30 @@ export async function resyncMasterPrompt(payload) {
     body: JSON.stringify(payload),
   });
 
-  return handleApiResponse(response, 'Master prompt re-sync failed');
+  return handleApiResponse(response, 'Master prompt re-sync from levers failed');
 }
+
+/**
+ * Deconstructs and extracts fine-grained 9-category visual levers from a user's Master Generation Prompt.
+ * @param {Object} payload { master_prompt, narrative, categories, vision_model }
+ * @returns {Promise<{categories: Object, narrative: string, conflicts: Array}>}
+ */
+export async function resyncLeversFromPrompt(payload) {
+  const response = await fetch('/api/moodboard/resync-levers', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  return handleApiResponse(response, 'Visual levers extraction from prompt failed');
+}
+
+/**
+ * Backward-compatible alias for resyncPromptFromLevers.
+ */
+export const resyncMasterPrompt = resyncPromptFromLevers;
 
 /**
  * Scans Master Prompt and visual levers for conflicting or contradictory directives.

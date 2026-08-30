@@ -277,9 +277,13 @@ class GenerationService:
         Executes 4 parallel baseline candidate generations with distinct randomized seeds.
         """
         state_dict = state.model_dump() if hasattr(state, "model_dump") else (state if isinstance(state, dict) else {})
-        positive_prompt = prompt_override or self.prompt_compiler.compile_prompt(
-            narrative=state_dict.get("narrative"),
-            categories=state_dict.get("categories"),
+        positive_prompt = (
+            prompt_override
+            or state_dict.get("master_prompt")
+            or self.prompt_compiler.compile_prompt(
+                narrative=state_dict.get("narrative"),
+                categories=state_dict.get("categories"),
+            )
         )
         negative_prompt = DEFAULT_NEGATIVE_PROMPT
 

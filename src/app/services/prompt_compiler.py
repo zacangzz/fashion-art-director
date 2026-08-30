@@ -88,12 +88,15 @@ class PromptCompiler:
         categories: Optional[Dict[str, Any]] = None,
         custom_tags: Optional[List[str]] = None,
         prompt_override: Optional[str] = None,
+        master_prompt: Optional[str] = None,
     ) -> str:
         """
         Compiles a reproducible, structured modular narrative prompt from 9-category tags.
         """
         if prompt_override and prompt_override.strip():
             return prompt_override.strip()
+        if master_prompt and master_prompt.strip():
+            return master_prompt.strip()
 
         sections = []
         if narrative and narrative.strip():

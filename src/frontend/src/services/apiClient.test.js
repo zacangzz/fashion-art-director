@@ -10,6 +10,8 @@ import {
   exportBundle,
   prepareExport,
   generateImage,
+  resyncPromptFromLevers,
+  resyncLeversFromPrompt,
 } from './apiClient';
 
 describe('apiClient', () => {
@@ -159,6 +161,52 @@ describe('apiClient', () => {
     expect(fetch).toHaveBeenCalledWith('/api/export/prepare', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({ generation_id: 'gen_456' }),
+    }));
+    expect(res).toEqual(mockResult);
+  });
+
+  it('resyncPromptFromLevers posts to /api/moodboard/resync-prompt', async () => {
+    const mockResult = {
+      master_prompt: 'Synthesized high fashion prompt',
+      narrative: 'Updated narrative',
+      conflicts: [],
+    };
+    fetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => mockResult,
+    });
+
+    const payload = {
+      narrative: 'Scene narrative',
+      categories: { lighting: [{ label: 'soft golden light' }] },
+    };
+    const res = await resyncPromptFromLevers(payload);
+    expect(fetch).toHaveBeenCalledWith('/api/moodboard/resync-prompt', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }));
+    expect(res).toEqual(mockResult);
+  });
+
+  it('resyncLeversFromPrompt posts to /api/moodboard/resync-levers', async () => {
+    const mockResult = {
+      categories: { subject_details: [{ label: 'striking model' }] },
+      narrative: 'Extracted narrative',
+      conflicts: [],
+    };
+    fetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => mockResult,
+    });
+
+    const payload = {
+      master_prompt: 'High fashion editorial photo with striking model.',
+      narrative: 'Editorial scene',
+    };
+    const res = await resyncLeversFromPrompt(payload);
+    expect(fetch).toHaveBeenCalledWith('/api/moodboard/resync-levers', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify(payload),
     }));
     expect(res).toEqual(mockResult);
   });

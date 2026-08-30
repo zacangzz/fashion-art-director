@@ -115,9 +115,12 @@ async def test_resync_prompt_success():
     mock_resync_result = {
         "master_prompt": "Re-synthesized high fashion master prompt",
         "narrative": "Updated scene narrative",
+        "categories": {
+            "mood_era": [{"id": "tag_mood_1", "category": "mood_era", "label": "cinematic", "enabled": True, "locked": False, "isCustom": False}]
+        },
     }
 
-    with patch("app.api.moodboard.vision_service.resync_master_prompt", new_callable=AsyncMock) as mock_resync:
+    with patch("app.api.moodboard.vision_service.resync_prompt_from_levers", new_callable=AsyncMock) as mock_resync:
         mock_resync.return_value = mock_resync_result
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -133,6 +136,37 @@ async def test_resync_prompt_success():
             data = response.json()
             assert data["master_prompt"] == "Re-synthesized high fashion master prompt"
             assert data["narrative"] == "Updated scene narrative"
+            assert "categories" in data
+            assert data["categories"]["mood_era"][0]["label"] == "cinematic"
+
+
+@pytest.mark.asyncio
+async def test_resync_levers_success():
+    mock_resync_result = {
+        "narrative": "Updated scene narrative",
+        "categories": {
+            "mood_era": [{"id": "tag_mood_1", "category": "mood_era", "label": "cinematic", "enabled": True, "locked": False, "isCustom": False}]
+        },
+        "conflicts": [],
+    }
+
+    with patch("app.api.moodboard.vision_service.resync_levers_from_prompt", new_callable=AsyncMock) as mock_resync:
+        mock_resync.return_value = mock_resync_result
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/api/moodboard/resync-levers",
+                json={
+                    "master_prompt": "A chic model in high-fashion couture in cinematic lighting.",
+                    "narrative": "A high-fashion shot",
+                },
+            )
+            assert response.status_code == 200
+            data = response.json()
+            assert data["narrative"] == "Updated scene narrative"
+            assert "categories" in data
+            assert data["categories"]["mood_era"][0]["label"] == "cinematic"
+            assert data["conflicts"] == []
 
 
 @pytest.mark.asyncio

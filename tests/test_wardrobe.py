@@ -655,4 +655,43 @@ async def test_wardrobe_upscale_cost_and_token_tracking(test_db, dummy_image_byt
     assert cards[0]["tokens"] == 1400
 
 
+@pytest.mark.asyncio
+async def test_wardrobe_service_interactions_api(test_db, dummy_image_bytes, tmp_path):
+    storage_dir = str(tmp_path / "storage")
+    service = WardrobeService(
+        db_manager=test_db,
+        api_key="fake-key",
+        storage_dir=storage_dir,
+    )
+
+    mock_interaction = MagicMock()
+    mock_interaction.output_text = json.dumps({
+        "garment_type": "Silk Evening Gown",
+        "primary_color": "Crimson",
+        "secondary_colors": ["Gold"],
+        "fabric_texture": "Mulberry Silk",
+        "has_graphic_or_print": False,
+        "has_text_or_logo": False,
+        "exact_text_content": [],
+        "graphic_description": None,
+        "logo_and_print_placement": None,
+        "hardware_and_details": "Gold zipper",
+    })
+    mock_interaction.usage.prompt_tokens = 150
+    mock_interaction.usage.candidates_tokens = 90
+    mock_interaction.usage.total_tokens = 240
+    service.client.interactions.create = MagicMock(return_value=mock_interaction)
+
+    details = await service.extract_garment_features(
+        crop_bytes=dummy_image_bytes,
+        label="Evening Gown",
+        category="dresses",
+    )
+
+    assert details["garment_type"] == "Silk Evening Gown"
+    assert details["primary_color"] == "Crimson"
+    assert service.client.interactions.create.called
+
+
+
 

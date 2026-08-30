@@ -94,3 +94,130 @@ async def test_analyze_moodboard_returns_all_chips():
         labels = [c.label for c in chips]
         assert "test subject" in labels
         assert "test lighting" in labels
+
+
+@pytest.mark.asyncio
+async def test_resync_prompt_from_levers_synthesizes_master_prompt():
+    mock_client = MagicMock()
+    resync_payload = {
+        "master_prompt": "A chic model in a ruby red satin evening gown on a Venetian canal at sunset.",
+        "narrative": "A high-fashion evening editorial in Venice.",
+        "conflicts": [],
+    }
+    mock_response = MagicMock()
+    mock_response.text = json.dumps(resync_payload)
+    mock_client.models.generate_content.return_value = mock_response
+
+    with patch("app.services.vision_service.genai.Client", return_value=mock_client):
+        service = VisionService(api_key="fake_key")
+        result = await service.resync_prompt_from_levers(
+            narrative="Venice evening",
+            categories={
+                "wardrobe_hair": [{"label": "ruby red satin evening gown", "enabled": True}],
+                "environment": [{"label": "Venetian canal", "enabled": True}],
+            },
+        )
+
+        assert result["master_prompt"] == "A chic model in a ruby red satin evening gown on a Venetian canal at sunset."
+        assert result["narrative"] == "A high-fashion evening editorial in Venice."
+        assert result["conflicts"] == []
+
+
+@pytest.mark.asyncio
+async def test_resync_levers_from_prompt_extracts_categories():
+    mock_client = MagicMock()
+    resync_payload = {
+        "categories": {
+            "subject_details": ["chic model with sleek dark hair"],
+            "wardrobe_hair": ["ruby red satin evening gown"],
+            "environment": ["Venetian canal", "waterway architecture"],
+            "lighting": ["sunset ambient lighting"],
+            "camera_optics": ["85mm prime lens f/1.4"],
+        },
+        "narrative": "A high-fashion evening editorial in Venice.",
+        "conflicts": [],
+    }
+    mock_response = MagicMock()
+    mock_response.text = json.dumps(resync_payload)
+    mock_client.models.generate_content.return_value = mock_response
+
+    with patch("app.services.vision_service.genai.Client", return_value=mock_client):
+        service = VisionService(api_key="fake_key")
+        result = await service.resync_levers_from_prompt(
+            master_prompt="A chic model in a ruby red satin evening gown on a Venetian canal at sunset.",
+            narrative="Venice evening",
+        )
+
+        assert "categories" in result
+        assert "wardrobe_hair" in result["categories"]
+        assert len(result["categories"]["wardrobe_hair"]) == 1
+        assert result["categories"]["wardrobe_hair"][0]["label"] == "ruby red satin evening gown"
+        assert result["categories"]["environment"][0]["label"] == "Venetian canal"
+        assert result["narrative"] == "A high-fashion evening editorial in Venice."
+
+
+@pytest.mark.asyncio
+async def test_resync_master_prompt_extracts_and_updates_categories():
+    mock_client = MagicMock()
+    resync_payload = {
+        "master_prompt": "A chic model in a ruby red satin evening gown on a Venetian canal at sunset.",
+        "narrative": "A high-fashion evening editorial in Venice.",
+        "categories": {
+            "subject_details": ["chic model with sleek dark hair"],
+            "wardrobe_hair": ["ruby red satin evening gown"],
+            "environment": ["Venetian canal", "waterway architecture"],
+            "lighting": ["sunset ambient lighting"],
+            "camera_optics": ["85mm prime lens f/1.4"],
+        },
+        "conflicts": [],
+    }
+    mock_response = MagicMock()
+    mock_response.text = json.dumps(resync_payload)
+    mock_client.models.generate_content.return_value = mock_response
+
+    with patch("app.services.vision_service.genai.Client", return_value=mock_client):
+        service = VisionService(api_key="fake_key")
+        result = await service.resync_master_prompt(
+            previous_master_prompt="User typed a new prompt with ruby red evening gown in Venice",
+            narrative="Venice evening",
+            categories={},
+        )
+
+        assert result["master_prompt"] == "A chic model in a ruby red satin evening gown on a Venetian canal at sunset."
+        assert result["narrative"] == "A high-fashion evening editorial in Venice."
+        assert "categories" in result
+        assert "wardrobe_hair" in result["categories"]
+        assert len(result["categories"]["wardrobe_hair"]) == 1
+        assert result["categories"]["wardrobe_hair"][0]["label"] == "ruby red satin evening gown"
+        assert result["categories"]["environment"][0]["label"] == "Venetian canal"
+
+
+@pytest.mark.asyncio
+async def test_vision_service_interactions_api_execution():
+    mock_client = MagicMock()
+    extracted_payload = {
+        "master_prompt": "A chic model in high-fashion couture in Paris.",
+        "narrative": "Parisian luxury editorial.",
+        "categories": {
+            "subject_details": ["Parisian female model"],
+            "wardrobe_hair": ["haute couture silk trench coat"],
+        },
+    }
+    mock_interaction = MagicMock()
+    mock_interaction.output_text = json.dumps(extracted_payload)
+    mock_interaction.usage.prompt_tokens = 120
+    mock_interaction.usage.candidates_tokens = 80
+    mock_interaction.usage.total_tokens = 200
+    mock_client.interactions.create.return_value = mock_interaction
+
+    with patch("app.services.vision_service.genai.Client", return_value=mock_client):
+        service = VisionService(api_key="fake_key")
+        result = await service.extract_tag_studio_state([b"fake_image_bytes"])
+
+        assert result["master_prompt"] == "A chic model in high-fashion couture in Paris."
+        assert result["narrative"] == "Parisian luxury editorial."
+        assert "subject_details" in result["categories"]
+        assert result["categories"]["subject_details"][0]["label"] == "Parisian female model"
+        assert mock_client.interactions.create.called
+
+

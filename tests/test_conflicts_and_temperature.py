@@ -125,7 +125,7 @@ async def test_resync_prompt_returns_conflicts():
         ],
     }
 
-    with patch("app.api.moodboard.vision_service.resync_master_prompt", new_callable=AsyncMock) as mock_resync:
+    with patch("app.api.moodboard.vision_service.resync_prompt_from_levers", new_callable=AsyncMock) as mock_resync:
         mock_resync.return_value = mock_resync_result
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -141,3 +141,39 @@ async def test_resync_prompt_returns_conflicts():
             assert "conflicts" in data
             assert len(data["conflicts"]) == 1
             assert data["conflicts"][0]["id"] == "conflict_2"
+
+
+@pytest.mark.asyncio
+async def test_resync_levers_returns_conflicts():
+    mock_resync_result = {
+        "categories": {
+            "wardrobe_hair": [{"id": "t1", "category": "wardrobe_hair", "label": "winter parka", "enabled": True, "locked": False, "isCustom": False}]
+        },
+        "narrative": "Updated narrative",
+        "conflicts": [
+            {
+                "id": "conflict_3",
+                "severity": "warning",
+                "conflicting_elements": ["direct sunlight", "studio strobe"],
+                "categories": ["lighting"],
+                "explanation": "Contradictory lighting.",
+                "recommendation": "Pick one light source.",
+            }
+        ],
+    }
+
+    with patch("app.api.moodboard.vision_service.resync_levers_from_prompt", new_callable=AsyncMock) as mock_resync:
+        mock_resync.return_value = mock_resync_result
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            payload = {
+                "master_prompt": "Direct sunlight with studio strobe",
+                "narrative": "Updated narrative",
+            }
+            response = await client.post("/api/moodboard/resync-levers", json=payload)
+            assert response.status_code == 200
+            data = response.json()
+            assert "categories" in data
+            assert "conflicts" in data
+            assert len(data["conflicts"]) == 1
+            assert data["conflicts"][0]["id"] == "conflict_3"

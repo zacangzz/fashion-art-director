@@ -295,16 +295,44 @@ class GenerateBaselinesResponse(BaseModel):
     baselines: List[BaselineSummary] = Field(default_factory=list)
 
 
-class ResyncMasterPromptRequest(BaseModel):
+class ResyncPromptFromLeversRequest(BaseModel):
     narrative: Optional[str] = ""
     categories: Optional[Dict[str, Any]] = None
     previous_master_prompt: Optional[str] = None
     vision_model: Optional[str] = None
 
 
-class ResyncMasterPromptResponse(BaseModel):
+class ResyncPromptFromLeversResponse(BaseModel):
     master_prompt: str
     narrative: str
+    conflicts: List[PromptConflict] = Field(default_factory=list)
+
+
+class ResyncLeversFromPromptRequest(BaseModel):
+    master_prompt: str
+    narrative: Optional[str] = ""
+    categories: Optional[Dict[str, Any]] = None
+    vision_model: Optional[str] = None
+
+
+class ResyncLeversFromPromptResponse(BaseModel):
+    categories: Dict[str, List[TagChip]] = Field(default_factory=dict)
+    narrative: str
+    conflicts: List[PromptConflict] = Field(default_factory=list)
+
+
+class ResyncMasterPromptRequest(BaseModel):
+    narrative: Optional[str] = ""
+    categories: Optional[Dict[str, Any]] = None
+    previous_master_prompt: Optional[str] = None
+    master_prompt: Optional[str] = None
+    vision_model: Optional[str] = None
+
+
+class ResyncMasterPromptResponse(BaseModel):
+    master_prompt: str = ""
+    narrative: str = ""
+    categories: Dict[str, List[TagChip]] = Field(default_factory=dict)
     conflicts: List[PromptConflict] = Field(default_factory=list)
 
 

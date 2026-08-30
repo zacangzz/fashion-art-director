@@ -56,8 +56,8 @@ describe('PromptReviewSection', () => {
     expect(onPromptChange).toHaveBeenCalledWith('Custom updated prompt');
   });
 
-  it('calls onResyncPrompt when Re-sync Master Prompt button is clicked', () => {
-    const onResync = vi.fn();
+  it('calls onResyncPromptFromLevers when Re-sync Master Prompt from Levers button is clicked', () => {
+    const onResyncPrompt = vi.fn();
     render(
       <PromptReviewSection
         tagState={mockTagState}
@@ -66,14 +66,34 @@ describe('PromptReviewSection', () => {
         onUpdateTagState={vi.fn()}
         onMasterPromptChange={vi.fn()}
         onNarrativeChange={vi.fn()}
-        onResyncPrompt={onResync}
+        onResyncPromptFromLevers={onResyncPrompt}
         onGenerateBaselines={vi.fn()}
       />
     );
 
-    const resyncBtn = screen.getByRole('button', { name: /Re-sync Master Prompt/i });
+    const resyncBtn = screen.getByRole('button', { name: /Re-sync Master Prompt from Levers/i });
     fireEvent.click(resyncBtn);
-    expect(onResync).toHaveBeenCalled();
+    expect(onResyncPrompt).toHaveBeenCalled();
+  });
+
+  it('calls onResyncLeversFromPrompt when Re-sync Levers from Prompt button is clicked', () => {
+    const onResyncLevers = vi.fn();
+    render(
+      <PromptReviewSection
+        tagState={mockTagState}
+        masterPrompt={mockTagState.master_prompt}
+        narrative={mockTagState.narrative}
+        onUpdateTagState={vi.fn()}
+        onMasterPromptChange={vi.fn()}
+        onNarrativeChange={vi.fn()}
+        onResyncLeversFromPrompt={onResyncLevers}
+        onGenerateBaselines={vi.fn()}
+      />
+    );
+
+    const resyncBtn = screen.getByRole('button', { name: /Re-sync Levers from Prompt/i });
+    fireEvent.click(resyncBtn);
+    expect(onResyncLevers).toHaveBeenCalled();
   });
 
   it('calls onGenerateBaselines when generate button is clicked', () => {

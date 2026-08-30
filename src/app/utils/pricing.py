@@ -50,11 +50,23 @@ def extract_usage_metadata(response: Any) -> Dict[str, int]:
     if response is None:
         return {"prompt_token_count": 0, "candidates_token_count": 0, "total_token_count": 0}
 
-    usage = getattr(response, "usage_metadata", None)
+    usage = getattr(response, "usage_metadata", None) or getattr(response, "usage", None)
     if usage is not None:
-        prompt_tokens = int(getattr(usage, "prompt_token_count", 0) or 0)
-        candidates_tokens = int(getattr(usage, "candidates_token_count", 0) or 0)
-        total_tokens = int(getattr(usage, "total_token_count", 0) or (prompt_tokens + candidates_tokens))
+        prompt_tokens = int(
+            getattr(usage, "prompt_token_count", None)
+            or getattr(usage, "prompt_tokens", 0)
+            or 0
+        )
+        candidates_tokens = int(
+            getattr(usage, "candidates_token_count", None)
+            or getattr(usage, "candidates_tokens", 0)
+            or 0
+        )
+        total_tokens = int(
+            getattr(usage, "total_token_count", None)
+            or getattr(usage, "total_tokens", 0)
+            or (prompt_tokens + candidates_tokens)
+        )
         return {
             "prompt_token_count": prompt_tokens,
             "candidates_token_count": candidates_tokens,

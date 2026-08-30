@@ -30,6 +30,8 @@ import {
   analyzeMoodboard,
   generateBaselines,
   resyncMasterPrompt,
+  resyncPromptFromLevers,
+  resyncLeversFromPrompt,
   checkPromptConflicts,
   analyzeAndGenerateBaselines,
   uploadDirectPhoto,
@@ -67,6 +69,7 @@ export default function App() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isGeneratingBaselines, setIsGeneratingBaselines] = useState(false);
   const [isResyncingPrompt, setIsResyncingPrompt] = useState(false);
+  const [isResyncingLevers, setIsResyncingLevers] = useState(false);
   const [moodboardId, setMoodboardId] = useState(null);
   const [masterPrompt, setMasterPrompt] = useState('');
   const [sceneNarrative, setSceneNarrative] = useState('');
@@ -298,13 +301,13 @@ export default function App() {
     }
   };
 
-  // On-Demand AI Master Prompt Re-Sync from Edited Visual Levers
-  const handleResyncMasterPrompt = async () => {
+  // On-Demand Re-Sync: Visual Levers -> Master Generation Prompt
+  const handleResyncPromptFromLevers = async () => {
     setIsResyncingPrompt(true);
     setErrorMessage(null);
 
     try {
-      const response = await resyncMasterPrompt({
+      const response = await resyncPromptFromLevers({
         narrative: sceneNarrative,
         categories: tagState.categories,
         previous_master_prompt: masterPrompt,
@@ -327,11 +330,49 @@ export default function App() {
         narrative: response.narrative || prev.narrative,
       }));
     } catch (err) {
-      setErrorMessage(err.message || 'Failed to re-sync master prompt with AI.');
+      setErrorMessage(err.message || 'Failed to re-sync master prompt from visual levers.');
     } finally {
       setIsResyncingPrompt(false);
     }
   };
+
+  // On-Demand Re-Sync: Master Generation Prompt -> 9-Category Visual Levers
+  const handleResyncLeversFromPrompt = async () => {
+    if (!masterPrompt.trim()) return;
+    setIsResyncingLevers(true);
+    setErrorMessage(null);
+
+    try {
+      const response = await resyncLeversFromPrompt({
+        master_prompt: masterPrompt,
+        narrative: sceneNarrative,
+        categories: tagState.categories,
+        vision_model: visionModel,
+      });
+
+      if (response.narrative) {
+        setSceneNarrative(response.narrative);
+      }
+      if (response.conflicts) {
+        setPromptConflicts(response.conflicts);
+      }
+
+      if (response.categories && Object.keys(response.categories).length > 0) {
+        setTagState((prev) => ({
+          ...prev,
+          narrative: response.narrative || prev.narrative,
+          categories: response.categories,
+        }));
+      }
+    } catch (err) {
+      setErrorMessage(err.message || 'Failed to extract visual levers from master prompt.');
+    } finally {
+      setIsResyncingLevers(false);
+    }
+  };
+
+  // Backward compatibility alias
+  const handleResyncMasterPrompt = handleResyncPromptFromLevers;
 
   // On-Demand Scan for Contradictory Instructions & Conflicts
   const handleCheckConflicts = async () => {
@@ -915,7 +956,11 @@ export default function App() {
                     conflicts={promptConflicts}
                     isCheckingConflicts={isCheckingConflicts}
                     onCheckConflicts={handleCheckConflicts}
-                    isResyncing={isResyncingPrompt}
+                    isResyncing={isResyncingPrompt || isResyncingLevers}
+                    isResyncingPrompt={isResyncingPrompt}
+                    onResyncPromptFromLevers={handleResyncPromptFromLevers}
+                    isResyncingLevers={isResyncingLevers}
+                    onResyncLeversFromPrompt={handleResyncLeversFromPrompt}
                     onResyncPrompt={handleResyncMasterPrompt}
                     isGeneratingBaselines={isGeneratingBaselines}
                     onGenerateBaselines={handleGenerateBaselines}

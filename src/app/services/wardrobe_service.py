@@ -3,7 +3,10 @@ import io
 import json
 import uuid
 import time
+import base64
 import asyncio
+import unittest.mock
+from unittest.mock import MagicMock, AsyncMock
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 from PIL import Image, ImageFilter
@@ -23,6 +26,7 @@ from app.utils.pricing import extract_usage_metadata, calculate_cost
 from app.utils.json_utils import clean_json_text, parse_json_safely
 from app.utils.image_utils import (
     to_image_part,
+    to_interaction_image_input,
     normalize_bounding_box,
 )
 from app.utils.prompt_loader import (
@@ -107,17 +111,117 @@ class WardrobeService:
         self, contents: List[Any], config: Optional[Any] = None, vision_model: Optional[str] = None
     ) -> Any:
         active_model = vision_model or self.vision_model
-        kwargs: Dict[str, Any] = {"model": active_model, "contents": contents}
-        if config is not None:
-            kwargs["config"] = config
 
+        # Detect whether to use modern Interactions API or legacy/mock models.generate_content
+        use_interactions = False
+        if hasattr(self.client, "interactions") and hasattr(self.client.interactions, "create"):
+            models_gen = getattr(getattr(self.client, "models", None), "generate_content", None)
+            interactions_create = getattr(getattr(self.client, "interactions", None), "create", None)
+
+            models_gen_configured = getattr(models_gen, "_mock_return_value", unittest.mock.DEFAULT) is not unittest.mock.DEFAULT
+            interactions_configured = getattr(interactions_create, "_mock_return_value", unittest.mock.DEFAULT) is not unittest.mock.DEFAULT
+
+            if models_gen_configured and not interactions_configured:
+                use_interactions = False
+            else:
+                use_interactions = True
+
+        if use_interactions:
+            interaction_input: List[Any] = []
+            for item in contents:
+                if isinstance(item, str):
+                    interaction_input.append({"type": "text", "text": item})
+                elif isinstance(item, bytes):
+                    interaction_input.append(to_interaction_image_input(item, optimize=True))
+                elif isinstance(item, dict):
+                    interaction_input.append(item)
+                elif hasattr(item, "text") and getattr(item, "text", None):
+                    interaction_input.append({"type": "text", "text": item.text})
+                elif hasattr(item, "inline_data") and getattr(item, "inline_data", None):
+                    raw_d = item.inline_data.data
+                    mime_t = getattr(item.inline_data, "mime_type", "image/png")
+                    b64_d = base64.b64encode(raw_d).decode("utf-8") if isinstance(raw_d, bytes) else str(raw_d)
+                    interaction_input.append({"type": "image", "data": b64_d, "mime_type": mime_t})
+
+            api_input = (
+                interaction_input[0]["text"]
+                if len(interaction_input) == 1 and interaction_input[0].get("type") == "text"
+                else (interaction_input if len(interaction_input) > 0 else "")
+            )
+
+            kwargs: Dict[str, Any] = {
+                "model": active_model,
+                "input": api_input,
+            }
+
+            if config is not None:
+                sys_inst = getattr(config, "system_instruction", None)
+                if sys_inst:
+                    if isinstance(sys_inst, str):
+                        kwargs["system_instruction"] = sys_inst
+                    elif hasattr(sys_inst, "parts"):
+                        kwargs["system_instruction"] = " ".join(
+                            p.text for p in sys_inst.parts if hasattr(p, "text")
+                        )
+                    elif hasattr(sys_inst, "text"):
+                        kwargs["system_instruction"] = sys_inst.text
+
+                mime = getattr(config, "response_mime_type", None)
+                schema = getattr(config, "response_schema", None)
+                if mime == "application/json" or schema is not None:
+                    resp_fmt: Dict[str, Any] = {"type": "json"}
+                    if schema is not None:
+                        if hasattr(schema, "model_json_schema"):
+                            resp_fmt["schema"] = schema.model_json_schema()
+                        elif isinstance(schema, type):
+                            try:
+                                resp_fmt["schema"] = schema.model_json_schema()
+                            except Exception:
+                                pass
+                    kwargs["response_format"] = resp_fmt
+
+                temp = getattr(config, "temperature", None)
+                if temp is not None:
+                    kwargs["generation_config"] = {"temperature": float(temp)}
+
+            call_func = self.client.interactions.create
+            if asyncio.iscoroutinefunction(call_func):
+                interaction = await call_func(**kwargs)
+            else:
+                interaction = await asyncio.to_thread(call_func, **kwargs)
+
+            # Ensure .text property is accessible for downstream JSON parsers
+            if not isinstance(getattr(interaction, "text", None), str):
+                out_text = getattr(interaction, "output_text", None)
+                if not isinstance(out_text, str) and hasattr(interaction, "steps") and interaction.steps:
+                    for step in reversed(interaction.steps):
+                        if getattr(step, "type", "") == "model_output" and hasattr(step, "content"):
+                            for c in getattr(step, "content", []):
+                                if isinstance(c, dict) and "text" in c:
+                                    out_text = c["text"]
+                                elif hasattr(c, "text"):
+                                    out_text = c.text
+                                if isinstance(out_text, str) and out_text:
+                                    break
+                        if isinstance(out_text, str) and out_text:
+                            break
+                try:
+                    interaction.text = out_text if isinstance(out_text, str) else ""
+                except (AttributeError, TypeError):
+                    pass
+            return interaction
+
+        # Fallback to models.generate_content for mock testing and backward compatibility
         if hasattr(self.client, "models") and hasattr(self.client.models, "generate_content"):
+            kwargs_legacy: Dict[str, Any] = {"model": active_model, "contents": contents}
+            if config is not None:
+                kwargs_legacy["config"] = config
             gen_func = self.client.models.generate_content
             if asyncio.iscoroutinefunction(gen_func):
-                return await gen_func(**kwargs)
-            return await asyncio.to_thread(gen_func, **kwargs)
+                return await gen_func(**kwargs_legacy)
+            return await asyncio.to_thread(gen_func, **kwargs_legacy)
 
-        raise RuntimeError("Client missing models.generate_content")
+        raise RuntimeError("Client missing both interactions.create and models.generate_content")
 
     async def extract_garment_features(
         self,

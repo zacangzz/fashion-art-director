@@ -1,0 +1,11 @@
+The user has updated the 9-category visual levers and scene narrative for this scene. Synthesize a definitive Master Generation Prompt and refined core narrative reflecting these active creative directives.
+
+<scene_narrative>
+{CURRENT_NARRATIVE}
+</scene_narrative>
+
+<visual_levers>
+{CATEGORIES_JSON}
+</visual_levers>
+
+Synthesize the definitive updated Master Generation Prompt and core narrative reflecting all active visual levers above.
