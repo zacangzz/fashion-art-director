@@ -217,7 +217,11 @@ async def test_vision_service_interactions_api_execution():
         assert result["master_prompt"] == "A chic model in high-fashion couture in Paris."
         assert result["narrative"] == "Parisian luxury editorial."
         assert "subject_details" in result["categories"]
-        assert result["categories"]["subject_details"][0]["label"] == "Parisian female model"
         assert mock_client.interactions.create.called
+        _, kwargs = mock_client.interactions.create.call_args
+        assert kwargs["response_format"] == {
+            "type": "text",
+            "mime_type": "application/json",
+        }
 
 

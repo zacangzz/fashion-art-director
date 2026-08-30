@@ -175,10 +175,15 @@ class VisionService:
                 mime = getattr(config, "response_mime_type", None)
                 schema = getattr(config, "response_schema", None)
                 if mime == "application/json" or schema is not None:
-                    resp_fmt: Dict[str, Any] = {"type": "json"}
+                    resp_fmt: Dict[str, Any] = {
+                        "type": "text",
+                        "mime_type": "application/json",
+                    }
                     if schema is not None:
                         if hasattr(schema, "model_json_schema"):
                             resp_fmt["schema"] = schema.model_json_schema()
+                        elif isinstance(schema, dict):
+                            resp_fmt["schema"] = schema
                         elif isinstance(schema, type):
                             try:
                                 resp_fmt["schema"] = schema.model_json_schema()
