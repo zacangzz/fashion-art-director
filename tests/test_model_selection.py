@@ -2,6 +2,7 @@ import pytest
 import io
 import os
 import json
+import base64
 from PIL import Image
 from unittest.mock import AsyncMock, patch, MagicMock
 from fastapi.testclient import TestClient
@@ -111,7 +112,7 @@ async def test_generation_service_custom_model_tracking(tmp_path):
 
 @pytest.mark.asyncio
 async def test_inpaint_strictly_uses_gemini_3_pro_image(tmp_path):
-    """Verify inpaint_region strictly uses gemini-3-pro-image regardless of defaults."""
+    """Verify inpaint_region strictly uses gemini-3-pro-image regardless of defaults via Interactions API."""
     from app.services.generation_service import GenerationService
 
     db_path = os.path.join(tmp_path, "test_inpaint.db")
@@ -130,16 +131,11 @@ async def test_inpaint_strictly_uses_gemini_3_pro_image(tmp_path):
     mask_bytes = create_test_image_bytes(200, 200, (255, 255, 255))
     output_bytes = create_test_image_bytes(200, 200, (0, 255, 0))
 
-    # Mock client generate_content response
-    mock_candidate = MagicMock()
-    mock_candidate.finish_reason = "STOP"
-    mock_part = MagicMock()
-    mock_part.inline_data = MagicMock(data=output_bytes)
-    mock_part.text = None
-    mock_candidate.content.parts = [mock_part]
-    mock_response = MagicMock(candidates=[mock_candidate])
+    mock_interaction = MagicMock()
+    mock_interaction.output_image.data = base64.b64encode(output_bytes).decode("utf-8")
+    mock_interaction.usage.total_tokens = 500
 
-    with patch.object(gen_service.client.models, "generate_content", return_value=mock_response) as mock_gen:
+    with patch.object(gen_service.client.interactions, "create", return_value=mock_interaction) as mock_create:
         result = await gen_service.inpaint_region(
             parent_id="",
             image_bytes=source_bytes,
@@ -147,8 +143,8 @@ async def test_inpaint_strictly_uses_gemini_3_pro_image(tmp_path):
             prompt="change color to red",
         )
 
-        assert mock_gen.called
-        assert mock_gen.call_args.kwargs["model"] == "gemini-3-pro-image"
+        assert mock_create.called
+        assert mock_create.call_args.kwargs["model"] == "gemini-3-pro-image"
 
         saved_gen = await db.get_generation(result["generation_id"])
         assert saved_gen is not None

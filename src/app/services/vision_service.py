@@ -10,6 +10,7 @@ from app.schemas.domain import TagChip, TagCategory
 from app.utils.logger import get_logger
 from app.utils.telemetry import TelemetryLogger, get_current_request_id
 from app.utils.pricing import extract_usage_metadata, calculate_cost
+from app.utils.json_utils import clean_json_text, parse_json_safely
 from app.utils.prompt_loader import (
     EXTRACTION_SYSTEM_PROMPT,
     USER_BASELINE_TEMPLATE,
@@ -68,18 +69,24 @@ DEFAULT_FALLBACK_TAGS: Dict[str, List[Dict[str, Any]]] = {
 
 
 class VisionService:
+    """
+    Vision analysis service composing Gemini Multimodal models for 9-category visual tag extraction,
+    conflict detection, and master prompt re-synchronization.
+    """
+
     def __init__(
         self,
         api_key: str,
         model_name: str = "gemini-3.5-flash-lite",
         audit_path: Optional[Path] = None,
         client: Optional[genai.Client] = None,
+        telemetry: Optional[TelemetryLogger] = None,
     ):
         self.api_key = api_key
         self.model_name = model_name
         self.client = client or genai.Client(api_key=self.api_key)
         self.audit_path = Path(audit_path or "storage/logs/vision_audit.jsonl")
-        self.telemetry = TelemetryLogger(
+        self.telemetry = telemetry or TelemetryLogger(
             audit_path=self.audit_path,
             component="vision",
             storage_dir=self.audit_path.parent.parent if self.audit_path else "./storage",
@@ -100,21 +107,20 @@ class VisionService:
         return [to_image_part(b) for b in image_bytes_list]
 
     async def _generate_content_async(
-        self, contents: List[Any], config: types.GenerateContentConfig, model: Optional[str] = None
+        self, contents: List[Any], config: Optional[types.GenerateContentConfig] = None, model: Optional[str] = None
     ) -> Any:
         active_model = model or self.model_name
-        aio_client = getattr(self.client, "aio", None)
-        if aio_client is not None:
-            models = getattr(aio_client, "models", None)
-            gen_func = getattr(models, "generate_content", None)
-            if callable(gen_func) and asyncio.iscoroutinefunction(gen_func):
-                return await gen_func(model=active_model, contents=contents, config=config)
-        return await asyncio.to_thread(
-            self.client.models.generate_content,
-            model=active_model,
-            contents=contents,
-            config=config,
-        )
+        kwargs: Dict[str, Any] = {"model": active_model, "contents": contents}
+        if config is not None:
+            kwargs["config"] = config
+
+        if hasattr(self.client, "models") and hasattr(self.client.models, "generate_content"):
+            gen_func = self.client.models.generate_content
+            if asyncio.iscoroutinefunction(gen_func):
+                return await gen_func(**kwargs)
+            return await asyncio.to_thread(gen_func, **kwargs)
+
+        raise RuntimeError("Client missing models.generate_content")
 
     async def extract_tag_studio_state(
         self,
@@ -129,7 +135,6 @@ class VisionService:
         """
         Synthesizes a dual narrative summary and 9-category TagChip dictionary from
         moodboard reference files and an optional user creative text prompt.
-        Preserves categories in locked_categories from existing_categories if supplied.
         """
         active_model = model_name or self.model_name
         prompt_log = f" with prompt baseline ('{prompt[:50]}...')" if prompt and prompt.strip() else ""
@@ -167,20 +172,7 @@ class VisionService:
             raise
 
         raw_text = getattr(response, "text", "") or ""
-        extracted_data = {}
-        clean_text = (raw_text or "{}").strip()
-        if clean_text.startswith("```json"):
-            clean_text = clean_text[7:]
-        if clean_text.startswith("```"):
-            clean_text = clean_text[3:]
-        if clean_text.endswith("```"):
-            clean_text = clean_text[:-3]
-
-        try:
-            extracted_data = json.loads(clean_text)
-        except Exception as parse_err:
-            logger.warning(f"Could not parse JSON from vision model response: {parse_err}. Falling back.")
-            extracted_data = {}
+        extracted_data = parse_json_safely(raw_text, default={})
 
         extracted_master_prompt = (
             extracted_data.get("master_prompt")
@@ -198,7 +190,6 @@ class VisionService:
         locked_set = set(locked_categories or [])
 
         for cat_key in VALID_CATEGORIES:
-            # If locked and we have existing tags for this category, preserve them
             if cat_key in locked_set and existing_categories and cat_key in existing_categories:
                 existing_val = existing_categories[cat_key]
                 if isinstance(existing_val, list):
@@ -208,7 +199,6 @@ class VisionService:
                     ]
                     continue
 
-            # Otherwise populate from extracted model tags or fallback
             raw_tags = extracted_categories_raw.get(cat_key) or DEFAULT_FALLBACK_TAGS.get(cat_key, [])
             chip_list: List[Dict[str, Any]] = []
 
@@ -245,7 +235,6 @@ class VisionService:
 
             categories_result[cat_key] = chip_list
 
-        # Parse conflicts if detected by the model
         raw_conflicts = extracted_data.get("conflicts") or []
         conflicts_result = []
         if isinstance(raw_conflicts, list):
@@ -297,10 +286,7 @@ class VisionService:
         existing_schema: Optional[Dict[str, Any]] = None,
         image_paths: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
-        """
-        Backwards-compatible wrapper calling extract_tag_studio_state.
-        """
-        res = await self.extract_tag_studio_state(
+        return await self.extract_tag_studio_state(
             image_bytes_list=image_bytes_list,
             prompt=prompt,
             locked_categories=locked_sections,
@@ -308,7 +294,6 @@ class VisionService:
             existing_narrative=existing_schema.get("narrative") if existing_schema and isinstance(existing_schema, dict) else None,
             image_paths=image_paths,
         )
-        return res
 
     async def analyze_moodboard(
         self,
@@ -331,7 +316,7 @@ class VisionService:
         categories: Optional[Dict[str, Any]] = None,
         previous_master_prompt: Optional[str] = None,
         model_name: Optional[str] = None,
-    ) -> Dict[str, str]:
+    ) -> Dict[str, Any]:
         """
         Re-synthesizes the Master Generation Prompt and narrative from updated 9-category visual levers.
         """
@@ -388,13 +373,8 @@ class VisionService:
         )
 
         response = await self._generate_content_async(contents=contents, config=config, model=active_model)
-        raw_text = response.text or "{}"
-
-        try:
-            parsed = json.loads(raw_text)
-        except Exception:
-            logger.warning("Failed to parse JSON response for resync_master_prompt, falling back to raw text")
-            parsed = {"master_prompt": raw_text.strip(), "narrative": narrative or ""}
+        raw_text = getattr(response, "text", "") or "{}"
+        parsed = parse_json_safely(raw_text, default={"master_prompt": raw_text.strip(), "narrative": narrative or ""})
 
         master_prompt = parsed.get("master_prompt", "").strip() or (previous_master_prompt or "")
         updated_narrative = parsed.get("narrative", "").strip() or (narrative or "")
@@ -447,8 +427,7 @@ class VisionService:
         model_name: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
-        On-Demand conflict check: Reviews master prompt, narrative, and visual lever tags
-        for contradictory directives that would confuse the image model.
+        Reviews master prompt, narrative, and visual lever tags for contradictory directives.
         """
         active_model = model_name or self.model_name
         request_id = get_current_request_id() or f"conflicts_{uuid.uuid4().hex}"
@@ -511,8 +490,8 @@ class VisionService:
                 prompt_tokens=usage_dict["prompt_token_count"],
                 candidates_tokens=usage_dict["candidates_token_count"],
             )
-            raw_text = response.text or "{}"
-            parsed = json.loads(raw_text)
+            raw_text = getattr(response, "text", "") or "{}"
+            parsed = parse_json_safely(raw_text, default={"conflicts": []})
         except Exception as exc:
             logger.warning(f"Error executing check_prompt_conflicts: {exc}")
             parsed = {"conflicts": []}
@@ -541,4 +520,3 @@ class VisionService:
         )
 
         return conflicts_result
-

@@ -6,10 +6,12 @@ from google.genai import types
 
 from app.config import get_settings
 from app.db.database import DatabaseManager
+from app.services.image_generator import ImageGenerator
 from app.services.vision_service import VisionService
 from app.services.wardrobe_service import WardrobeService
 from app.services.generation_service import GenerationService
 from app.services.export_service import ExportService
+from app.utils.telemetry import TelemetryLogger
 
 
 @lru_cache()
@@ -25,6 +27,21 @@ def get_gemini_client() -> genai.Client:
     http_opts = types.HttpOptions(timeout=timeout_ms)
     return genai.Client(api_key=settings.GEMINI_API_KEY, http_options=http_opts)
 
+
+@lru_cache()
+def get_image_generator() -> ImageGenerator:
+    settings = get_settings()
+    client = get_gemini_client()
+    telemetry = TelemetryLogger(
+        audit_path=os.path.join(settings.STORAGE_DIR, "logs", "generation_audit.jsonl"),
+        component="generation",
+        storage_dir=settings.STORAGE_DIR,
+    )
+    return ImageGenerator(
+        client=client,
+        default_model=settings.IMAGEN_MODEL,
+        telemetry=telemetry,
+    )
 
 
 @lru_cache()
@@ -46,8 +63,10 @@ def get_wardrobe_service() -> WardrobeService:
         api_key=settings.GEMINI_API_KEY,
         storage_dir=settings.STORAGE_DIR,
         vision_model=settings.VISION_MODEL,
+        imagen_model=settings.IMAGEN_MODEL,
         audit_path=os.path.join(settings.STORAGE_DIR, "logs", "wardrobe_audit.jsonl"),
         client=get_gemini_client(),
+        image_generator=get_image_generator(),
     )
 
 
@@ -64,6 +83,7 @@ def get_generation_service() -> GenerationService:
         audit_path=os.path.join(settings.STORAGE_DIR, "logs", "generation_audit.jsonl"),
         wardrobe_service=ws,
         client=get_gemini_client(),
+        image_generator=get_image_generator(),
     )
     ws.set_generation_service(gs)
     return gs
@@ -74,6 +94,6 @@ def get_export_service() -> ExportService:
     settings = get_settings()
     return ExportService(
         db_manager=get_db_manager(),
-        generation_service=get_generation_service(),
+        image_generator=get_image_generator(),
         storage_dir=settings.STORAGE_DIR,
     )

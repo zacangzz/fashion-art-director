@@ -6,11 +6,12 @@ import time
 import asyncio
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
-from PIL import Image
+from PIL import Image, ImageFilter
 from google import genai
 from google.genai import types
 
 from app.db.database import DatabaseManager
+from app.services.image_generator import ImageGenerator
 from app.schemas.domain import (
     WardrobeSegmentationResult,
     ClothingRegionDetectionResult,
@@ -19,6 +20,11 @@ from app.schemas.domain import (
 from app.utils.logger import get_logger
 from app.utils.telemetry import TelemetryLogger
 from app.utils.pricing import extract_usage_metadata, calculate_cost
+from app.utils.json_utils import clean_json_text, parse_json_safely
+from app.utils.image_utils import (
+    to_image_part,
+    normalize_bounding_box,
+)
 from app.utils.prompt_loader import (
     WARDROBE_SEGMENTATION_PROMPT,
     CLOTHING_REGION_DETECTION_PROMPT,
@@ -26,12 +32,17 @@ from app.utils.prompt_loader import (
     GARMENT_UPSCALE_SYSTEM_PROMPT,
     GARMENT_FEATURE_EXTRACTION_PROMPT,
 )
-from app.utils.image_utils import to_image_part
 
 logger = get_logger("wardrobe_service")
 
 
 class WardrobeService:
+    """
+    Service responsible for wardrobe management: lookbook segmentation, feature extraction,
+    spatial subject grounding, and garment upscale processing.
+    Composes ImageGenerator, DatabaseManager, and TelemetryLogger.
+    """
+
     def __init__(
         self,
         db_manager: DatabaseManager,
@@ -41,23 +52,26 @@ class WardrobeService:
         imagen_model: str = "gemini-3.1-flash-image",
         audit_path: Optional[str] = None,
         client: Optional[genai.Client] = None,
+        image_generator: Optional[ImageGenerator] = None,
         generation_service: Optional[Any] = None,
+        telemetry: Optional[TelemetryLogger] = None,
     ):
         self.db = db_manager
+        self.db_manager = db_manager
         self.api_key = api_key
         self.storage_dir = storage_dir
         self.vision_model = vision_model
         self.imagen_model = imagen_model
         self.audit_path = audit_path
         self.client = client or genai.Client(api_key=api_key)
+        self.image_generator = image_generator
         self._generation_service = generation_service
-        self.telemetry = TelemetryLogger(
+        self.telemetry = telemetry or TelemetryLogger(
             audit_path=self.audit_path,
             component="wardrobe",
             storage_dir=self.storage_dir,
         )
 
-        # Ensure storage subdirectories exist
         self.sources_dir = os.path.join(storage_dir, "wardrobe", "sources")
         self.items_dir = os.path.join(storage_dir, "wardrobe", "items")
         os.makedirs(self.sources_dir, exist_ok=True)
@@ -65,20 +79,14 @@ class WardrobeService:
 
     def set_generation_service(self, generation_service: Any) -> None:
         self._generation_service = generation_service
+        if hasattr(generation_service, "image_generator"):
+            self.image_generator = generation_service.image_generator
 
     @property
     def generation_service(self) -> Any:
-        if self._generation_service is None:
-            try:
-                from app.dependencies import get_generation_service
-                self._generation_service = get_generation_service()
-            except Exception as err:
-                logger.warning(f"Could not lazily load generation_service in WardrobeService: {err}")
         return self._generation_service
 
     def _audit(self, event_type: str, request_id: str, **kwargs):
-        if not self.audit_path:
-            return
         try:
             self.telemetry.record_event(
                 event=event_type,
@@ -90,155 +98,27 @@ class WardrobeService:
             logger.warning(f"Failed to write wardrobe audit log: {e}")
 
     def _clean_json_text(self, text: str) -> str:
-        """Strips markdown code fences and whitespace."""
-        text = text.strip()
-        if text.startswith("```"):
-            lines = text.splitlines()
-            if lines[0].startswith("```"):
-                lines = lines[1:]
-            if lines and lines[-1].startswith("```"):
-                lines = lines[:-1]
-            text = "\n".join(lines).strip()
-        return text
+        return clean_json_text(text)
+
+    def _normalize_bbox(self, bbox_raw: Any, img_w: int, img_h: int) -> Optional[List[float]]:
+        return normalize_bounding_box(bbox_raw, img_w, img_h)
 
     async def _generate_content_async(
         self, contents: List[Any], config: Optional[Any] = None, vision_model: Optional[str] = None
     ) -> Any:
         active_model = vision_model or self.vision_model
-        kwargs = {"model": active_model, "contents": contents}
+        kwargs: Dict[str, Any] = {"model": active_model, "contents": contents}
         if config is not None:
             kwargs["config"] = config
-        return await asyncio.to_thread(
-            self.client.models.generate_content,
-            **kwargs,
-        )
 
-    def _normalize_bbox(
-        self,
-        bbox_raw: Any,
-        img_w: int,
-        img_h: int,
-    ) -> Optional[List[float]]:
-        """
-        Normalizes any bounding box format into [ymin, xmin, ymax, xmax] floats in [0.0, 1.0].
-        Handles 0..1000 integer ranges, absolute pixels, and dictionary structures.
-        """
-        if not bbox_raw:
-            return None
+        if hasattr(self.client, "models") and hasattr(self.client.models, "generate_content"):
+            gen_func = self.client.models.generate_content
+            if asyncio.iscoroutinefunction(gen_func):
+                return await gen_func(**kwargs)
+            return await asyncio.to_thread(gen_func, **kwargs)
 
-        ymin, xmin, ymax, xmax = 0.0, 0.0, 1.0, 1.0
+        raise RuntimeError("Client missing models.generate_content")
 
-        if isinstance(bbox_raw, (list, tuple)) and len(bbox_raw) >= 4:
-            try:
-                ymin, xmin, ymax, xmax = [float(c) for c in bbox_raw[:4]]
-            except Exception:
-                return None
-        elif isinstance(bbox_raw, dict):
-            try:
-                ymin = float(bbox_raw.get("ymin", bbox_raw.get("top", bbox_raw.get("y1", 0.0))))
-                xmin = float(bbox_raw.get("xmin", bbox_raw.get("left", bbox_raw.get("x1", 0.0))))
-                ymax = float(bbox_raw.get("ymax", bbox_raw.get("bottom", bbox_raw.get("y2", 1.0))))
-                xmax = float(bbox_raw.get("xmax", bbox_raw.get("right", bbox_raw.get("x2", 1.0))))
-            except Exception:
-                return None
-        else:
-            return None
-
-        # Auto-detect coordinate scale
-        max_coord = max(abs(ymin), abs(xmin), abs(ymax), abs(xmax))
-        if max_coord > 1.0:
-            if max_coord <= 1050.0:
-                # Gemini standard 0..1000 coordinate space
-                ymin /= 1000.0
-                xmin /= 1000.0
-                ymax /= 1000.0
-                xmax /= 1000.0
-            else:
-                # Absolute pixel coordinates
-                ymin /= float(img_h) if img_h > 0 else 1.0
-                xmin /= float(img_w) if img_w > 0 else 1.0
-                ymax /= float(img_h) if img_h > 0 else 1.0
-                xmax /= float(img_w) if img_w > 0 else 1.0
-
-        # Ensure ymin < ymax and xmin < xmax
-        if ymin > ymax:
-            ymin, ymax = ymax, ymin
-        if xmin > xmax:
-            xmin, xmax = xmax, xmin
-
-        # Clamp between 0.0 and 1.0
-        ymin = max(0.0, min(1.0, ymin))
-        xmin = max(0.0, min(1.0, xmin))
-        ymax = max(0.0, min(1.0, ymax))
-        xmax = max(0.0, min(1.0, xmax))
-
-        # Check minimal dimension (at least 0.8% in both axes)
-        if (ymax - ymin) < 0.008 or (xmax - xmin) < 0.008:
-            return None
-
-        return [round(ymin, 4), round(xmin, 4), round(ymax, 4), round(xmax, 4)]
-
-    async def segment_and_save_sheet(
-        self,
-        image_bytes: bytes,
-        original_filename: str = "wardrobe_sheet.png",
-        vision_model: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
-        """
-        Ingests a multi-garment sheet image, runs Gemini vision to detect bounding boxes
-        for each item, crops them with PIL, persists to DB, and returns garment cards.
-        """
-        active_model = vision_model or self.vision_model
-        sheet_id = f"sheet_{uuid.uuid4().hex[:8]}"
-        request_id = f"seg_{uuid.uuid4().hex}"
-        logger.info(f"Segmenting wardrobe sheet {sheet_id} ({len(image_bytes)} bytes) using vision model '{active_model}'")
-
-        # Save original source sheet
-        safe_ext = os.path.splitext(original_filename)[1] or ".png"
-        source_filename = f"{sheet_id}_source{safe_ext}"
-        source_filepath = os.path.join(self.sources_dir, source_filename)
-        with open(source_filepath, "wb") as f:
-            f.write(image_bytes)
-
-        # Call Gemini Vision to detect items and bounding boxes
-        image_part = to_image_part(image_bytes)
-        contents = [image_part, WARDROBE_SEGMENTATION_PROMPT]
-        config = types.GenerateContentConfig(
-            temperature=0.0,
-            response_mime_type="application/json",
-            response_schema=WardrobeSegmentationResult,
-        )
-
-        self._audit(
-            "wardrobe_segmentation_request",
-            request_id,
-            sheet_id=sheet_id,
-            model=active_model,
-            bytes=len(image_bytes),
-        )
-
-        try:
-            response = await self._generate_content_async(contents, config=config, vision_model=active_model)
-            raw_text = getattr(response, "text", "") or ""
-            logger.info(f"Gemini vision response received for sheet {sheet_id}: {raw_text[:200]}...")
-        except Exception as exc:
-            logger.error(f"Gemini vision segmentation error: {exc}", exc_info=True)
-            self._audit("wardrobe_segmentation_error", request_id, model=active_model, error=str(exc))
-            raw_text = "{}"
-
-        # Parse detected items
-        cleaned = self._clean_json_text(raw_text)
-        detected_items = []
-        try:
-            parsed = json.loads(cleaned)
-            if isinstance(parsed, dict) and "items" in parsed:
-                detected_items = parsed["items"]
-            elif isinstance(parsed, list):
-                detected_items = parsed
-        except Exception as parse_err:
-            logger.warning(f"Could not parse vision JSON response: {parse_err}. Raw: {cleaned}")
-
-        base_img = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
     async def extract_garment_features(
         self,
         crop_bytes: bytes,
@@ -247,9 +127,7 @@ class WardrobeService:
         vision_model: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Deep Vision Feature Extraction Pre-pass.
-        Analyzes a single garment crop to extract exact text/slogans, graphic artwork descriptions,
-        colors, placement, and fabric textures.
+        Extracts exact text/slogans, graphic artwork descriptions, colors, and fabric textures.
         """
         active_model = vision_model or self.vision_model
         request_id = f"feat_{uuid.uuid4().hex[:8]}"
@@ -267,8 +145,7 @@ class WardrobeService:
         try:
             response = await self._generate_content_async(contents, config=config, vision_model=active_model)
             raw_text = getattr(response, "text", "") or ""
-            cleaned = self._clean_json_text(raw_text)
-            parsed = json.loads(cleaned) if cleaned else {}
+            parsed = parse_json_safely(raw_text, default={})
             usage_dict = extract_usage_metadata(response)
             cost_info = calculate_cost(
                 model=active_model,
@@ -316,23 +193,19 @@ class WardrobeService:
         vision_model: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
-        Ingests a multi-garment sheet image, runs Gemini vision to detect bounding boxes
-        for each item, crops them with PIL, performs deep visual feature extraction, persists to DB,
-        and returns garment cards.
+        Segments a multi-garment sheet image, crops detected items, and extracts detailed features.
         """
         active_model = vision_model or self.vision_model
         sheet_id = f"sheet_{uuid.uuid4().hex[:8]}"
         request_id = f"seg_{uuid.uuid4().hex}"
         logger.info(f"Segmenting wardrobe sheet {sheet_id} ({len(image_bytes)} bytes) using vision model '{active_model}'")
 
-        # Save original source sheet
         safe_ext = os.path.splitext(original_filename)[1] or ".png"
         source_filename = f"{sheet_id}_source{safe_ext}"
         source_filepath = os.path.join(self.sources_dir, source_filename)
         with open(source_filepath, "wb") as f:
             f.write(image_bytes)
 
-        # Call Gemini Vision to detect items and bounding boxes
         image_part = to_image_part(image_bytes)
         contents = [image_part, WARDROBE_SEGMENTATION_PROMPT]
         config = types.GenerateContentConfig(
@@ -358,22 +231,16 @@ class WardrobeService:
             self._audit("wardrobe_segmentation_error", request_id, model=active_model, error=str(exc))
             raw_text = "{}"
 
-        # Parse detected items
-        cleaned = self._clean_json_text(raw_text)
         detected_items = []
-        try:
-            parsed = json.loads(cleaned)
-            if isinstance(parsed, dict) and "items" in parsed:
-                detected_items = parsed["items"]
-            elif isinstance(parsed, list):
-                detected_items = parsed
-        except Exception as parse_err:
-            logger.warning(f"Could not parse vision JSON response: {parse_err}. Raw: {cleaned}")
+        parsed = parse_json_safely(raw_text, default={})
+        if isinstance(parsed, dict) and "items" in parsed:
+            detected_items = parsed["items"]
+        elif isinstance(parsed, list):
+            detected_items = parsed
 
         base_img = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
         img_w, img_h = base_img.size
 
-        # Fallback if no items detected: treat entire sheet as 1 item
         if not detected_items:
             logger.info("No items detected by vision model; fallback to full-sheet card.")
             base_title = os.path.splitext(original_filename)[0].replace("_", " ").title()
@@ -385,12 +252,10 @@ class WardrobeService:
                 }
             ]
 
-        # Stage 1: Crop and prepare valid items
         prepared_crops = []
         for idx, item in enumerate(detected_items):
             raw_box = item.get("box_2d") or item.get("bbox") or item.get("bounding_box") or item.get("box")
             norm_box = self._normalize_bbox(raw_box, img_w, img_h)
-
             if not norm_box:
                 continue
 
@@ -400,7 +265,6 @@ class WardrobeService:
             if category not in ["outerwear", "tops", "bottoms", "footwear", "accessories", "full_outfit"]:
                 category = "tops"
 
-            # Apply subtle 2% padding for clean aesthetic borders
             pad_y = (ymax - ymin) * 0.02
             pad_x = (xmax - xmin) * 0.02
             crop_ymin = max(0.0, ymin - pad_y)
@@ -408,7 +272,6 @@ class WardrobeService:
             crop_ymax = min(1.0, ymax + pad_y)
             crop_xmax = min(1.0, xmax + pad_x)
 
-            # Convert to absolute pixel coordinates
             left = int(crop_xmin * img_w)
             top = int(crop_ymin * img_h)
             right = int(crop_xmax * img_w)
@@ -438,7 +301,6 @@ class WardrobeService:
                 "crop_bytes": crop_bytes,
             })
 
-        # Stage 2: Deep Vision Feature Extraction for all cropped items in parallel
         extraction_tasks = [
             self.extract_garment_features(
                 crop_bytes=item["crop_bytes"],
@@ -515,7 +377,6 @@ class WardrobeService:
                 "is_upscaled": False,
             })
 
-            # Dispatch non-blocking background task to upscale and enhance the garment with extracted details
             asyncio.create_task(
                 self.upscale_garment_background(
                     item_id=item_id,
@@ -548,9 +409,7 @@ class WardrobeService:
         imagen_model: Optional[str] = None,
     ) -> None:
         """
-        Asynchronously enhances and upscales an individual garment crop using Gemini Image Model.
-        Injects extracted text, graphics, and logo specifications with strict invariance rules.
-        Saves 600 DPI master image and updates DB item status to 'completed'.
+        Enhances and upscales an individual garment crop using Gemini Interactions API (4K).
         """
         active_model = imagen_model or self.imagen_model or "gemini-3.1-flash-image"
         request_id = f"upscale_{uuid.uuid4().hex[:8]}"
@@ -563,15 +422,11 @@ class WardrobeService:
             upscale_status="processing",
         )
 
-        # Build extracted details specification block
         details_lines = []
         if extracted_details:
             if extracted_details.get("has_text_or_logo") and extracted_details.get("exact_text_content"):
                 text_content = extracted_details["exact_text_content"]
-                if isinstance(text_content, list):
-                    text_str = ", ".join([f'"{t}"' for t in text_content])
-                else:
-                    text_str = str(text_content)
+                text_str = ", ".join([f'"{t}"' for t in text_content]) if isinstance(text_content, list) else str(text_content)
                 details_lines.append(f"- EXACT VISIBLE TEXT & SLOGANS (100% SPELLING LOCK): {text_str}")
             if extracted_details.get("logo_and_print_placement"):
                 details_lines.append(f"- PRINT & LOGO PLACEMENT: {extracted_details['logo_and_print_placement']}")
@@ -598,9 +453,22 @@ class WardrobeService:
         )
 
         try:
-            gen_service = self.generation_service
-            if gen_service is not None:
-                enhanced_bytes = await gen_service._call_image_model(
+            upscale_cost = 0.0
+            upscale_tokens = 0
+            if self.image_generator is not None:
+                enhanced_bytes = await self.image_generator.generate(
+                    prompt=prompt_text,
+                    negative_prompt=upscale_neg_prompt,
+                    aspect_ratio="1:1",
+                    reference_images=[crop_bytes],
+                    audit_request_id=request_id,
+                    model=active_model,
+                )
+                upscale_metrics = getattr(self.image_generator, "last_call_metrics", {})
+                upscale_cost = float(upscale_metrics.get("cost_usd", 0.0))
+                upscale_tokens = int(upscale_metrics.get("total_token_count", 0))
+            elif self._generation_service is not None and hasattr(self._generation_service, "_call_image_model"):
+                enhanced_bytes = await self._generation_service._call_image_model(
                     prompt=prompt_text,
                     negative_prompt=upscale_neg_prompt,
                     aspect_ratio="1:1",
@@ -608,8 +476,11 @@ class WardrobeService:
                     audit_request_id=request_id,
                     model_name=active_model,
                 )
+                upscale_metrics = getattr(self._generation_service, "_last_call_metrics", {})
+                upscale_cost = float(upscale_metrics.get("cost_usd", 0.0))
+                upscale_tokens = int(upscale_metrics.get("total_token_count", 0))
             else:
-                raise RuntimeError("GenerationService instance not available for garment upscale.")
+                raise RuntimeError("Image generator instance not available for garment upscale.")
 
             pil_img = Image.open(io.BytesIO(enhanced_bytes))
             if pil_img.mode not in ("RGB", "RGBA"):
@@ -622,13 +493,6 @@ class WardrobeService:
             pil_img.save(buf, format="PNG", dpi=(600, 600))
             with open(upscaled_filepath, "wb") as f:
                 f.write(buf.getvalue())
-
-            upscale_metrics = getattr(gen_service, "_last_call_metrics", None) or {}
-            upscale_cost = float(upscale_metrics.get("cost_usd", 0.0))
-            if isinstance(upscale_metrics.get("tokens"), dict):
-                upscale_tokens = int(upscale_metrics["tokens"].get("total_token_count", 0))
-            else:
-                upscale_tokens = int(upscale_metrics.get("total_token_count") or 0)
 
             await self.db.update_wardrobe_item_upscale(
                 item_id=item_id,
@@ -654,8 +518,6 @@ class WardrobeService:
                 pil_crop = Image.open(io.BytesIO(crop_bytes))
                 target_size = (max(pil_crop.width * 4, 3840), max(pil_crop.height * 4, 3840))
                 upscaled_crop = pil_crop.resize(target_size, Image.Resampling.LANCZOS)
-                
-                from PIL import ImageFilter
                 upscaled_crop = upscaled_crop.filter(ImageFilter.UnsharpMask(radius=2, percent=150, threshold=3))
 
                 upscaled_filename = f"{item_id}_upscaled.png"
@@ -699,7 +561,6 @@ class WardrobeService:
     ) -> List[Dict[str, Any]]:
         """
         Analyzes a generated image to detect subject clothing regions with bounding boxes.
-        Used for auto-mask overlay preview.
         """
         active_model = vision_model or self.vision_model
         logger.info(f"Detecting clothing regions for auto-mask preview using {active_model}...")
@@ -727,16 +588,12 @@ class WardrobeService:
             candidates_tokens=usage_dict["candidates_token_count"],
         )
 
-        cleaned = self._clean_json_text(raw_text)
         detected = []
-        try:
-            parsed = json.loads(cleaned)
-            if isinstance(parsed, dict) and "regions" in parsed:
-                detected = parsed["regions"]
-            elif isinstance(parsed, list):
-                detected = parsed
-        except Exception as parse_err:
-            logger.warning(f"Could not parse clothing region detection JSON: {parse_err}. Raw: {cleaned}")
+        parsed = parse_json_safely(raw_text, default={})
+        if isinstance(parsed, dict) and "regions" in parsed:
+            detected = parsed["regions"]
+        elif isinstance(parsed, list):
+            detected = parsed
 
         base_img = Image.open(io.BytesIO(image_bytes))
         img_w, img_h = base_img.size
@@ -799,7 +656,6 @@ class WardrobeService:
         if not deleted_item:
             return False
 
-        # Clean up physical files from disk
         for path_key in ("cropped_image_path", "upscaled_image_path"):
             filepath = deleted_item.get(path_key)
             if filepath and os.path.exists(filepath):
@@ -838,10 +694,6 @@ class WardrobeService:
         return len(deleted_items)
 
     def _heuristic_spatial_grounding(self, assignments: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """
-        Deterministic spatial grounding fallback if Vision model fails or is offline.
-        Translates normalized (x, y) coordinates and category into descriptive subject/spatial strings.
-        """
         grounded_pins = []
         for asgn in assignments:
             pin_num = asgn.get("pin_number", 1)
@@ -851,7 +703,6 @@ class WardrobeService:
             cat = (asgn.get("category") or "tops").lower()
             label = asgn.get("item_label") or asgn.get("target_description") or "garment"
 
-            # Horizontal placement
             if x < 0.35:
                 h_desc = "on the left side of the frame"
                 quad_h = "left"
@@ -862,8 +713,7 @@ class WardrobeService:
                 h_desc = "in the center of the frame"
                 quad_h = "center"
 
-            # Vertical anatomy
-            if y < 0.28 or "hat" in label.lower() or "cap" in label.lower() or "beanie" in label.lower() or "sunglass" in label.lower():
+            if y < 0.28 or any(w in label.lower() for w in ["hat", "cap", "beanie", "sunglass"]):
                 body_loc = "head and hair region"
                 quad_v = "upper"
             elif y > 0.68 or cat in ["bottoms", "footwear"]:
@@ -896,7 +746,6 @@ class WardrobeService:
         vision_model: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Vision-Assisted Subject Grounding (Pre-pass).
         Inspects the base image and user drop pin coordinates with Gemini Vision to identify
         the specific subject, body location, and non-target subject preservation guardrails.
         """
@@ -911,7 +760,6 @@ class WardrobeService:
         request_id = f"ground_{uuid.uuid4().hex}"
         started = time.perf_counter()
 
-        # Build pin summary prompt input
         pin_lines = []
         for asgn in assignments:
             pin_num = asgn.get("pin_number", 1)
@@ -948,13 +796,11 @@ class WardrobeService:
                 candidates_tokens=usage_dict["candidates_token_count"],
             )
             raw_text = getattr(response, "text", "") or ""
-            cleaned = self._clean_json_text(raw_text)
-            parsed = json.loads(cleaned)
+            parsed = parse_json_safely(raw_text, default={})
 
             grounded_list = parsed.get("grounded_pins", []) if isinstance(parsed, dict) else (parsed if isinstance(parsed, list) else [])
             guardrail = (parsed.get("unmodified_subjects_guardrail") if isinstance(parsed, dict) else None) or fallback_result["unmodified_subjects_guardrail"]
 
-            # Merge with fallback to ensure every pin has a grounded description
             grounded_by_pin = {g.get("pin_number"): g for g in grounded_list if isinstance(g, dict)}
             final_grounded = []
 
