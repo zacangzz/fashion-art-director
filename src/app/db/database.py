@@ -30,7 +30,13 @@ CREATE TABLE IF NOT EXISTS wardrobe_items (
     label TEXT NOT NULL,
     category TEXT DEFAULT 'tops',
     cropped_image_path TEXT NOT NULL,
+    upscaled_image_path TEXT NULL,
+    upscale_status TEXT DEFAULT 'pending',
+    upscale_error TEXT NULL,
     bbox_json TEXT,
+    extracted_details_json TEXT NULL,
+    cost_usd REAL DEFAULT 0.0,
+    tokens INTEGER DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP NULL
 );
@@ -68,6 +74,10 @@ CREATE TABLE IF NOT EXISTS generations (
     resolution_height INTEGER NOT NULL DEFAULT 1440,
     conversation_id TEXT NULL,
     model_name TEXT NULL,
+    cost_usd REAL DEFAULT 0.0,
+    tokens INTEGER DEFAULT 0,
+    accumulated_cost_usd REAL DEFAULT 0.0,
+    accumulated_tokens INTEGER DEFAULT 0,
     FOREIGN KEY(parent_id) REFERENCES generations(id),
     FOREIGN KEY(moodboard_id) REFERENCES moodboards(id)
 );
@@ -110,6 +120,39 @@ class DatabaseManager:
                 if "model_name" not in columns:
                     logger.info("Migrating DB: adding column 'model_name'")
                     await db.execute("ALTER TABLE generations ADD COLUMN model_name TEXT")
+                if "cost_usd" not in columns:
+                    logger.info("Migrating DB: adding column 'cost_usd'")
+                    await db.execute("ALTER TABLE generations ADD COLUMN cost_usd REAL DEFAULT 0.0")
+                if "tokens" not in columns:
+                    logger.info("Migrating DB: adding column 'tokens'")
+                    await db.execute("ALTER TABLE generations ADD COLUMN tokens INTEGER DEFAULT 0")
+                if "accumulated_cost_usd" not in columns:
+                    logger.info("Migrating DB: adding column 'accumulated_cost_usd'")
+                    await db.execute("ALTER TABLE generations ADD COLUMN accumulated_cost_usd REAL DEFAULT 0.0")
+                if "accumulated_tokens" not in columns:
+                    logger.info("Migrating DB: adding column 'accumulated_tokens'")
+                    await db.execute("ALTER TABLE generations ADD COLUMN accumulated_tokens INTEGER DEFAULT 0")
+
+            async with db.execute("PRAGMA table_info(wardrobe_items)") as cursor:
+                w_cols = [row[1] for row in await cursor.fetchall()]
+                if "upscaled_image_path" not in w_cols:
+                    logger.info("Migrating DB: adding column 'upscaled_image_path' to wardrobe_items")
+                    await db.execute("ALTER TABLE wardrobe_items ADD COLUMN upscaled_image_path TEXT NULL")
+                if "upscale_status" not in w_cols:
+                    logger.info("Migrating DB: adding column 'upscale_status' to wardrobe_items")
+                    await db.execute("ALTER TABLE wardrobe_items ADD COLUMN upscale_status TEXT DEFAULT 'pending'")
+                if "upscale_error" not in w_cols:
+                    logger.info("Migrating DB: adding column 'upscale_error' to wardrobe_items")
+                    await db.execute("ALTER TABLE wardrobe_items ADD COLUMN upscale_error TEXT NULL")
+                if "extracted_details_json" not in w_cols:
+                    logger.info("Migrating DB: adding column 'extracted_details_json' to wardrobe_items")
+                    await db.execute("ALTER TABLE wardrobe_items ADD COLUMN extracted_details_json TEXT NULL")
+                if "cost_usd" not in w_cols:
+                    logger.info("Migrating DB: adding column 'cost_usd' to wardrobe_items")
+                    await db.execute("ALTER TABLE wardrobe_items ADD COLUMN cost_usd REAL DEFAULT 0.0")
+                if "tokens" not in w_cols:
+                    logger.info("Migrating DB: adding column 'tokens' to wardrobe_items")
+                    await db.execute("ALTER TABLE wardrobe_items ADD COLUMN tokens INTEGER DEFAULT 0")
 
             # Cache current table columns for rapid future insertions
             async with db.execute("PRAGMA table_info(generations)") as cursor:
@@ -172,6 +215,12 @@ class DatabaseManager:
             if isinstance(data.get("schema_json"), dict):
                 data["model_name"] = data["schema_json"].get("imagen_model") or data["schema_json"].get("model_name")
 
+        # Ensure cost and token fields are set
+        data["cost_usd"] = float(data.get("cost_usd") or 0.0)
+        data["tokens"] = int(data.get("tokens") or 0)
+        data["accumulated_cost_usd"] = float(data.get("accumulated_cost_usd") or 0.0)
+        data["accumulated_tokens"] = int(data.get("accumulated_tokens") or 0)
+
         # Ensure is_baseline is bool
         data["is_baseline"] = bool(data.get("is_baseline", False))
         return data
@@ -200,6 +249,11 @@ class DatabaseManager:
         if not model_name and isinstance(gen_data.get("schema_json"), dict):
             model_name = gen_data["schema_json"].get("imagen_model") or gen_data["schema_json"].get("model_name")
 
+        cost_usd = float(gen_data.get("cost_usd") or 0.0)
+        tokens = int(gen_data.get("tokens") or 0)
+        accum_cost = float(gen_data.get("accumulated_cost_usd") or cost_usd)
+        accum_tokens = int(gen_data.get("accumulated_tokens") or tokens)
+
         async with aiosqlite.connect(self.db_path) as db:
             if self._table_columns_cache is None:
                 async with db.execute("PRAGMA table_info(generations)") as cursor:
@@ -221,6 +275,10 @@ class DatabaseManager:
                 "resolution_height": gen_data.get("resolution_height", 3840),
                 "conversation_id": gen_data.get("conversation_id"),
                 "model_name": model_name,
+                "cost_usd": cost_usd,
+                "tokens": tokens,
+                "accumulated_cost_usd": accum_cost,
+                "accumulated_tokens": accum_tokens,
             }
 
             # Map schema & prompt to both modern and legacy column names if present
@@ -242,7 +300,7 @@ class DatabaseManager:
             col_names = ", ".join(keys)
             values = [filtered_fields[k] for k in keys]
 
-            logger.info(f"Inserting generation record {gen_data['id']} (is_baseline={gen_data.get('is_baseline', False)}, seed={gen_data['seed']})")
+            logger.info(f"Inserting generation record {gen_data['id']} (is_baseline={gen_data.get('is_baseline', False)}, seed={gen_data['seed']}, cost=${cost_usd:.4f}, accum_cost=${accum_cost:.4f})")
             await db.execute(
                 f"INSERT INTO generations ({col_names}) VALUES ({placeholders})",
                 values,
@@ -263,7 +321,24 @@ class DatabaseManager:
             db.row_factory = aiosqlite.Row
             async with db.execute("SELECT * FROM generations ORDER BY created_at DESC, rowid DESC") as cursor:
                 rows = await cursor.fetchall()
-                return [self._normalize_generation_row(dict(row)) for row in rows]
+                normalized = [self._normalize_generation_row(dict(row)) for row in rows]
+
+                # If needed, resolve accumulated costs for lineage chains
+                records_by_id = {r["id"]: r for r in normalized}
+                for r in normalized:
+                    if r.get("accumulated_cost_usd", 0.0) == 0.0 and r.get("cost_usd", 0.0) > 0:
+                        # Trace ancestors to sum costs
+                        total_cost = r.get("cost_usd", 0.0)
+                        total_toks = r.get("tokens", 0)
+                        curr_p = r.get("parent_id")
+                        while curr_p and curr_p in records_by_id:
+                            parent_rec = records_by_id[curr_p]
+                            total_cost += parent_rec.get("cost_usd", 0.0)
+                            total_toks += parent_rec.get("tokens", 0)
+                            curr_p = parent_rec.get("parent_id")
+                        r["accumulated_cost_usd"] = round(total_cost, 6)
+                        r["accumulated_tokens"] = total_toks
+                return normalized
 
     async def get_lineage(self, generation_id: str) -> Dict[str, Any]:
         """
@@ -290,7 +365,7 @@ class DatabaseManager:
         descendant_ids = [gid for gid, pid in pairs.items() if pid == generation_id]
 
         # Fetch only required ancestor and descendant generation records
-        needed_ids = set(ancestor_ids + descendant_ids)
+        needed_ids = set(ancestor_ids + descendant_ids + [generation_id])
         if not needed_ids:
             return {"root_id": root_id, "ancestors": [], "descendants": []}
 
@@ -305,6 +380,18 @@ class DatabaseManager:
                     row["id"]: self._normalize_generation_row(dict(row))
                     for row in await cursor.fetchall()
                 }
+
+        # Compute accurate accumulated costs along root -> ancestor chain
+        ordered_chain = [root_id] + [aid for aid in reversed(ancestor_ids) if aid != root_id]
+        running_cost = 0.0
+        running_toks = 0
+        for cid in ordered_chain:
+            if cid in fetched_rows:
+                running_cost += fetched_rows[cid].get("cost_usd", 0.0)
+                running_toks += fetched_rows[cid].get("tokens", 0)
+                if not fetched_rows[cid].get("accumulated_cost_usd"):
+                    fetched_rows[cid]["accumulated_cost_usd"] = round(running_cost, 6)
+                    fetched_rows[cid]["accumulated_tokens"] = running_toks
 
         ancestors = [fetched_rows[aid] for aid in reversed(ancestor_ids) if aid in fetched_rows]
         descendants = [fetched_rows[did] for did in descendant_ids if did in fetched_rows]
@@ -343,17 +430,54 @@ class DatabaseManager:
                 rows = await cursor.fetchall()
                 return [self._normalize_generation_row(dict(row)) for row in rows]
 
+    def _normalize_wardrobe_row(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        if isinstance(data.get("bbox_json"), str):
+            try:
+                data["bbox"] = json.loads(data["bbox_json"])
+            except Exception:
+                data["bbox"] = None
+        else:
+            data["bbox"] = data.get("bbox_json")
+
+        if isinstance(data.get("extracted_details_json"), str):
+            try:
+                data["extracted_details"] = json.loads(data["extracted_details_json"])
+            except Exception:
+                data["extracted_details"] = None
+        elif isinstance(data.get("extracted_details_json"), dict):
+            data["extracted_details"] = data.get("extracted_details_json")
+        else:
+            data["extracted_details"] = data.get("extracted_details")
+
+        if not data.get("upscale_status"):
+            data["upscale_status"] = "completed" if data.get("upscaled_image_path") else "pending"
+        data["is_upscaled"] = bool(data.get("upscaled_image_path") and data.get("upscale_status") == "completed")
+        data["cost_usd"] = float(data.get("cost_usd") or 0.0)
+        data["tokens"] = int(data.get("tokens") or 0)
+        return data
+
     async def create_wardrobe_item(self, item_data: Dict[str, Any]) -> None:
         logger.info(f"Creating wardrobe item {item_data['id']}: {item_data.get('label')}")
         bbox_val = item_data.get("bbox_json")
         if isinstance(bbox_val, (list, dict)):
             bbox_val = json.dumps(bbox_val)
 
+        extracted_val = item_data.get("extracted_details_json") or item_data.get("extracted_details")
+        if isinstance(extracted_val, dict):
+            extracted_val = json.dumps(extracted_val)
+
+        cost_usd = float(item_data.get("cost_usd") or 0.0)
+        tokens = int(item_data.get("tokens") or 0)
+
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute(
                 """
-                INSERT INTO wardrobe_items (id, source_image_path, label, category, cropped_image_path, bbox_json, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+                INSERT INTO wardrobe_items (
+                    id, source_image_path, label, category, cropped_image_path,
+                    upscaled_image_path, upscale_status, upscale_error, bbox_json, extracted_details_json,
+                    cost_usd, tokens, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
                 """,
                 (
                     item_data["id"],
@@ -361,11 +485,75 @@ class DatabaseManager:
                     item_data["label"],
                     item_data.get("category", "tops"),
                     item_data["cropped_image_path"],
+                    item_data.get("upscaled_image_path"),
+                    item_data.get("upscale_status", "pending"),
+                    item_data.get("upscale_error"),
                     bbox_val,
+                    extracted_val,
+                    cost_usd,
+                    tokens,
                     item_data.get("created_at"),
                 ),
             )
             await db.commit()
+
+    async def update_wardrobe_item_details(
+        self,
+        item_id: str,
+        extracted_details: Dict[str, Any],
+        cost_usd: Optional[float] = None,
+        tokens: Optional[int] = None,
+    ) -> bool:
+        logger.info(f"Updating wardrobe item {item_id} extracted details")
+        extracted_val = json.dumps(extracted_details) if isinstance(extracted_details, dict) else extracted_details
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """
+                UPDATE wardrobe_items
+                SET extracted_details_json = ?,
+                    cost_usd = CASE WHEN ? IS NOT NULL THEN cost_usd + ? ELSE cost_usd END,
+                    tokens = CASE WHEN ? IS NOT NULL THEN tokens + ? ELSE tokens END
+                WHERE id = ? AND deleted_at IS NULL
+                """,
+                (extracted_val, cost_usd, cost_usd or 0.0, tokens, tokens or 0, item_id),
+            )
+            await db.commit()
+            return cursor.rowcount > 0
+
+    async def update_wardrobe_item_upscale(
+        self,
+        item_id: str,
+        upscaled_image_path: Optional[str],
+        upscale_status: str = "completed",
+        upscale_error: Optional[str] = None,
+        cost_usd: Optional[float] = None,
+        tokens: Optional[int] = None,
+    ) -> bool:
+        logger.info(f"Updating wardrobe item {item_id} upscale status to '{upscale_status}' (cost_usd={cost_usd}, tokens={tokens})")
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """
+                UPDATE wardrobe_items
+                SET upscaled_image_path = COALESCE(?, upscaled_image_path),
+                    upscale_status = ?,
+                    upscale_error = ?,
+                    cost_usd = CASE WHEN ? IS NOT NULL THEN cost_usd + ? ELSE cost_usd END,
+                    tokens = CASE WHEN ? IS NOT NULL THEN tokens + ? ELSE tokens END
+                WHERE id = ? AND deleted_at IS NULL
+                """,
+                (
+                    upscaled_image_path,
+                    upscale_status,
+                    upscale_error,
+                    cost_usd,
+                    cost_usd or 0.0,
+                    tokens,
+                    tokens or 0,
+                    item_id,
+                ),
+            )
+            await db.commit()
+            return cursor.rowcount > 0
 
     async def get_wardrobe_item(self, item_id: str) -> Optional[Dict[str, Any]]:
         async with aiosqlite.connect(self.db_path) as db:
@@ -376,13 +564,7 @@ class DatabaseManager:
             ) as cursor:
                 row = await cursor.fetchone()
                 if row:
-                    data = dict(row)
-                    if isinstance(data.get("bbox_json"), str):
-                        try:
-                            data["bbox"] = json.loads(data["bbox_json"])
-                        except Exception:
-                            data["bbox"] = None
-                    return data
+                    return self._normalize_wardrobe_row(dict(row))
                 return None
 
     async def list_wardrobe_items(self) -> List[Dict[str, Any]]:
@@ -392,35 +574,48 @@ class DatabaseManager:
                 "SELECT * FROM wardrobe_items WHERE deleted_at IS NULL ORDER BY created_at DESC, rowid DESC"
             ) as cursor:
                 rows = await cursor.fetchall()
-                results = []
-                for row in rows:
-                    data = dict(row)
-                    if isinstance(data.get("bbox_json"), str):
-                        try:
-                            data["bbox"] = json.loads(data["bbox_json"])
-                        except Exception:
-                            data["bbox"] = None
-                    results.append(data)
-                return results
+                return [self._normalize_wardrobe_row(dict(row)) for row in rows]
 
-    async def delete_wardrobe_item(self, item_id: str) -> bool:
-        logger.info(f"Soft-deleting wardrobe item {item_id}")
+    async def delete_wardrobe_item(self, item_id: str) -> Optional[Dict[str, Any]]:
+        logger.info(f"Deleting wardrobe item {item_id} and associated composition assignments")
         async with aiosqlite.connect(self.db_path) as db:
-            cursor = await db.execute(
-                "UPDATE wardrobe_items SET deleted_at = CURRENT_TIMESTAMP WHERE id = ? AND deleted_at IS NULL",
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT * FROM wardrobe_items WHERE id = ? AND deleted_at IS NULL",
+                (item_id,),
+            ) as cursor:
+                row = await cursor.fetchone()
+                if not row:
+                    return None
+                item_data = self._normalize_wardrobe_row(dict(row))
+
+            await db.execute(
+                "DELETE FROM composition_assignments WHERE wardrobe_item_id = ?",
+                (item_id,),
+            )
+            await db.execute(
+                "UPDATE wardrobe_items SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (item_id,),
             )
             await db.commit()
-            return cursor.rowcount > 0
+            return item_data
 
-    async def delete_all_wardrobe_items(self) -> int:
-        logger.info("Soft-deleting all wardrobe items")
+    async def delete_all_wardrobe_items(self) -> List[Dict[str, Any]]:
+        logger.info("Deleting all wardrobe items and associated composition assignments")
         async with aiosqlite.connect(self.db_path) as db:
-            cursor = await db.execute(
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT * FROM wardrobe_items WHERE deleted_at IS NULL"
+            ) as cursor:
+                rows = await cursor.fetchall()
+                items = [self._normalize_wardrobe_row(dict(row)) for row in rows]
+
+            await db.execute("DELETE FROM composition_assignments")
+            await db.execute(
                 "UPDATE wardrobe_items SET deleted_at = CURRENT_TIMESTAMP WHERE deleted_at IS NULL"
             )
             await db.commit()
-            return cursor.rowcount
+            return items
 
 
     async def create_composition_assignment(self, assignment_data: Dict[str, Any]) -> None:

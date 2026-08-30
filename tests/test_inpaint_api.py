@@ -35,7 +35,8 @@ async def test_inpaint_endpoint_success():
             "bounding_box": {"min_x": 10, "min_y": 10, "max_x": 30, "max_y": 30, "width": 21, "height": 21},
         },
         "created_at": "2026-08-25T12:00:00Z",
-        "resolution": {"width": 1080, "height": 1620},
+        "aspect_ratio": "16:9",
+        "resolution": {"width": 3840, "height": 2160},
     }
 
     with patch("app.api.inpaint.generation_service.inpaint_region", new_callable=AsyncMock) as mock_inpaint:
@@ -50,6 +51,7 @@ async def test_inpaint_endpoint_success():
                 "prompt": "change jacket to navy blue",
                 "generation_id": "gen_base_11223344",
                 "seed": "4289102",
+                "aspect_ratio": "16:9",
             }
             response = await client.post("/api/inpaint", files=files, data=data)
             assert response.status_code == 200
@@ -58,7 +60,11 @@ async def test_inpaint_endpoint_success():
             assert res_json["parent_id"] == "gen_base_11223344"
             assert res_json["image_url"] == "/api/images/gen_inpaint_12345678_master.png"
             assert res_json["mask_url"] == "/api/images/gen_inpaint_12345678_mask.png"
+            assert res_json["aspect_ratio"] == "16:9"
             assert res_json["mask_stats"]["coverage_percentage"] == 5.0
+            mock_inpaint.assert_called_once()
+            _, kwargs = mock_inpaint.call_args
+            assert kwargs["aspect_ratio"] == "16:9"
 
 
 

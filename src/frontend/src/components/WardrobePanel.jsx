@@ -12,8 +12,10 @@ import {
   GripHorizontal,
   RefreshCw,
   HelpCircle,
+  Eye,
 } from 'lucide-react';
 import { uploadWardrobeSheet, fetchWardrobeItems, deleteWardrobeItem, deleteAllWardrobeItems } from '../services/apiClient';
+import WardrobePreviewModal from './WardrobePreviewModal';
 
 const CATEGORY_COLORS = {
   tops: '#38bdf8',
@@ -42,6 +44,7 @@ export default function WardrobePanel({
   const [errorMessage, setErrorMessage] = useState(null);
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [customInstruction, setCustomInstruction] = useState('');
+  const [previewItemId, setPreviewItemId] = useState(null);
   const fileInputRef = useRef(null);
 
   // Load wardrobe library items on mount or when panel opens
@@ -50,6 +53,28 @@ export default function WardrobePanel({
       loadItems();
     }
   }, [isOpen]);
+
+  // Auto-poll while any garments are pending or processing AI detail upscaling
+  useEffect(() => {
+    if (!isOpen) return;
+    const hasPendingUpscale = items.some(
+      (item) => item.upscale_status === 'pending' || item.upscale_status === 'processing'
+    );
+    if (!hasPendingUpscale) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetchWardrobeItems();
+        if (res.items) {
+          setItems(res.items);
+        }
+      } catch (err) {
+        console.warn('Failed to poll wardrobe items status:', err);
+      }
+    }, 2500);
+
+    return () => clearInterval(interval);
+  }, [isOpen, items]);
 
   const loadItems = async () => {
     try {
@@ -92,6 +117,9 @@ export default function WardrobePanel({
     try {
       await deleteWardrobeItem(id);
       setItems((prev) => prev.filter((item) => item.id !== id));
+      if (previewItem?.id === id) {
+        setPreviewItem(null);
+      }
       // Remove any active assignment using this item
       assignments.forEach((asgn) => {
         if (asgn.wardrobe_item_id === id) {
@@ -110,6 +138,7 @@ export default function WardrobePanel({
       setIsLoading(true);
       await deleteAllWardrobeItems();
       setItems([]);
+      setPreviewItem(null);
       onClearAssignments?.();
     } catch (err) {
       setErrorMessage(err.message || 'Failed to delete all garments.');
@@ -267,27 +296,30 @@ export default function WardrobePanel({
             {filteredItems.map((item) => {
               const activePinCount = assignments.filter((a) => a.wardrobe_item_id === item.id).length;
               const catColor = CATEGORY_COLORS[item.category] || CATEGORY_COLORS.tops;
+              const isUpscaled = item.is_upscaled || item.upscale_status === 'completed';
+              const isUpscaling = item.upscale_status === 'pending' || item.upscale_status === 'processing';
+              const displayImageUrl = isUpscaled && item.upscaled_image_url ? item.upscaled_image_url : item.image_url;
 
               return (
                 <div
                   key={item.id}
                   className={`garment-card ${activePinCount > 0 ? 'is-assigned' : ''}`}
                   draggable={true}
-                  onDragStart={(e) => handleDragStart(e, item)}
-                  onClick={() => handleQuickAdd(item)}
+                  onDragStart={(e) => handleDragStart(e, { ...item, display_image_url: displayImageUrl })}
+                  onClick={() => handleQuickAdd({ ...item, display_image_url: displayImageUrl })}
                   tabIndex={0}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault();
-                      handleQuickAdd(item);
+                      handleQuickAdd({ ...item, display_image_url: displayImageUrl });
                     }
                   }}
                   title="Drag onto viewport or click to pin garment"
-                  aria-label={`${item.label}, Category: ${item.category || 'tops'}`}
+                  aria-label={`${item.label}, Category: ${item.category || 'tops'}${isUpscaled ? ', HD Upscaled' : ''}`}
                 >
                   <div className="garment-thumb-wrap">
                     <img
-                      src={item.image_url}
+                      src={displayImageUrl}
                       alt={item.label}
                       className="garment-thumb-img"
                       loading="lazy"
@@ -301,28 +333,76 @@ export default function WardrobePanel({
                         <span>Pinned ({activePinCount})</span>
                       </div>
                     )}
+                    {isUpscaling && (
+                      <div className="garment-upscaling-badge" title="AI detail enhancement & upscaling in progress">
+                        <Sparkles size={10} className="animate-spin text-accent" />
+                        <span>Enhancing...</span>
+                      </div>
+                    )}
+                    {isUpscaled && !isUpscaling && (
+                      <div className="garment-hd-badge" title="AI 4K high-definition detail upscaled with graphic invariance">
+                        <span>HD Lock</span>
+                      </div>
+                    )}
+                    {Number(item.cost_usd || 0) > 0 && (
+                      <div className="garment-cost-badge" title={`API Cost: $${Number(item.cost_usd).toFixed(4)} (${item.tokens || 0} tokens)`}>
+                        <span>${Number(item.cost_usd).toFixed(4)}</span>
+                      </div>
+                    )}
                   </div>
                   <div className="garment-info-row">
                     <div className="garment-text-col">
                       <span className="garment-title" title={item.label}>
                         {item.label}
                       </span>
-                      <span
-                        className="garment-cat-tag"
-                        style={{ color: catColor, borderColor: `${catColor}40` }}
-                      >
-                        {item.category || 'tops'}
-                      </span>
+                      <div className="garment-tags-wrap">
+                        <span
+                          className="garment-cat-tag"
+                          style={{ color: catColor, borderColor: `${catColor}40` }}
+                        >
+                          {item.category || 'tops'}
+                        </span>
+                        {item.extracted_details?.has_text_or_logo && item.extracted_details?.exact_text_content?.length > 0 && (
+                          <span
+                            className="garment-feature-tag text-cyan-400 border-cyan-500/30 bg-cyan-950/40"
+                            title={`Exact Text: ${item.extracted_details.exact_text_content.join(', ')}`}
+                          >
+                            Text Lock
+                          </span>
+                        )}
+                        {item.extracted_details?.has_graphic_or_print && (
+                          <span
+                            className="garment-feature-tag text-purple-400 border-purple-500/30 bg-purple-950/40"
+                            title={`Graphic Print: ${item.extracted_details.graphic_description || 'Artwork detected'}`}
+                          >
+                            Graphic
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <button
-                      type="button"
-                      className="garment-delete-btn"
-                      onClick={(e) => handleDeleteItem(e, item.id)}
-                      title="Delete garment"
-                      aria-label={`Delete ${item.label}`}
-                    >
-                      <Trash2 size={12} />
-                    </button>
+                    <div className="garment-card-actions">
+                      <button
+                        type="button"
+                        className="garment-action-btn garment-preview-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setPreviewItemId(item.id);
+                        }}
+                        title="Preview & inspect garment quality"
+                        aria-label={`Preview quality of ${item.label}`}
+                      >
+                        <Eye size={12} />
+                      </button>
+                      <button
+                        type="button"
+                        className="garment-action-btn garment-delete-btn"
+                        onClick={(e) => handleDeleteItem(e, item.id)}
+                        title="Delete garment"
+                        aria-label={`Delete ${item.label}`}
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
                   </div>
                 </div>
               );
@@ -416,6 +496,16 @@ export default function WardrobePanel({
           )}
         </button>
       </div>
+
+      {/* Garment Quality Inspector & Preview Modal */}
+      <WardrobePreviewModal
+        isOpen={previewItemId !== null}
+        onClose={() => setPreviewItemId(null)}
+        items={filteredItems}
+        initialItemId={previewItemId}
+        onAddAssignment={onAddAssignment}
+        onDeleteItem={handleDeleteItem}
+      />
     </aside>
   );
 }

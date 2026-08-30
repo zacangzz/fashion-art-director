@@ -90,6 +90,22 @@ describe('WardrobePanel Component', () => {
     });
   });
 
+  it('opens garment preview quality inspector modal when preview button is clicked', async () => {
+    render(<WardrobePanel isOpen={true} onClose={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Wool Trench Coat')).toBeInTheDocument();
+    });
+
+    const previewBtn = screen.getByRole('button', { name: /Preview quality of Wool Trench Coat/i });
+    expect(previewBtn).toBeInTheDocument();
+
+    fireEvent.click(previewBtn);
+
+    expect(screen.getByText('Garment Quality Inspector')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Wool Trench Coat' })).toBeInTheDocument();
+  });
+
   it('returns null when isOpen is false', () => {
     const { container } = render(<WardrobePanel isOpen={false} />);
     expect(container.firstChild).toBeNull();

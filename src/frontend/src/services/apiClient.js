@@ -364,11 +364,11 @@ export async function exportBundle(generationId) {
 }
 
 /**
- * Canvas Studio: Sends inpaint request with source image blob, mask blob, prompt and optional generation_id/seed.
- * @param {Object} params { generationId, imageBlob, maskBlob, prompt, negativePrompt, seed }
- * @returns {Promise<{generation_id: string, parent_id: string, image_url: string, created_at: string, compiled_prompt: string, seed: number, resolution: Object}>}
+ * Canvas Studio: Sends inpaint request with source image blob, mask blob, prompt and optional generation_id/seed/aspectRatio.
+ * @param {Object} params { generationId, imageBlob, maskBlob, prompt, negativePrompt, seed, aspectRatio }
+ * @returns {Promise<{generation_id: string, parent_id: string, image_url: string, created_at: string, compiled_prompt: string, seed: number, aspect_ratio: string, resolution: Object}>}
  */
-export async function inpaintRegion({ generationId, imageBlob, maskBlob, prompt, negativePrompt = null, seed = null }) {
+export async function inpaintRegion({ generationId, imageBlob, maskBlob, prompt, negativePrompt = null, seed = null, aspectRatio = null }) {
   const formData = new FormData();
   if (generationId) {
     formData.append('generation_id', generationId);
@@ -381,6 +381,9 @@ export async function inpaintRegion({ generationId, imageBlob, maskBlob, prompt,
   }
   if (seed !== null && seed !== undefined) {
     formData.append('seed', seed);
+  }
+  if (aspectRatio && typeof aspectRatio === 'string') {
+    formData.append('aspect_ratio', aspectRatio);
   }
 
   const response = await fetch('/api/inpaint', {

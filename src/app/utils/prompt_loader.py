@@ -31,4 +31,7 @@ SUBJECT_GROUNDING_PROMPT = load_prompt("subject_grounding_system.txt")
 RESYNC_MASTER_PROMPT_SYSTEM = load_prompt("resync_master_prompt_system.txt")
 RESYNC_MASTER_PROMPT_TEMPLATE = load_prompt("resync_master_prompt_template.txt")
 CHECK_CONFLICTS_SYSTEM_PROMPT = load_prompt("check_conflicts_system.txt")
+GARMENT_UPSCALE_SYSTEM_PROMPT = load_prompt("garment_upscale_system.txt")
+GARMENT_FEATURE_EXTRACTION_PROMPT = load_prompt("garment_feature_extraction.txt")
+
 

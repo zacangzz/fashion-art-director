@@ -17,6 +17,7 @@ from app.db.database import DatabaseManager
 from app.schemas.domain import SceneSchema
 from app.utils.logger import get_logger
 from app.utils.telemetry import TelemetryLogger
+from app.utils.pricing import extract_usage_metadata, calculate_cost
 from app.utils.prompt_loader import (
     DEFAULT_NEGATIVE_PROMPT,
     IMAGE_GENERATION_SUFFIX,
@@ -583,6 +584,12 @@ class GenerationService:
             if response.generated_images:
                 image_bytes = response.generated_images[0].image.image_bytes
                 logger.info(f"Received image bytes from Imagen model ({len(image_bytes)} bytes)")
+                usage_dict = extract_usage_metadata(response)
+                if usage_dict["total_token_count"] == 0:
+                    usage_dict = {"prompt_token_count": max(len(prompt) // 4, 50), "candidates_token_count": 0, "total_token_count": max(len(prompt) // 4, 50)}
+                cost_info = calculate_cost(active_model, prompt_tokens=usage_dict["prompt_token_count"], candidates_tokens=usage_dict["candidates_token_count"], images_count=1)
+                self._last_call_metrics = cost_info
+
                 if audit_request_id:
                     self._audit(
                         "image_model_response",
@@ -591,6 +598,8 @@ class GenerationService:
                         response_metadata=response.model_dump() if callable(getattr(response, "model_dump", None)) else None,
                         output={"sha256": hashlib.sha256(image_bytes).hexdigest(), "bytes": len(image_bytes)},
                         duration_ms=round((time.perf_counter() - started) * 1000, 1),
+                        tokens=usage_dict,
+                        cost_usd=cost_info["cost_usd"],
                     )
                 return image_bytes
         else:
@@ -669,6 +678,12 @@ class GenerationService:
 
                 if image_bytes:
                     logger.info(f"Received direct 4K image bytes from Gemini Interactions API ({len(image_bytes)} bytes)")
+                    usage_dict = extract_usage_metadata(interaction)
+                    if usage_dict["total_token_count"] == 0:
+                        usage_dict = {"prompt_token_count": max(len(full_prompt) // 4, 80), "candidates_token_count": 0, "total_token_count": max(len(full_prompt) // 4, 80)}
+                    cost_info = calculate_cost(active_model, prompt_tokens=usage_dict["prompt_token_count"], candidates_tokens=usage_dict["candidates_token_count"], images_count=1)
+                    self._last_call_metrics = cost_info
+
                     if audit_request_id:
                         self._audit(
                             "image_model_response",
@@ -676,6 +691,8 @@ class GenerationService:
                             model=active_model,
                             output={"sha256": hashlib.sha256(image_bytes).hexdigest(), "bytes": len(image_bytes)},
                             duration_ms=round((time.perf_counter() - started) * 1000, 1),
+                            tokens=usage_dict,
+                            cost_usd=cost_info["cost_usd"],
                         )
                     return image_bytes
             except Exception as interaction_err:
@@ -704,6 +721,19 @@ class GenerationService:
                         for part in response.candidates[0].content.parts:
                             if getattr(part, "inline_data", None) and part.inline_data.data:
                                 logger.info(f"Received inline image bytes from fallback Gemini model ({len(part.inline_data.data)} bytes)")
+                                usage_dict = extract_usage_metadata(response)
+                                if usage_dict["total_token_count"] == 0:
+                                    usage_dict = {"prompt_token_count": max(len(full_prompt) // 4, 80), "candidates_token_count": 0, "total_token_count": max(len(full_prompt) // 4, 80)}
+                                cost_info = calculate_cost(active_model, prompt_tokens=usage_dict["prompt_token_count"], candidates_tokens=usage_dict["candidates_token_count"], images_count=1)
+                                self._last_call_metrics = cost_info
+                                if audit_request_id:
+                                    self._audit(
+                                        "image_model_response",
+                                        audit_request_id,
+                                        model=active_model,
+                                        tokens=usage_dict,
+                                        cost_usd=cost_info["cost_usd"],
+                                    )
                                 return part.inline_data.data
                 except Exception as fallback_err:
                     if audit_request_id:
@@ -823,6 +853,12 @@ class GenerationService:
 
             if image_bytes:
                 logger.info(f"Received direct 4K image bytes from Gemini multi-image Interactions API ({len(image_bytes)} bytes)")
+                usage_dict = extract_usage_metadata(interaction)
+                if usage_dict["total_token_count"] == 0:
+                    usage_dict = {"prompt_token_count": 258 * len(contents) + 120, "candidates_token_count": 0, "total_token_count": 258 * len(contents) + 120}
+                cost_info = calculate_cost(active_model, prompt_tokens=usage_dict["prompt_token_count"], candidates_tokens=usage_dict["candidates_token_count"], images_count=1)
+                self._last_call_metrics = cost_info
+
                 if audit_request_id:
                     self._audit(
                         "multi_image_model_response",
@@ -830,6 +866,8 @@ class GenerationService:
                         model=active_model,
                         output={"sha256": hashlib.sha256(image_bytes).hexdigest(), "bytes": len(image_bytes)},
                         duration_ms=round((time.perf_counter() - started) * 1000, 1),
+                        tokens=usage_dict,
+                        cost_usd=cost_info["cost_usd"],
                     )
                 return image_bytes
         except Exception as interaction_err:
@@ -854,6 +892,19 @@ class GenerationService:
                     for part in response.candidates[0].content.parts:
                         if getattr(part, "inline_data", None) and part.inline_data.data:
                             logger.info(f"Received inline image bytes from Gemini multi-image fallback model ({len(part.inline_data.data)} bytes)")
+                            usage_dict = extract_usage_metadata(response)
+                            if usage_dict["total_token_count"] == 0:
+                                usage_dict = {"prompt_token_count": 258 * len(contents) + 120, "candidates_token_count": 0, "total_token_count": 258 * len(contents) + 120}
+                            cost_info = calculate_cost(active_model, prompt_tokens=usage_dict["prompt_token_count"], candidates_tokens=usage_dict["candidates_token_count"], images_count=1)
+                            self._last_call_metrics = cost_info
+                            if audit_request_id:
+                                self._audit(
+                                    "multi_image_model_response",
+                                    audit_request_id,
+                                    model=active_model,
+                                    tokens=usage_dict,
+                                    cost_usd=cost_info["cost_usd"],
+                                )
                             return part.inline_data.data
             except Exception as fallback_err:
                 if audit_request_id:
@@ -940,6 +991,10 @@ class GenerationService:
         schema_payload["model_name"] = active_model
         schema_payload["temperature"] = temperature
 
+        last_metrics = getattr(self, "_last_call_metrics", None) or calculate_cost(active_model, images_count=1)
+        cost_usd = float(last_metrics.get("cost_usd", 0.0))
+        tokens = int(last_metrics.get("total_tokens", 0))
+
         record = {
             "id": gen_id,
             "parent_id": None,
@@ -955,6 +1010,10 @@ class GenerationService:
             "resolution_width": width,
             "resolution_height": height,
             "model_name": active_model,
+            "cost_usd": cost_usd,
+            "tokens": tokens,
+            "accumulated_cost_usd": cost_usd,
+            "accumulated_tokens": tokens,
         }
         await self.db.create_generation(record)
         self._audit(
@@ -966,8 +1025,12 @@ class GenerationService:
             model=active_model,
             duration_ms=duration_ms,
             output={"sha256": hashlib.sha256(image_bytes).hexdigest(), "bytes": len(image_bytes), "filename": filename},
+            cost_usd=cost_usd,
+            cumulative_cost_usd=cost_usd,
+            tokens=last_metrics.get("tokens") or {"total_tokens": tokens},
+            cumulative_tokens=tokens,
         )
-        logger.info(f"Saved baseline record {gen_id} to database and disk at {filepath}")
+        logger.info(f"Saved baseline record {gen_id} to database and disk at {filepath} (cost=${cost_usd:.4f})")
 
         return {
             "id": gen_id,
@@ -978,6 +1041,10 @@ class GenerationService:
             "resolution": {"width": width, "height": height},
             "compiled_prompt": full_baseline_prompt,
             "temperature": temperature,
+            "cost_usd": cost_usd,
+            "tokens": tokens,
+            "accumulated_cost_usd": cost_usd,
+            "accumulated_tokens": tokens,
         }
 
     async def register_uploaded_photo(
@@ -1254,6 +1321,15 @@ class GenerationService:
             "model_name": active_model,
         }
 
+        last_metrics = getattr(self, "_last_call_metrics", None) or calculate_cost(active_model, images_count=1)
+        cost_usd = float(last_metrics.get("cost_usd", 0.0))
+        tokens = int(last_metrics.get("total_tokens", 0))
+
+        parent_accum_cost = float(parent_record.get("accumulated_cost_usd", 0.0)) if parent_record else 0.0
+        parent_accum_tokens = int(parent_record.get("accumulated_tokens", 0)) if parent_record else 0
+        accum_cost = round(parent_accum_cost + cost_usd, 6)
+        accum_tokens = parent_accum_tokens + tokens
+
         record = {
             "id": child_id,
             "parent_id": parent_id,
@@ -1269,14 +1345,22 @@ class GenerationService:
             "resolution_width": width,
             "resolution_height": height,
             "model_name": active_model,
+            "cost_usd": cost_usd,
+            "tokens": tokens,
+            "accumulated_cost_usd": accum_cost,
+            "accumulated_tokens": accum_tokens,
         }
         await self.db.create_generation(record)
         self._audit("fine_tune_response", request_id,
             generation_id=child_id, parent_id=parent_id,
             output_path=filepath, compiled_prompt=compiled_prompt,
             seed=seed, aspect_ratio=aspect_ratio, negative_prompt=final_neg_prompt,
-            model=active_model)
-        logger.info(f"Fine-tuned iteration {child_id} created successfully.")
+            model=active_model,
+            cost_usd=cost_usd,
+            cumulative_cost_usd=accum_cost,
+            tokens=last_metrics.get("tokens") or {"total_tokens": tokens},
+            cumulative_tokens=accum_tokens)
+        logger.info(f"Fine-tuned iteration {child_id} created successfully (cost=${cost_usd:.4f}, total_lineage=${accum_cost:.4f}).")
 
         return {
             "generation_id": child_id,
@@ -1288,6 +1372,10 @@ class GenerationService:
             "created_at": created_at,
             "aspect_ratio": aspect_ratio,
             "resolution": {"width": width, "height": height},
+            "cost_usd": cost_usd,
+            "tokens": tokens,
+            "accumulated_cost_usd": accum_cost,
+            "accumulated_tokens": accum_tokens,
         }
 
     async def refine_generation(
@@ -1352,6 +1440,15 @@ class GenerationService:
 
         width, height = self._process_and_save_image(image_bytes, filepath, aspect_ratio)
 
+        last_metrics = getattr(self, "_last_call_metrics", None) or calculate_cost(active_model, images_count=1)
+        cost_usd = float(last_metrics.get("cost_usd", 0.0))
+        tokens = int(last_metrics.get("total_tokens", 0))
+
+        parent_accum_cost = float(parent_record.get("accumulated_cost_usd", 0.0)) if parent_record else 0.0
+        parent_accum_tokens = int(parent_record.get("accumulated_tokens", 0)) if parent_record else 0
+        accum_cost = round(parent_accum_cost + cost_usd, 6)
+        accum_tokens = parent_accum_tokens + tokens
+
         record = {
             "id": child_id,
             "parent_id": parent_id,
@@ -1368,14 +1465,22 @@ class GenerationService:
             "resolution_height": height,
             "conversation_id": conversation_id,
             "model_name": active_model,
+            "cost_usd": cost_usd,
+            "tokens": tokens,
+            "accumulated_cost_usd": accum_cost,
+            "accumulated_tokens": accum_tokens,
         }
         await self.db.create_generation(record)
         self._audit("refinement_response", request_id,
             generation_id=child_id, parent_id=parent_id,
             output_path=filepath, compiled_prompt=compiled_prompt,
             seed=seed, aspect_ratio=aspect_ratio, conversation_id=conversation_id,
-            model=active_model)
-        logger.info(f"Refinement {child_id} created successfully.")
+            model=active_model,
+            cost_usd=cost_usd,
+            cumulative_cost_usd=accum_cost,
+            tokens=last_metrics.get("tokens") or {"total_tokens": tokens},
+            cumulative_tokens=accum_tokens)
+        logger.info(f"Refinement {child_id} created successfully (cost=${cost_usd:.4f}, total_lineage=${accum_cost:.4f}).")
 
         return {
             "generation_id": child_id,
@@ -1388,6 +1493,10 @@ class GenerationService:
             "aspect_ratio": aspect_ratio,
             "resolution": {"width": width, "height": height},
             "conversation_id": conversation_id,
+            "cost_usd": cost_usd,
+            "tokens": tokens,
+            "accumulated_cost_usd": accum_cost,
+            "accumulated_tokens": accum_tokens,
         }
 
     async def compose_wardrobe(
@@ -1395,7 +1504,7 @@ class GenerationService:
         parent_id: str,
         assignments: List[Dict[str, Any]],
         seed: int = 4289102,
-        aspect_ratio: str = "2:3",
+        aspect_ratio: Optional[str] = None,
         negative_prompt: Optional[str] = None,
         conversation_id: Optional[str] = None,
         custom_instruction: Optional[str] = None,
@@ -1420,6 +1529,19 @@ class GenerationService:
         with open(parent_img_path, "rb") as f:
             parent_bytes = f.read()
 
+        # Determine effective aspect ratio
+        parent_aspect = parent_record.get("aspect_ratio")
+        if aspect_ratio and aspect_ratio.strip():
+            eff_aspect_ratio = aspect_ratio.strip()
+        elif parent_aspect and parent_aspect.strip():
+            eff_aspect_ratio = parent_aspect.strip()
+        else:
+            try:
+                parent_pil = Image.open(io.BytesIO(parent_bytes))
+                eff_aspect_ratio = detect_closest_aspect_ratio(parent_pil.width, parent_pil.height)
+            except Exception:
+                eff_aspect_ratio = "2:3"
+
         contents: List[Any] = [
             to_image_part(parent_bytes),
             "Primary Base Scene Image above (showing the current model/subject)."
@@ -1441,16 +1563,21 @@ class GenerationService:
                 logger.warning(f"Wardrobe item '{item_id}' not found in DB.")
                 continue
 
+            # Prioritize high-definition upscaled asset if available
+            upscaled_path = wardrobe_item.get("upscaled_image_path")
             crop_path = wardrobe_item.get("cropped_image_path")
-            if not crop_path or not os.path.exists(crop_path):
-                logger.warning(f"Cropped image '{crop_path}' not found on disk.")
+            target_image_path = upscaled_path if (upscaled_path and os.path.exists(upscaled_path)) else crop_path
+
+            if not target_image_path or not os.path.exists(target_image_path):
+                logger.warning(f"Garment image '{target_image_path}' not found on disk.")
                 continue
 
-            with open(crop_path, "rb") as f:
+            with open(target_image_path, "rb") as f:
                 garment_bytes = f.read()
 
             label = wardrobe_item.get("label", f"Garment {pin_num}")
             category = wardrobe_item.get("category", "tops")
+            extracted_details = wardrobe_item.get("extracted_details") or {}
 
             loaded_items_temp.append({
                 "pin_number": pin_num,
@@ -1461,6 +1588,7 @@ class GenerationService:
                 "target_desc": target_desc,
                 "garment_bytes": garment_bytes,
                 "region_bbox": assignment.get("region_bbox"),
+                "extracted_details": extracted_details,
             })
             assignments_for_grounding.append({
                 "pin_number": pin_num,
@@ -1480,7 +1608,7 @@ class GenerationService:
             g.get("pin_number"): g for g in grounding_data.get("grounded_pins", []) if isinstance(g, dict)
         }
 
-        # 3. Build replacement instructions with grounded subject descriptions
+        # 3. Build replacement instructions with grounded subject descriptions and graphic specifications
         instruction_lines = []
         loaded_assignments = []
 
@@ -1492,11 +1620,27 @@ class GenerationService:
             spatial_anchor = g_info.get("spatial_anchor") or f"drop pin (x: {round(float(item['drop_pos'].get('x', 0.5))*100)}%, y: {round(float(item['drop_pos'].get('y', 0.5))*100)}%)"
             current_attire = g_info.get("current_attire") or "the existing clothing"
 
+            details = item.get("extracted_details") or {}
+            detail_sublines = []
+            if details:
+                if details.get("has_text_or_logo") and details.get("exact_text_content"):
+                    texts = details["exact_text_content"]
+                    text_str = ", ".join([f'"{t}"' for t in texts]) if isinstance(texts, list) else str(texts)
+                    detail_sublines.append(f"    * Exact Graphic Text & Slogans (100% Spelling Lock): {text_str}")
+                if details.get("logo_and_print_placement"):
+                    detail_sublines.append(f"    * Print / Logo Placement: {details['logo_and_print_placement']}")
+                if details.get("has_graphic_or_print") and details.get("graphic_description"):
+                    detail_sublines.append(f"    * Graphic Artwork & Motif: {details['graphic_description']}")
+                if details.get("fabric_texture"):
+                    detail_sublines.append(f"    * Fabric Material & Weave: {details['fabric_texture']}")
+
+            graphic_spec_str = ("\n" + "\n".join(detail_sublines)) if detail_sublines else ""
+
             instruction_lines.append(
                 f"- [Garment Pin #{pin_num}] \"{item['label']}\" ({item['category']}):\n"
                 f"  * Target Subject: {target_subject} at {body_loc} [{spatial_anchor}].\n"
-                f"  * Replacement Action: Replace {current_attire} with the garment in Reference Garment #{pin_num}.\n"
-                f"  * Tailoring & Fit: Harmonize naturally with this exact subject's body geometry, pose, and ambient scene lighting."
+                f"  * Replacement Action: Replace {current_attire} with the garment in Reference Garment #{pin_num}.{graphic_spec_str}\n"
+                f"  * Tailoring & Graphic Drape: Faithfully transfer the exact artwork, typography spelling, and logos from Reference Garment #{pin_num} in perspective onto this subject's clothing, harmonizing naturally with body geometry, pose, and ambient lighting without alteration or scrambling."
             )
 
             contents.append(f"Reference Garment #{pin_num} (Label: {item['label']}):")
@@ -1527,7 +1671,13 @@ class GenerationService:
         )
         contents.append(compiled_prompt)
 
-        final_neg_prompt = negative_prompt if negative_prompt is not None else DEFAULT_NEGATIVE_PROMPT
+        base_neg = negative_prompt if negative_prompt is not None else DEFAULT_NEGATIVE_PROMPT
+        anti_distortion_tokens = "scrambled text, misspelled words, altered logos, hallucinated prints, blurry graphics, distorted lettering, generic replacement artwork"
+        if anti_distortion_tokens not in base_neg:
+            final_neg_prompt = f"{base_neg}, {anti_distortion_tokens}"
+        else:
+            final_neg_prompt = base_neg
+
         request_id = f"compose_{uuid.uuid4().hex}"
         self._audit(
             "wardrobe_compose_request",
@@ -1536,7 +1686,7 @@ class GenerationService:
             assignments_count=len(loaded_assignments),
             grounded_subjects=[a.get("grounded_subject") for a in loaded_assignments],
             seed=seed,
-            aspect_ratio=aspect_ratio,
+            aspect_ratio=eff_aspect_ratio,
             negative_prompt=final_neg_prompt,
             conversation_id=conversation_id,
             model=active_model,
@@ -1549,7 +1699,7 @@ class GenerationService:
         image_bytes = await self._call_multi_image_model(
             contents=contents,
             seed=seed,
-            aspect_ratio=aspect_ratio,
+            aspect_ratio=eff_aspect_ratio,
             negative_prompt=final_neg_prompt,
             audit_request_id=request_id,
             model_name=active_model,
@@ -1560,7 +1710,16 @@ class GenerationService:
         filename = f"{child_id}_master.png"
         filepath = os.path.join(gen_dir, filename)
 
-        width, height = self._process_and_save_image(image_bytes, filepath, aspect_ratio)
+        width, height = self._process_and_save_image(image_bytes, filepath, eff_aspect_ratio)
+
+        last_metrics = getattr(self, "_last_call_metrics", None) or calculate_cost(active_model, images_count=1)
+        cost_usd = float(last_metrics.get("cost_usd", 0.0))
+        tokens = int(last_metrics.get("total_tokens", 0))
+
+        parent_accum_cost = float(parent_record.get("accumulated_cost_usd", 0.0)) if parent_record else 0.0
+        parent_accum_tokens = int(parent_record.get("accumulated_tokens", 0)) if parent_record else 0
+        accum_cost = round(parent_accum_cost + cost_usd, 6)
+        accum_tokens = parent_accum_tokens + tokens
 
         record = {
             "id": child_id,
@@ -1581,11 +1740,15 @@ class GenerationService:
             "negative_prompt": final_neg_prompt,
             "seed": seed,
             "master_image_path": filepath,
-            "aspect_ratio": aspect_ratio,
+            "aspect_ratio": eff_aspect_ratio,
             "resolution_width": width,
             "resolution_height": height,
             "conversation_id": conversation_id,
             "model_name": active_model,
+            "cost_usd": cost_usd,
+            "tokens": tokens,
+            "accumulated_cost_usd": accum_cost,
+            "accumulated_tokens": accum_tokens,
         }
         await self.db.create_generation(record)
 
@@ -1608,12 +1771,16 @@ class GenerationService:
             parent_id=parent_id,
             output_path=filepath,
             seed=seed,
-            aspect_ratio=aspect_ratio,
+            aspect_ratio=eff_aspect_ratio,
             conversation_id=conversation_id,
             model=active_model,
             vision_model=vision_model,
+            cost_usd=cost_usd,
+            cumulative_cost_usd=accum_cost,
+            tokens=last_metrics.get("tokens") or {"total_tokens": tokens},
+            cumulative_tokens=accum_tokens,
         )
-        logger.info(f"Wardrobe composition {child_id} created successfully.")
+        logger.info(f"Wardrobe composition {child_id} created successfully (cost=${cost_usd:.4f}, total_lineage=${accum_cost:.4f}).")
 
         return {
             "generation_id": child_id,
@@ -1623,10 +1790,14 @@ class GenerationService:
             "negative_prompt": final_neg_prompt,
             "image_url": f"/api/images/{filename}",
             "created_at": created_at,
-            "aspect_ratio": aspect_ratio,
+            "aspect_ratio": eff_aspect_ratio,
             "resolution": {"width": width, "height": height},
             "conversation_id": conversation_id,
             "assignments": loaded_assignments,
+            "cost_usd": cost_usd,
+            "tokens": tokens,
+            "accumulated_cost_usd": accum_cost,
+            "accumulated_tokens": accum_tokens,
         }
 
     async def inpaint_region(
@@ -1637,6 +1808,7 @@ class GenerationService:
         prompt: str,
         negative_prompt: Optional[str] = None,
         seed: Optional[int] = None,
+        aspect_ratio: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Canvas Studio: Targeted inpainting with a source image and black & white mask.
@@ -1645,17 +1817,30 @@ class GenerationService:
         parent_record = await self.db.get_generation(parent_id) if parent_id else None
         moodboard_id = parent_record.get("moodboard_id") if parent_record else None
         saved_state = parent_record.get("schema_json", {}) if parent_record else {}
-        aspect_ratio = parent_record.get("aspect_ratio", "2:3") if parent_record else "2:3"
         parent_seed = parent_record.get("seed", 4289102) if parent_record else 4289102
         active_seed = seed if seed is not None else parent_seed
-
-        neg_prompt = negative_prompt if negative_prompt is not None else DEFAULT_NEGATIVE_PROMPT
-        request_id = f"inpaint_{uuid.uuid4().hex}"
 
         # Analyze mask metrics & source image telemetry
         mask_stats = analyze_mask_bytes(mask_bytes)
         base_image = Image.open(io.BytesIO(image_bytes))
         mask_image = Image.open(io.BytesIO(mask_bytes))
+
+        # Determine effective aspect ratio
+        parent_aspect = parent_record.get("aspect_ratio") if parent_record else None
+        if aspect_ratio and aspect_ratio.strip():
+            eff_aspect_ratio = aspect_ratio.strip()
+        elif parent_aspect and parent_aspect.strip():
+            eff_aspect_ratio = parent_aspect.strip()
+        else:
+            eff_aspect_ratio = detect_closest_aspect_ratio(base_image.width, base_image.height)
+
+        base_neg = negative_prompt if negative_prompt is not None else DEFAULT_NEGATIVE_PROMPT
+        anti_distortion_tokens = "scrambled text, misspelled words, altered logos, hallucinated prints, blurry graphics, distorted lettering, generic replacement artwork"
+        if anti_distortion_tokens not in base_neg:
+            neg_prompt = f"{base_neg}, {anti_distortion_tokens}"
+        else:
+            neg_prompt = base_neg
+        request_id = f"inpaint_{uuid.uuid4().hex}"
 
         source_stats = {
             "sha256": hashlib.sha256(image_bytes).hexdigest(),
@@ -1674,7 +1859,7 @@ class GenerationService:
             negative_prompt=neg_prompt,
             seed=active_seed,
             model=self.inpaint_model_name,
-            aspect_ratio=aspect_ratio,
+            aspect_ratio=eff_aspect_ratio,
             source_image=source_stats,
             mask=mask_stats,
         )
@@ -1682,13 +1867,13 @@ class GenerationService:
         logger.info(
             f"Inpaint request [{request_id}]: parent={parent_id}, prompt='{prompt}', "
             f"mask={mask_stats['width']}x{mask_stats['height']} ({mask_stats['coverage_percentage']}% coverage, "
-            f"bbox={mask_stats['bounding_box']}), seed={active_seed}, model={self.inpaint_model_name}"
+            f"bbox={mask_stats['bounding_box']}), seed={active_seed}, aspect={eff_aspect_ratio}, model={self.inpaint_model_name}"
         )
 
         started = time.perf_counter()
 
         # Derive target resolution from aspect ratio or source image
-        res_tuple = ASPECT_RATIO_RESOLUTIONS.get(aspect_ratio, (base_image.width, base_image.height))
+        res_tuple = ASPECT_RATIO_RESOLUTIONS.get(eff_aspect_ratio, (base_image.width, base_image.height))
         res_str = f"{res_tuple[0]}x{res_tuple[1]}"
 
         # Formulate precise spatial instructions for the model
@@ -1696,77 +1881,123 @@ class GenerationService:
             INPAINT_SYSTEM_PROMPT
             .replace("{USER_PROMPT}", prompt.strip())
             .replace("{RESOLUTION}", res_str)
-            .replace("{ASPECT_RATIO}", aspect_ratio or "unspecified")
+            .replace("{ASPECT_RATIO}", eff_aspect_ratio or "unspecified")
         )
         if neg_prompt:
             suffix = (
                 INPAINT_SUFFIX
                 .replace("{NEGATIVE_PROMPT}", neg_prompt)
                 .replace("{RESOLUTION}", res_str)
-                .replace("{ASPECT_RATIO}", aspect_ratio or "unspecified")
+                .replace("{ASPECT_RATIO}", eff_aspect_ratio or "unspecified")
             )
             spatial_prompt = f"{spatial_prompt}\n\n{suffix}"
 
-        contents = [base_image, mask_image, spatial_prompt]
+        norm_aspect = normalize_interaction_aspect_ratio(eff_aspect_ratio)
 
-
-        # Configure image generation modalities
-        image_config = None
-        if hasattr(types, "ImageConfig"):
-            valid_ratios = {"1:1", "3:4", "4:3", "9:16", "16:9", "2:3", "3:2"}
-            target_ratio = aspect_ratio if aspect_ratio in valid_ratios else "1:1"
-            image_config = types.ImageConfig(aspect_ratio=target_ratio)
-
-        config = types.GenerateContentConfig(
-            response_modalities=["IMAGE", "TEXT"],
-            image_config=image_config,
-        )
-
-        try:
-            response = await asyncio.to_thread(
-                self.client.models.generate_content,
-                model=self.inpaint_model_name,
-                contents=contents,
-                config=config,
-            )
-        except Exception as model_err:
-            self._audit(
-                "inpaint_error",
-                request_id,
-                parent_id=parent_id,
-                error=repr(model_err),
-                mask_summary={
-                    "coverage_percentage": mask_stats["coverage_percentage"],
-                    "dimensions": [mask_stats["width"], mask_stats["height"]],
-                },
-            )
-            logger.error(f"Inpaint request [{request_id}] failed: {model_err}")
-            raise
+        # Primary call via Google GenAI Interactions API with 4K resolution
+        input_items = [
+            to_interaction_image_input(image_bytes, optimize=True),
+            to_interaction_image_input(mask_bytes, optimize=True),
+            {"type": "text", "text": spatial_prompt.strip()},
+        ]
+        response_format = {
+            "type": "image",
+            "aspect_ratio": norm_aspect,
+            "image_size": "4K",
+        }
 
         output_image_bytes = None
         finish_reason = None
         text_notes = []
+        usage_dict = {"prompt_token_count": 258 * 2 + max(len(prompt) // 4, 60), "candidates_token_count": 0, "total_token_count": 258 * 2 + max(len(prompt) // 4, 60)}
 
-        if response.candidates and response.candidates[0].content:
-            candidate = response.candidates[0]
-            finish_reason = getattr(candidate, "finish_reason", None)
-            if candidate.content and candidate.content.parts:
-                for part in candidate.content.parts:
-                    if getattr(part, "inline_data", None) and part.inline_data.data:
-                        output_image_bytes = part.inline_data.data
-                        break
-                    elif hasattr(part, "as_image") and callable(part.as_image):
-                        try:
-                            img_obj = part.as_image()
-                            if img_obj:
-                                buf = io.BytesIO()
-                                img_obj.save(buf, format="PNG")
-                                output_image_bytes = buf.getvalue()
+        try:
+            interaction = await self._execute_with_retry(
+                self.client.interactions.create,
+                model=self.inpaint_model_name,
+                input=input_items,
+                response_format=response_format,
+            )
+            if getattr(interaction, "output_image", None) and interaction.output_image and getattr(interaction.output_image, "data", None):
+                output_image_bytes = base64.b64decode(interaction.output_image.data)
+            elif hasattr(interaction, "steps"):
+                for step in getattr(interaction, "steps", []):
+                    if getattr(step, "type", None) == "model_output":
+                        for block in getattr(step, "content", []):
+                            if getattr(block, "type", None) == "image" and getattr(block, "data", None):
+                                output_image_bytes = base64.b64decode(block.data)
                                 break
-                        except Exception:
-                            pass
-                    if getattr(part, "text", None):
-                        text_notes.append(part.text)
+                            elif getattr(block, "type", None) == "text" and getattr(block, "text", None):
+                                text_notes.append(block.text)
+                    elif getattr(step, "type", None) == "thought":
+                        for block in getattr(step, "summary", []):
+                            if getattr(block, "type", None) == "text" and getattr(block, "text", None):
+                                text_notes.append(block.text)
+
+            if hasattr(interaction, "usage") and interaction.usage:
+                usage_dict = {
+                    "prompt_token_count": getattr(interaction.usage, "prompt_tokens", None) or getattr(interaction.usage, "input_tokens", None) or usage_dict["prompt_token_count"],
+                    "candidates_token_count": getattr(interaction.usage, "candidates_tokens", None) or getattr(interaction.usage, "output_tokens", None) or 0,
+                    "total_tokens": getattr(interaction.usage, "total_tokens", None) or usage_dict["total_token_count"],
+                    "total_token_count": getattr(interaction.usage, "total_tokens", None) or usage_dict["total_token_count"],
+                }
+        except Exception as interaction_err:
+            logger.warning(f"Interactions API inpaint call encountered: {interaction_err}. Trying generate_content fallback...")
+            # Fallback to generate_content
+            contents = [base_image, mask_image, spatial_prompt]
+            image_config = None
+            if hasattr(types, "ImageConfig"):
+                valid_ratios = {"1:1", "3:4", "4:3", "9:16", "16:9", "2:3", "3:2", "4:5", "5:4", "21:9"}
+                target_ratio = norm_aspect if norm_aspect in valid_ratios else "1:1"
+                image_config = types.ImageConfig(aspect_ratio=target_ratio)
+
+            config = types.GenerateContentConfig(
+                response_modalities=["IMAGE", "TEXT"],
+                image_config=image_config,
+            )
+            try:
+                response = await self._execute_with_retry(
+                    self.client.models.generate_content,
+                    model=self.inpaint_model_name,
+                    contents=contents,
+                    config=config,
+                )
+                if response.candidates and response.candidates[0].content:
+                    candidate = response.candidates[0]
+                    finish_reason = getattr(candidate, "finish_reason", None)
+                    if candidate.content and candidate.content.parts:
+                        for part in candidate.content.parts:
+                            if getattr(part, "inline_data", None) and part.inline_data.data:
+                                output_image_bytes = part.inline_data.data
+                                break
+                            elif hasattr(part, "as_image") and callable(part.as_image):
+                                try:
+                                    img_obj = part.as_image()
+                                    if img_obj:
+                                        buf = io.BytesIO()
+                                        img_obj.save(buf, format="PNG")
+                                        output_image_bytes = buf.getvalue()
+                                        break
+                                except Exception:
+                                    pass
+                            if getattr(part, "text", None):
+                                text_notes.append(part.text)
+                extracted_u = extract_usage_metadata(response)
+                if extracted_u.get("total_token_count", 0) > 0:
+                    usage_dict = extracted_u
+            except Exception as fallback_err:
+                self._audit(
+                    "inpaint_error",
+                    request_id,
+                    parent_id=parent_id,
+                    error=repr(fallback_err),
+                    mask_summary={
+                        "coverage_percentage": mask_stats["coverage_percentage"],
+                        "dimensions": [mask_stats["width"], mask_stats["height"]],
+                    },
+                )
+                logger.error(f"Inpaint request [{request_id}] failed: {fallback_err}")
+                raise fallback_err
 
         if not output_image_bytes:
             reason_msg = f" Finish reason: {finish_reason}." if finish_reason else ""
@@ -1787,9 +2018,19 @@ class GenerationService:
         mask_filepath = os.path.join(gen_dir, mask_filename)
 
         # Save both master output image (processed to 4K) and the mask artifact to disk
-        width, height = self._process_and_save_image(output_image_bytes, filepath, aspect_ratio)
+        width, height = self._process_and_save_image(output_image_bytes, filepath, eff_aspect_ratio)
         with open(mask_filepath, "wb") as f:
             f.write(mask_bytes)
+
+        cost_info = calculate_cost(self.inpaint_model_name, prompt_tokens=usage_dict["prompt_token_count"], candidates_tokens=usage_dict["candidates_token_count"], images_count=1)
+        cost_usd = float(cost_info.get("cost_usd", 0.0))
+        tokens = int(cost_info.get("total_tokens", 0))
+
+        parent_rec = await self.db.get_generation(parent_id) if parent_id else None
+        parent_accum_cost = float(parent_rec.get("accumulated_cost_usd", 0.0)) if parent_rec else 0.0
+        parent_accum_tokens = int(parent_rec.get("accumulated_tokens", 0)) if parent_rec else 0
+        accum_cost = round(parent_accum_cost + cost_usd, 6)
+        accum_tokens = parent_accum_tokens + tokens
 
         # Structured audit of successful response and mask artifact
         self._audit(
@@ -1808,6 +2049,10 @@ class GenerationService:
                 "coverage_percentage": mask_stats["coverage_percentage"],
             },
             duration_ms=duration_ms,
+            cost_usd=cost_usd,
+            cumulative_cost_usd=accum_cost,
+            tokens=usage_dict,
+            cumulative_tokens=accum_tokens,
         )
 
         inpaint_meta = {
@@ -1817,12 +2062,12 @@ class GenerationService:
             "mask_url": f"/api/images/{mask_filename}",
             "mask_path": mask_filepath,
             "mask_stats": mask_stats,
-            "model": "gemini-3-pro-image",
+            "model": self.inpaint_model_name,
         }
         updated_state = dict(saved_state) if isinstance(saved_state, dict) else {}
         updated_state["inpaint_metadata"] = inpaint_meta
-        updated_state["model_name"] = "gemini-3-pro-image"
-        updated_state["inpaint_model"] = "gemini-3-pro-image"
+        updated_state["model_name"] = self.inpaint_model_name
+        updated_state["inpaint_model"] = self.inpaint_model_name
 
         record = {
             "id": child_id,
@@ -1835,16 +2080,20 @@ class GenerationService:
             "negative_prompt": neg_prompt,
             "seed": active_seed,
             "master_image_path": filepath,
-            "aspect_ratio": aspect_ratio,
+            "aspect_ratio": eff_aspect_ratio,
             "resolution_width": width,
             "resolution_height": height,
-            "model_name": "gemini-3-pro-image",
+            "model_name": self.inpaint_model_name,
+            "cost_usd": cost_usd,
+            "tokens": tokens,
+            "accumulated_cost_usd": accum_cost,
+            "accumulated_tokens": accum_tokens,
         }
         await self.db.create_generation(record)
         logger.info(
             f"Inpaint generation [{child_id}] completed in {duration_ms}ms: "
             f"master saved at {filepath}, mask artifact saved at {mask_filepath} "
-            f"(coverage={mask_stats['coverage_percentage']}%)"
+            f"(aspect={eff_aspect_ratio}, coverage={mask_stats['coverage_percentage']}%, cost=${cost_usd:.4f}, total_lineage=${accum_cost:.4f})"
         )
 
         return {
@@ -1857,8 +2106,12 @@ class GenerationService:
             "mask_url": f"/api/images/{mask_filename}",
             "mask_stats": mask_stats,
             "created_at": created_at,
-            "aspect_ratio": aspect_ratio,
+            "aspect_ratio": eff_aspect_ratio,
             "resolution": {"width": width, "height": height},
+            "cost_usd": cost_usd,
+            "tokens": tokens,
+            "accumulated_cost_usd": accum_cost,
+            "accumulated_tokens": accum_tokens,
         }
 
 
@@ -1894,6 +2147,16 @@ class GenerationService:
 
         width, height = self._process_and_save_image(image_bytes, filepath, aspect_ratio)
 
+        last_metrics = getattr(self, "_last_call_metrics", None) or calculate_cost(self.model_name, images_count=1)
+        cost_usd = float(last_metrics.get("cost_usd", 0.0))
+        tokens = int(last_metrics.get("total_tokens", 0))
+
+        parent_rec = await self.db.get_generation(parent_id) if parent_id else None
+        parent_accum_cost = float(parent_rec.get("accumulated_cost_usd", 0.0)) if parent_rec else 0.0
+        parent_accum_tokens = int(parent_rec.get("accumulated_tokens", 0)) if parent_rec else 0
+        accum_cost = round(parent_accum_cost + cost_usd, 6)
+        accum_tokens = parent_accum_tokens + tokens
+
         record = {
             "id": gen_id,
             "parent_id": parent_id,
@@ -1908,6 +2171,10 @@ class GenerationService:
             "aspect_ratio": aspect_ratio,
             "resolution_width": width,
             "resolution_height": height,
+            "cost_usd": cost_usd,
+            "tokens": tokens,
+            "accumulated_cost_usd": accum_cost,
+            "accumulated_tokens": accum_tokens,
         }
         await self.db.create_generation(record)
         logger.info(f"Legacy generation {gen_id} saved successfully.")
@@ -1921,4 +2188,8 @@ class GenerationService:
             "master_image_path": filepath,
             "aspect_ratio": aspect_ratio,
             "resolution": {"width": width, "height": height},
+            "cost_usd": cost_usd,
+            "tokens": tokens,
+            "accumulated_cost_usd": accum_cost,
+            "accumulated_tokens": accum_tokens,
         }

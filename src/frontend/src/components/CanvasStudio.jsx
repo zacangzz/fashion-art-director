@@ -23,6 +23,7 @@ export default function CanvasStudio({
   imageUrl = null,
   generationId = null,
   activeSeed = 4289102,
+  aspectRatio = null,
   onEditComplete,
   onSwitchToGraph,
   onOpenHistory,
@@ -238,6 +239,7 @@ export default function CanvasStudio({
         maskBlob: maskBlob,
         prompt: prompt.trim(),
         seed: activeSeed,
+        aspectRatio: aspectRatio || undefined,
       });
 
       if (onEditComplete) {

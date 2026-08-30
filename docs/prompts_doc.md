@@ -23,6 +23,7 @@ The application operates across a **4-Step Sequential Studio Architecture** with
 │ ├─ 2A. Conversational Natural Language Refinement (refinement_system.txt + parent image)         │
 │ ├─ 2B. Seed-Locked Fine-Tuning with Tag Delta Compiler (compile_delta_prompt + parent image)      │
 │ ├─ 2C. Wardrobe Lookbook Sheet Auto-Segmentation (wardrobe_segmentation.txt + sheet image)       │
+│ ├─ 2C.2 AI Garment Detail Upscaling (garment_upscale_system.txt + crop image)                   │
 │ ├─ 2D. Vision Subject Grounding Pre-Pass (subject_grounding_system.txt + pin coordinates)       │
 │ ├─ 2E. Multi-Garment Wardrobe Composition (wardrobe_composition_system.txt + N garment images)   │
 │ └─ 2F. Clothing Region Detection for Auto-Masking (clothing_region_detection.txt + scene image)  │
@@ -52,8 +53,9 @@ The application operates across a **4-Step Sequential Studio Architecture** with
 | **2A** | **Conversational Refinement** | `src/app/prompts/refinement_system.txt`<br>`src/app/prompts/image_generation_suffix.txt` | `generate_content`<br>`gemini-3-pro-image` | `contents = [ImagePart(parent_bytes), f"{REFINEMENT_SYSTEM_PROMPT} {suffix}"]` | Single refined image bytes with seed lock |
 | **2B** | **Tag Delta Fine-Tuning** | `src/app/services/generation_service.py`<br>`src/frontend/src/utils/promptCompiler.js` | `generate_content`<br>`gemini-3-pro-image` | `contents = [ImagePart(parent_bytes), f"{compile_delta_prompt()} {suffix}"]` | Single fine-tuned image bytes with locked category anchors |
 | **2C** | **Wardrobe Sheet Segmentation** | `src/app/prompts/wardrobe_segmentation.txt` | `generate_content`<br>`gemini-3.5-flash-lite` | `contents = [ImagePart(sheet_bytes), WARDROBE_SEGMENTATION_PROMPT]`<br>`config`: `temperature=0.0`, `response_schema=WardrobeSegmentationResult` | JSON array of detected garments with label, category, and `[ymin, xmin, ymax, xmax]` 0..1000 |
+| **2C.2** | **AI Garment Detail Upscaling** | `src/app/prompts/garment_upscale_system.txt`<br>`src/app/services/wardrobe_service.py` | `generate_content`<br>`gemini-3-pro-image` | `contents = [ImagePart(crop_bytes), f"{GARMENT_UPSCALE_SYSTEM_PROMPT} {suffix}"]` | High-definition studio garment PNG bytes (600 DPI) for UI and downstream composition |
 | **2D** | **Vision Subject Grounding Pre-Pass** | `src/app/prompts/subject_grounding_system.txt`<br>`src/app/services/wardrobe_service.py` | `generate_content`<br>`gemini-3.5-flash-lite` | `contents = [ImagePart(parent_bytes), pin_text, SUBJECT_GROUNDING_PROMPT]` | JSON object: `grounded_pins` (subject, body location, attire) + non-target guardrail |
-| **2E** | **Multi-Garment Wardrobe Composition** | `src/app/prompts/wardrobe_composition_system.txt`<br>`src/app/services/generation_service.py` | `generate_content`<br>`gemini-3-pro-image` | Multi-image contents array:<br>`[ImagePart(parent), "Base Scene...", "Garment #1:", ImagePart(g1), ..., WARDROBE_COMPOSITION_PROMPT, suffix]` | Single composited image bytes with garment transfer & multi-subject invariance |
+| **2E** | **Multi-Garment Wardrobe Composition** | `src/app/prompts/wardrobe_composition_system.txt`<br>`src/app/services/generation_service.py` | `generate_content`<br>`gemini-3-pro-image` | Multi-image contents array:<br>`[ImagePart(parent), "Base Scene...", "Garment #1:", ImagePart(upscaled_g1), ..., WARDROBE_COMPOSITION_PROMPT, suffix]` | Single composited image bytes with garment transfer & multi-subject invariance |
 | **2F** | **Clothing Region Detection (Auto-Mask)** | `src/app/prompts/clothing_region_detection.txt` | `generate_content`<br>`gemini-3.5-flash-lite` | `contents = [ImagePart(scene_bytes), CLOTHING_REGION_DETECTION_PROMPT]`<br>`config`: `response_schema=ClothingRegionDetectionResult` | JSON array of clothing regions with normalized float bboxes for interactive canvas overlay |
 | **3** | **Canvas Studio Spatial Inpainting** | `src/app/prompts/inpaint_system.txt`<br>`src/app/prompts/inpaint_suffix.txt` | `generate_content`<br>`gemini-3-pro-image` | `contents = [PIL.Image(base), PIL.Image(mask), f"{INPAINT_SYSTEM_PROMPT}\n\n{INPAINT_SUFFIX}"]`<br>`config`: `response_modalities=["IMAGE", "TEXT"]` | Single inpainted image bytes strictly preserving pixels outside white mask |
 | **4** | **Export Master AI Restoration** | `src/app/services/export_service.py` (`DEFAULT_UPSCALE_PROMPT`) | `generate_content`<br>`gemini-3-pro-image` | `contents = [ImagePart(source_bytes), f"{DEFAULT_UPSCALE_PROMPT} {suffix}"]` | Enhanced 4K master image bytes with 600 DPI optical definition & fabric micro-texture |
@@ -541,6 +543,64 @@ Detection & Segmentation Guidelines:
    - Provide clear, descriptive titles indicating color, material, and garment type (e.g. "Camel Wool Overcoat", "White Cotton T-Shirt", "Indigo Raw Denim Jeans", "White Leather Low-Top Sneakers", "Black Leather Crossbody Bag").
 
 Output format must be valid JSON adhering strictly to the schema with an "items" array.
+```
+
+---
+
+### 4.3.2. Step 2C.2: AI Garment Detail Upscaling & Texture Restoration
+
+Immediately following raw crop segmentation, `WardrobeService.upscale_garment_background` runs an asynchronous background detail enhancement pass using Gemini Image Model (`gemini-3-pro-image`) to synthesize high-frequency fabric weaves, stitching, seams, and hardware on a clean studio backdrop.
+
+* **API Method**: `client.models.generate_content` / `client.interactions.create`
+* **Target Model**: `gemini-3-pro-image` (or user-selected image model)
+* **Configuration**: `image_size="4K"`, `aspect_ratio="1:1"`, `negative_prompt` filtering
+* **Source File**: `src/app/prompts/garment_upscale_system.txt`
+
+#### Wire Payload Sent to API:
+```python
+prompt_text = GARMENT_UPSCALE_SYSTEM_PROMPT.replace("{LABEL}", label).replace("{CATEGORY}", category)
+suffix = IMAGE_GENERATION_SUFFIX.format(
+    RESOLUTION="2048x2048",
+    ASPECT_RATIO="1:1",
+    SEED=4289102,
+    NEGATIVE_PROMPT="blurry, low quality, artifacts, watermark, text, distorted, cropped, cut off, noise, jpeg artifacts, duplicate limbs, mannequin head, face",
+)
+full_prompt = f"{prompt_text} {suffix}"
+
+contents = [
+    to_image_part(crop_image_bytes),
+    full_prompt
+]
+```
+
+#### Verbatim Garment Upscaling Prompt (`garment_upscale_system.txt`):
+```text
+You are an elite fashion catalog retoucher, studio product photographer, and garment detail restoration specialist.
+You will receive a cropped reference image of an individual garment piece (clothing, outerwear, top, bottom, footwear, or accessory).
+
+Your task:
+Generate a high-definition, studio-quality photographic master of this exact garment with 600 DPI museum-grade optical definition and authentic physical micro-textures.
+
+Directives:
+1. Exact Garment Fidelity:
+   - Faithfully preserve the specific garment's design, cut, silhouette, color hue, pattern, fabric weight, and proportions from the reference crop.
+   - Do NOT redesign or alter the core clothing piece.
+
+2. Micro-Texture & Material Restoration:
+   - Sharply resolve and render authentic high-frequency material textures: natural fabric weave, knit gauge, fine stitching, tailored seam lines, zipper teeth, metal buttons, leather grain, embroidery, and subtle natural drapery folds.
+   - Strictly prevent plastic skin, artificial airbrushing, waxy smoothing, or blurred/smudged textures.
+
+3. Clean Studio Isolation:
+   - Present the garment cleanly and prominently on a neutral, seamless, soft-lit studio backdrop (soft off-white, neutral grey, or studio surface) free of distracting background artifacts, clutter, or disembodied limbs from the original crop.
+   - If the crop contains parts of a model's body or adjacent clothing, isolate and focus purely on the target garment piece in a clean catalog/lookbook studio presentation.
+
+4. Lighting & Optics:
+   - Illuminate with balanced, high-end commercial fashion studio lighting featuring soft directional falloff, authentic specular highlights on hardware/fabrics, and subtle contact shadows.
+   - Maintain crisp 1:1 optical clarity across the entire garment.
+
+GARMENT SPECIFICATION:
+- Label: {LABEL}
+- Category: {CATEGORY}
 ```
 
 ---

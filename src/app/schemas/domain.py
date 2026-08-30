@@ -177,6 +177,10 @@ class GenerationRecordResponse(BaseModel):
     resolution_width: int = 3840
     resolution_height: int = 3840
     model_name: Optional[str] = None
+    cost_usd: float = 0.0
+    tokens: int = 0
+    accumulated_cost_usd: float = 0.0
+    accumulated_tokens: int = 0
 
 
 class InpaintResponse(BaseModel):
@@ -191,7 +195,10 @@ class InpaintResponse(BaseModel):
     created_at: str
     aspect_ratio: Optional[str] = None
     resolution: Optional[Dict[str, int]] = None
-
+    cost_usd: Optional[float] = 0.0
+    tokens: Optional[int] = 0
+    accumulated_cost_usd: Optional[float] = 0.0
+    accumulated_tokens: Optional[int] = 0
 
 
 class HistoryResponse(BaseModel):
@@ -230,6 +237,10 @@ class RefinementResponse(BaseModel):
     aspect_ratio: Optional[str] = None
     resolution: Optional[Dict[str, int]] = None
     conversation_id: Optional[str] = None
+    cost_usd: Optional[float] = 0.0
+    tokens: Optional[int] = 0
+    accumulated_cost_usd: Optional[float] = 0.0
+    accumulated_tokens: Optional[int] = 0
 
 
 class ConversationMessage(BaseModel):
@@ -333,6 +344,10 @@ class GenerationResponse(BaseModel):
     seed: int
     master_image_url: str
     resolution: Resolution
+    cost_usd: Optional[float] = 0.0
+    tokens: Optional[int] = 0
+    accumulated_cost_usd: Optional[float] = 0.0
+    accumulated_tokens: Optional[int] = 0
 
 
 # ==============================================================================
@@ -373,14 +388,33 @@ class ClothingRegionDetectionResult(BaseModel):
     )
 
 
+class GarmentExtractedDetails(BaseModel):
+    garment_type: Optional[str] = Field(default=None, description="Specific clothing type (e.g. T-Shirt, Hoodie, Jeans)")
+    primary_color: Optional[str] = Field(default=None, description="Dominant primary color hue")
+    secondary_colors: List[str] = Field(default_factory=list, description="Secondary accent colors or trim colors")
+    fabric_texture: Optional[str] = Field(default=None, description="Material weave, weight, and fabric texture")
+    has_graphic_or_print: bool = Field(default=False, description="Whether the garment features graphic artwork, illustrations, or patterns")
+    has_text_or_logo: bool = Field(default=False, description="Whether visible text, slogans, or logos appear on the garment")
+    exact_text_content: List[str] = Field(default_factory=list, description="Exact transcription of all letters, numbers, and slogans visible on the garment")
+    graphic_description: Optional[str] = Field(default=None, description="Detailed description of graphic art, symbols, illustrations, or distressed print effects")
+    logo_and_print_placement: Optional[str] = Field(default=None, description="Anatomical placement (e.g. Center chest, Left breast pocket, Full back)")
+    hardware_and_details: Optional[str] = Field(default=None, description="Hardware details such as buttons, zippers, drawstrings, distress, stitching")
+
+
 class GarmentCard(BaseModel):
     id: str
     label: str
     category: Optional[str] = "tops"
     image_url: str
+    upscaled_image_url: Optional[str] = None
     source_image_url: Optional[str] = None
     bbox: Optional[List[float]] = None
+    extracted_details: Optional[Union[GarmentExtractedDetails, Dict[str, Any]]] = None
     created_at: Optional[str] = None
+    upscale_status: Optional[str] = "pending"
+    is_upscaled: bool = False
+    cost_usd: float = 0.0
+    tokens: int = 0
 
 
 class WardrobeUploadResponse(BaseModel):
@@ -420,7 +454,7 @@ class WardrobeComposeRequest(BaseModel):
     assignments: List[CompositionPinAssignment] = Field(default_factory=list)
     seed_mode: str = "locked"
     seed: int = 4289102
-    aspect_ratio: Optional[str] = "2:3"
+    aspect_ratio: Optional[str] = None
     negative_prompt: Optional[str] = None
     conversation_id: Optional[str] = None
     custom_instruction: Optional[str] = None
@@ -436,7 +470,12 @@ class WardrobeComposeResponse(BaseModel):
     negative_prompt: str
     image_url: str
     created_at: str
+    aspect_ratio: Optional[str] = "2:3"
     resolution: Optional[Dict[str, int]] = None
     conversation_id: Optional[str] = None
     assignments: List[CompositionPinAssignment] = Field(default_factory=list)
+    cost_usd: Optional[float] = 0.0
+    tokens: Optional[int] = 0
+    accumulated_cost_usd: Optional[float] = 0.0
+    accumulated_tokens: Optional[int] = 0
 

@@ -181,6 +181,50 @@ describe('HistoryDrawer', () => {
     const naElements = screen.getAllByText('N/A');
     expect(naElements.length).toBe(2);
   });
+
+  it('renders accumulated lineage cost and step cost breakdown', () => {
+    const costHistory = [
+      {
+        id: 'gen_base_1',
+        is_baseline: true,
+        seed: 12345,
+        master_image_url: '/api/images/gen_base_1.png',
+        compiled_prompt: 'baseline prompt',
+        created_at: '2026-08-24T00:00:00Z',
+        cost_usd: 0.04,
+        tokens: 120,
+        accumulated_cost_usd: 0.04,
+        accumulated_tokens: 120,
+        model_name: 'gemini-3-pro-image',
+      },
+      {
+        id: 'gen_iter_2',
+        is_baseline: false,
+        seed: 12345,
+        master_image_url: '/api/images/gen_iter_2.png',
+        compiled_prompt: 'iteration prompt',
+        created_at: '2026-08-24T00:05:00Z',
+        cost_usd: 0.0402,
+        tokens: 150,
+        accumulated_cost_usd: 0.0802,
+        accumulated_tokens: 270,
+        model_name: 'gemini-3-pro-image',
+      },
+    ];
+
+    render(
+      <HistoryDrawer
+        isOpen={true}
+        history={costHistory}
+        activeGenerationId="gen_iter_2"
+        onClose={() => {}}
+      />
+    );
+
+    expect(screen.getByText('$0.0400')).toBeInTheDocument();
+    expect(screen.getByText('$0.0802')).toBeInTheDocument();
+    expect(screen.getByText('(+$0.0402)')).toBeInTheDocument();
+  });
 });
 
 

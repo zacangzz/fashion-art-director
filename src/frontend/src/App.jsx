@@ -9,7 +9,6 @@ import {
   AlertCircle,
   X,
   Activity,
-  ExternalLink,
   Eye,
   Cpu,
 } from 'lucide-react';
@@ -44,7 +43,7 @@ import {
 } from './services/apiClient';
 
 export default function App() {
-  // 4-Step Sequential Workflow: 1: Art Direction, 2: Refinement, 3: Canvas, 4: Export
+  // 5-Step Sequential Workflow: 1: Art Direction, 2: Refinement, 3: Canvas, 4: Wardrobe, 5: Export
   const [currentStep, setCurrentStep] = useState(1);
 
   // Model Selection state
@@ -526,7 +525,7 @@ export default function App() {
         })),
         seed: effSeed,
         seed_mode: seedMode,
-        aspect_ratio: aspectRatio,
+        aspect_ratio: generationResult?.aspect_ratio || activeBaseline?.aspect_ratio || aspectRatio,
         conversation_id: conversationId,
         custom_instruction: customInstruction,
         imagen_model: imagenModel,
@@ -539,7 +538,7 @@ export default function App() {
         setPreviousGenerationResult(generationResult);
       }
 
-      const effRatio = result.aspect_ratio || aspectRatio;
+      const effRatio = result.aspect_ratio || generationResult?.aspect_ratio || activeBaseline?.aspect_ratio || aspectRatio;
       const nextGen = {
         generation_id: result.generation_id,
         master_image_url: result.image_url,
@@ -720,7 +719,7 @@ export default function App() {
     }
 
     setIsHistoryOpen(false);
-    if (currentStep === 1 || currentStep === 4) {
+    if (currentStep === 1 || currentStep === 5) {
       setCurrentStep(2);
     }
   };
@@ -749,10 +748,10 @@ export default function App() {
           <div className="header-logo">
             <Sparkles size={20} />
           </div>
-          <span className="header-title">Image Gen Pipeline Studio</span>
+          <span className="header-title">Fashion AI</span>
         </div>
 
-        {/* 4-Step Sequential Workflow Navigator */}
+        {/* 5-Step Sequential Workflow Navigator */}
         <div className="step-nav-bar">
           <button
             type="button"
@@ -790,6 +789,16 @@ export default function App() {
             disabled={!hasActiveImage}
           >
             <span className="step-num">4</span>
+            <span>Wardrobe</span>
+          </button>
+
+          <button
+            type="button"
+            className={`step-nav-btn ${currentStep === 5 ? 'active' : ''}`}
+            onClick={() => setCurrentStep(5)}
+            disabled={!hasActiveImage}
+          >
+            <span className="step-num">5</span>
             <span>Export</span>
           </button>
         </div>
@@ -798,12 +807,12 @@ export default function App() {
         <div className="header-actions">
           <div className="model-selectors-container">
             <div className="model-selector-chip" title="Vision Model for Analysis, Directing & Pin Grounding">
-              <Eye size={12} className="text-cyan-400 shrink-0" />
-              <span className="model-selector-chip-label">Vision</span>
+              <Eye size={13} className="text-cyan-400 shrink-0" />
               <select
                 className="model-select-input"
                 value={visionModel}
                 onChange={(e) => handleVisionModelChange(e.target.value)}
+                aria-label="Vision Model"
               >
                 {modelConfig.available_vision_models.map((m) => (
                   <option key={m} value={m}>
@@ -814,12 +823,12 @@ export default function App() {
             </div>
 
             <div className="model-selector-chip" title="Image Model for Baselines, Fine-Tuning & Refinement">
-              <Cpu size={12} className="text-amber-400 shrink-0" />
-              <span className="model-selector-chip-label">Imagen</span>
+              <Cpu size={13} className="text-amber-400 shrink-0" />
               <select
                 className="model-select-input"
                 value={imagenModel}
                 onChange={(e) => handleImagenModelChange(e.target.value)}
+                aria-label="Image Generation Model"
               >
                 {modelConfig.available_imagen_models.map((m) => (
                   <option key={m} value={m}>
@@ -830,26 +839,28 @@ export default function App() {
             </div>
           </div>
 
-          <a
-            href="/telemetry"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="btn-secondary btn-sm"
-            title="Open Studio Observability, Telemetry & Database in a separate tab"
-          >
-            <Activity size={14} className="text-indigo-400" />
-            <span>Observability & Logs</span>
-            <ExternalLink size={11} className="opacity-60" />
-          </a>
+          <div className="nav-utilities-container">
+            <a
+              href="/telemetry"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="nav-utility-btn"
+              title="Studio Observability, Telemetry & Logs"
+              aria-label="Observability & Logs"
+            >
+              <Activity size={18} className="text-indigo-400" />
+            </a>
 
-          <button
-            type="button"
-            className="btn-secondary btn-sm"
-            onClick={() => setIsHistoryOpen(true)}
-          >
-            <HistoryIcon size={14} />
-            <span>Lineage History ({history.length})</span>
-          </button>
+            <button
+              type="button"
+              className="nav-utility-btn"
+              onClick={() => setIsHistoryOpen(true)}
+              title={`Lineage History (${history.length})`}
+              aria-label="Lineage History"
+            >
+              <HistoryIcon size={18} className="text-slate-300" />
+            </button>
+          </div>
         </div>
       </header>
 
@@ -948,8 +959,8 @@ export default function App() {
         )}
 
         {currentStep === 2 && (
-          /* Step 2: Refinement Chat + Master Viewport + Optional Wardrobe Studio Panel */
-          <div className={`workspace-grid ${isWardrobeOpen ? 'with-wardrobe-panel' : ''}`}>
+          /* Step 2: Refinement Chat + Master Viewport */
+          <div className="workspace-grid">
             <div className="workspace-left-column">
               <RefinementChat
                 conversationMessages={conversationMessages}
@@ -961,8 +972,8 @@ export default function App() {
                 onSeedChange={setActiveSeed}
                 activeGenerationId={generationResult?.generation_id}
                 onSelectMessage={handleSelectMessage}
-                onToggleWardrobe={() => setIsWardrobeOpen(!isWardrobeOpen)}
-                isWardrobeOpen={isWardrobeOpen}
+                onToggleWardrobe={() => setCurrentStep(4)}
+                isWardrobeOpen={false}
                 assignmentCount={wardrobeAssignments.length}
               />
             </div>
@@ -993,27 +1004,10 @@ export default function App() {
                   onDropGarment={handleAddWardrobeAssignment}
                   onRemovePin={handleRemoveWardrobeAssignment}
                   onUpdatePinPosition={handleUpdateWardrobePosition}
-                  isWardrobeMode={isWardrobeOpen}
+                  isWardrobeMode={false}
                 />
               </div>
             </div>
-
-            {isWardrobeOpen && (
-              <div className="workspace-wardrobe-column">
-                <WardrobePanel
-                  isOpen={isWardrobeOpen}
-                  onClose={() => setIsWardrobeOpen(false)}
-                  assignments={wardrobeAssignments}
-                  onAddAssignment={handleAddWardrobeAssignment}
-                  onRemoveAssignment={handleRemoveWardrobeAssignment}
-                  onClearAssignments={handleClearWardrobeAssignments}
-                  onCompose={handleComposeWardrobe}
-                  isComposing={isComposingWardrobe}
-                  activeGenerationId={generationResult?.generation_id || activeBaseline?.id}
-                  visionModel={visionModel}
-                />
-              </div>
-            )}
           </div>
         )}
 
@@ -1025,6 +1019,7 @@ export default function App() {
                 imageUrl={generationResult?.master_image_url || activeBaseline?.image_url || null}
                 generationId={generationResult?.generation_id || activeBaseline?.id}
                 activeSeed={activeSeed}
+                aspectRatio={generationResult?.aspect_ratio || activeBaseline?.aspect_ratio || aspectRatio}
                 onEditComplete={handleInpaintComplete}
                 onSwitchToGraph={() => setCurrentStep(2)}
                 onOpenHistory={() => setIsHistoryOpen(true)}
@@ -1063,7 +1058,58 @@ export default function App() {
         )}
 
         {currentStep === 4 && (
-          /* Step 4: Dedicated Export Page */
+          /* Step 4: Dedicated Wardrobe Studio */
+          <div className="workspace-grid wardrobe-workspace-grid">
+            <div className="workspace-left-column">
+              <WardrobePanel
+                isOpen={true}
+                onClose={() => setCurrentStep(2)}
+                assignments={wardrobeAssignments}
+                onAddAssignment={handleAddWardrobeAssignment}
+                onRemoveAssignment={handleRemoveWardrobeAssignment}
+                onClearAssignments={handleClearWardrobeAssignments}
+                onCompose={handleComposeWardrobe}
+                isComposing={isComposingWardrobe}
+                activeGenerationId={generationResult?.generation_id || activeBaseline?.id}
+                visionModel={visionModel}
+              />
+            </div>
+
+            <div className="workspace-right-column">
+              <div className="workspace-viewport-wrapper">
+                <CanvasViewport
+                  imageUrl={generationResult?.master_image_url || activeBaseline?.image_url || null}
+                  beforeImageUrl={previousGenerationResult?.master_image_url || activeBaseline?.image_url || null}
+                  baselineImageUrl={activeBaseline?.image_url || null}
+                  beforeLabel={
+                    previousGenerationResult && previousGenerationResult.generation_id !== activeBaseline?.id
+                      ? 'Previous Output'
+                      : 'Baseline'
+                  }
+                  afterLabel="Wardrobe Output"
+                  isGenerating={isComposingWardrobe}
+                  isExporting={isExporting}
+                  generationResult={generationResult}
+                  previousGenerationResult={previousGenerationResult}
+                  activeSeed={activeSeed}
+                  seedMode={seedMode}
+                  onExportBundle={handleExportBundle}
+                  onOpenHistory={() => setIsHistoryOpen(true)}
+                  canGenerate={false}
+                  mode="wardrobe"
+                  wardrobeAssignments={wardrobeAssignments}
+                  onDropGarment={handleAddWardrobeAssignment}
+                  onRemovePin={handleRemoveWardrobeAssignment}
+                  onUpdatePinPosition={handleUpdateWardrobePosition}
+                  isWardrobeMode={true}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {currentStep === 5 && (
+          /* Step 5: Dedicated Export Page */
           <ExportStudio
             generationResult={generationResult}
             activeBaseline={activeBaseline}

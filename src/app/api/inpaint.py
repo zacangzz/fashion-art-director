@@ -21,6 +21,7 @@ async def inpaint_image(
     generation_id: Optional[str] = Form(None),
     negative_prompt: Optional[str] = Form(None),
     seed: Optional[int] = Form(None),
+    aspect_ratio: Optional[str] = Form(None),
 ):
     """
     Canvas Studio: Targeted inpainting using a source image, black & white mask, and natural language prompt.
@@ -54,6 +55,7 @@ async def inpaint_image(
             prompt=prompt.strip(),
             negative_prompt=negative_prompt,
             seed=seed,
+            aspect_ratio=aspect_ratio,
         )
         return InpaintResponse(**result)
     except Exception as exc:

@@ -9,6 +9,7 @@ from google.genai import types
 from app.schemas.domain import TagChip, TagCategory
 from app.utils.logger import get_logger
 from app.utils.telemetry import TelemetryLogger, get_current_request_id
+from app.utils.pricing import extract_usage_metadata, calculate_cost
 from app.utils.prompt_loader import (
     EXTRACTION_SYSTEM_PROMPT,
     USER_BASELINE_TEMPLATE,
@@ -259,6 +260,13 @@ class VisionService:
                         "recommendation": c.get("recommendation"),
                     })
 
+        usage_dict = extract_usage_metadata(response)
+        cost_info = calculate_cost(
+            model=active_model,
+            prompt_tokens=usage_dict["prompt_token_count"],
+            candidates_tokens=usage_dict["candidates_token_count"],
+        )
+
         self._audit(
             "vision_response",
             request_id,
@@ -267,6 +275,8 @@ class VisionService:
             extracted_narrative=extracted_narrative,
             categories_count={k: len(v) for k, v in categories_result.items()},
             conflicts_count=len(conflicts_result),
+            tokens=usage_dict,
+            cost_usd=cost_info["cost_usd"],
         )
 
         return {
@@ -275,6 +285,8 @@ class VisionService:
             "categories": categories_result,
             "locked_categories": list(locked_set),
             "conflicts": conflicts_result,
+            "tokens": usage_dict,
+            "cost_usd": cost_info["cost_usd"],
         }
 
     async def extract_scene_schema(
@@ -401,6 +413,13 @@ class VisionService:
                         "recommendation": c.get("recommendation"),
                     })
 
+        usage_dict = extract_usage_metadata(response)
+        cost_info = calculate_cost(
+            model=active_model,
+            prompt_tokens=usage_dict["prompt_token_count"],
+            candidates_tokens=usage_dict["candidates_token_count"],
+        )
+
         self._audit(
             "resync_prompt_response",
             request_id,
@@ -408,12 +427,16 @@ class VisionService:
             master_prompt=master_prompt,
             narrative=updated_narrative,
             conflicts_count=len(conflicts_result),
+            tokens=usage_dict,
+            cost_usd=cost_info["cost_usd"],
         )
 
         return {
             "master_prompt": master_prompt,
             "narrative": updated_narrative,
             "conflicts": conflicts_result,
+            "tokens": usage_dict,
+            "cost_usd": cost_info["cost_usd"],
         }
 
     async def check_prompt_conflicts(
@@ -478,8 +501,16 @@ class VisionService:
             categories_count={k: len(v) for k, v in clean_cats.items()},
         )
 
+        usage_dict = {"prompt_token_count": 0, "candidates_token_count": 0, "total_token_count": 0}
+        cost_info = {"cost_usd": 0.0}
         try:
             response = await self._generate_content_async(contents=contents, config=config, model=active_model)
+            usage_dict = extract_usage_metadata(response)
+            cost_info = calculate_cost(
+                model=active_model,
+                prompt_tokens=usage_dict["prompt_token_count"],
+                candidates_tokens=usage_dict["candidates_token_count"],
+            )
             raw_text = response.text or "{}"
             parsed = json.loads(raw_text)
         except Exception as exc:
@@ -505,6 +536,8 @@ class VisionService:
             request_id,
             model=active_model,
             conflicts_count=len(conflicts_result),
+            tokens=usage_dict,
+            cost_usd=cost_info["cost_usd"],
         )
 
         return conflicts_result

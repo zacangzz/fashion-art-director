@@ -54,16 +54,19 @@ def get_wardrobe_service() -> WardrobeService:
 @lru_cache()
 def get_generation_service() -> GenerationService:
     settings = get_settings()
-    return GenerationService(
+    ws = get_wardrobe_service()
+    gs = GenerationService(
         db_manager=get_db_manager(),
         api_key=settings.GEMINI_API_KEY,
         storage_dir=settings.STORAGE_DIR,
         model_name=settings.IMAGEN_MODEL,
         inpaint_model_name=settings.INPAINT_MODEL,
         audit_path=os.path.join(settings.STORAGE_DIR, "logs", "generation_audit.jsonl"),
-        wardrobe_service=get_wardrobe_service(),
+        wardrobe_service=ws,
         client=get_gemini_client(),
     )
+    ws.set_generation_service(gs)
+    return gs
 
 
 @lru_cache()

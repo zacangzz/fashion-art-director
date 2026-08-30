@@ -73,6 +73,11 @@ class TelemetryLogger:
         inputs: Optional[Dict[str, Any]] = None,
         outputs: Optional[Dict[str, Any]] = None,
         metrics: Optional[Dict[str, Any]] = None,
+        tokens: Optional[Dict[str, Any]] = None,
+        cost_usd: Optional[float] = None,
+        cumulative_cost_usd: Optional[float] = None,
+        cumulative_tokens: Optional[int] = None,
+        generation_id: Optional[str] = None,
         error: Optional[str] = None,
         **extra: Any,
     ) -> Dict[str, Any]:
@@ -107,6 +112,16 @@ class TelemetryLogger:
             record["outputs"] = outputs
         if metrics is not None:
             record["metrics"] = metrics
+        if tokens is not None:
+            record["tokens"] = tokens
+        if cost_usd is not None:
+            record["cost_usd"] = round(float(cost_usd), 6)
+        if cumulative_cost_usd is not None:
+            record["cumulative_cost_usd"] = round(float(cumulative_cost_usd), 6)
+        if cumulative_tokens is not None:
+            record["cumulative_tokens"] = int(cumulative_tokens)
+        if generation_id is not None:
+            record["generation_id"] = generation_id
         if error is not None:
             record["error"] = str(error)
 
@@ -252,6 +267,9 @@ def get_telemetry_summary_stats(
     events_by_component: Dict[str, int] = {}
     events_by_type: Dict[str, int] = {}
     latencies_by_model: Dict[str, List[float]] = {}
+    total_cost_usd = 0.0
+    total_tokens = 0
+    cost_by_component: Dict[str, float] = {}
     error_count = 0
 
     for ev in events:
@@ -261,6 +279,28 @@ def get_telemetry_summary_stats(
 
         events_by_component[comp] = events_by_component.get(comp, 0) + 1
         events_by_type[ev_type] = events_by_type.get(ev_type, 0) + 1
+
+        cost = ev.get("cost_usd")
+        if cost is not None:
+            try:
+                c_val = float(cost)
+                total_cost_usd += c_val
+                cost_by_component[comp] = cost_by_component.get(comp, 0.0) + c_val
+            except (ValueError, TypeError):
+                pass
+
+        toks = ev.get("tokens")
+        if isinstance(toks, dict):
+            t_val = toks.get("total_tokens") or toks.get("total_token_count") or 0
+            try:
+                total_tokens += int(t_val)
+            except (ValueError, TypeError):
+                pass
+        elif ev.get("total_tokens") is not None:
+            try:
+                total_tokens += int(ev["total_tokens"])
+            except (ValueError, TypeError):
+                pass
 
         if status == "error" or "error" in ev_type.lower():
             error_count += 1
@@ -282,6 +322,9 @@ def get_telemetry_summary_stats(
         "total_events": total_events,
         "error_count": error_count,
         "success_rate": round(((total_events - error_count) / total_events * 100), 1) if total_events > 0 else 100.0,
+        "total_cost_usd": round(total_cost_usd, 4),
+        "total_tokens": total_tokens,
+        "cost_by_component": {k: round(v, 4) for k, v in cost_by_component.items()},
         "components": events_by_component,
         "event_types": events_by_type,
         "average_latencies_ms": avg_latencies,

@@ -82,12 +82,15 @@ async def test_wardrobe_db_crud(test_db, dummy_image_bytes, tmp_path):
 
     # 6. Delete item
     deleted = await test_db.delete_wardrobe_item("wd_test_01")
-    assert deleted is True
+    assert bool(deleted) is True
 
-    # 7. Verify soft delete
+    # 7. Verify soft delete and cascaded assignment deletion
     fetched_after = await test_db.get_wardrobe_item("wd_test_01")
     assert fetched_after is None
     items_after = await test_db.list_wardrobe_items()
+    assert len(items_after) == 0
+    assignments_after = await test_db.list_composition_assignments("gen_test_01")
+    assert len(assignments_after) == 0
     assert len(items_after) == 0
 
 
@@ -189,21 +192,25 @@ async def test_wardrobe_service_gemini_1000_scale_coordinates(test_db, dummy_ima
 
 
 def test_wardrobe_api_endpoints():
-    client = TestClient(app)
+    mock_ws = MagicMock()
+    mock_ws.list_items = AsyncMock(return_value=[])
+    mock_ws.delete_all_items = AsyncMock(return_value=0)
+    with patch("app.api.wardrobe.wardrobe_service", mock_ws):
+        client = TestClient(app)
 
-    # 1. Test GET /api/wardrobe/items
-    resp = client.get("/api/wardrobe/items")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "items" in data
-    assert isinstance(data["items"], list)
+        # 1. Test GET /api/wardrobe/items
+        resp = client.get("/api/wardrobe/items")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "items" in data
+        assert isinstance(data["items"], list)
 
-    # 2. Test DELETE /api/wardrobe/items (bulk delete)
-    del_resp = client.delete("/api/wardrobe/items")
-    assert del_resp.status_code == 200
-    del_data = del_resp.json()
-    assert del_data["status"] == "deleted"
-    assert "count" in del_data
+        # 2. Test DELETE /api/wardrobe/items (bulk delete)
+        del_resp = client.delete("/api/wardrobe/items")
+        assert del_resp.status_code == 200
+        del_data = del_resp.json()
+        assert del_data["status"] == "deleted"
+        assert "count" in del_data
 
 
 @pytest.mark.asyncio
@@ -365,5 +372,287 @@ async def test_wardrobe_service_small_accessory_retention(test_db, dummy_image_b
     assert cards[0]["label"] == "Gold Aviator Sunglasses"
     assert cards[0]["category"] == "accessories"
     assert cards[0]["bbox"] == [0.1, 0.2, 0.115, 0.215]
+
+
+@pytest.mark.asyncio
+async def test_wardrobe_upscale_background_execution(test_db, dummy_image_bytes, tmp_path):
+    storage_dir = str(tmp_path / "storage")
+    os.makedirs(storage_dir, exist_ok=True)
+
+    mock_gen_service = MagicMock()
+    mock_gen_service._call_image_model = AsyncMock(return_value=dummy_image_bytes)
+
+    service = WardrobeService(
+        db_manager=test_db,
+        api_key="fake-key",
+        storage_dir=storage_dir,
+        generation_service=mock_gen_service,
+    )
+
+    # 1. Create item record
+    item_id = "item_upscale_test"
+    item_data = {
+        "id": item_id,
+        "source_image_path": str(tmp_path / "src.png"),
+        "label": "Cashmere Knit Sweater",
+        "category": "tops",
+        "cropped_image_path": str(tmp_path / "crop.png"),
+        "bbox_json": [0.2, 0.2, 0.8, 0.8],
+        "upscale_status": "pending",
+    }
+    await test_db.create_wardrobe_item(item_data)
+
+    # 2. Run background upscale
+    await service.upscale_garment_background(
+        item_id=item_id,
+        crop_bytes=dummy_image_bytes,
+        label="Cashmere Knit Sweater",
+        category="tops",
+    )
+
+    # 3. Verify item is updated to completed with upscaled_image_path
+    updated = await test_db.get_wardrobe_item(item_id)
+    assert updated is not None
+    assert updated["upscale_status"] == "completed"
+    assert updated["is_upscaled"] is True
+    assert updated["upscaled_image_path"] is not None
+    assert os.path.exists(updated["upscaled_image_path"])
+
+    # 4. List items returns upscaled url and status
+    cards = await service.list_items()
+    assert len(cards) == 1
+    assert cards[0]["id"] == item_id
+    assert cards[0]["upscale_status"] == "completed"
+    assert cards[0]["is_upscaled"] is True
+    assert f"/api/wardrobe/items/{item_id}/upscaled-image" in cards[0]["upscaled_image_url"]
+
+
+@pytest.mark.asyncio
+async def test_wardrobe_feature_extraction(test_db, dummy_image_bytes, tmp_path):
+    storage_dir = str(tmp_path / "storage")
+    service = WardrobeService(
+        db_manager=test_db,
+        api_key="fake-key",
+        storage_dir=storage_dir,
+    )
+
+    mock_response = MagicMock()
+    mock_response.text = json.dumps({
+        "garment_type": "Vintage Graphic T-Shirt",
+        "primary_color": "Faded Black",
+        "secondary_colors": ["Sunset Orange", "Cream"],
+        "fabric_texture": "Washed heavy jersey cotton",
+        "has_graphic_or_print": True,
+        "has_text_or_logo": True,
+        "exact_text_content": ["RETRO SURF", "1984"],
+        "graphic_description": "Distressed sunburst and ocean wave motif",
+        "logo_and_print_placement": "Center chest",
+        "hardware_and_details": "Ribbed crewneck collar",
+    })
+    service.client.models.generate_content = MagicMock(return_value=mock_response)
+
+    details = await service.extract_garment_features(
+        crop_bytes=dummy_image_bytes,
+        label="Graphic T-Shirt",
+        category="tops",
+    )
+
+    assert details["has_text_or_logo"] is True
+    assert details["has_graphic_or_print"] is True
+    assert "RETRO SURF" in details["exact_text_content"]
+    assert details["logo_and_print_placement"] == "Center chest"
+
+
+@pytest.mark.asyncio
+async def test_wardrobe_composition_with_graphic_locks(test_db, dummy_image_bytes, tmp_path):
+    storage_dir = str(tmp_path / "storage")
+    os.makedirs(storage_dir, exist_ok=True)
+    gen_dir = os.path.join(storage_dir, "generations")
+    os.makedirs(gen_dir, exist_ok=True)
+
+    # 1. Create parent generation
+    parent_img = os.path.join(gen_dir, "parent_master.png")
+    with open(parent_img, "wb") as f:
+        f.write(dummy_image_bytes)
+
+    await test_db.create_generation({
+        "id": "gen_parent_01",
+        "parent_id": None,
+        "moodboard_id": None,
+        "is_baseline": True,
+        "compiled_prompt": "A model standing in studio",
+        "negative_prompt": "blurry",
+        "seed": 4289102,
+        "master_image_path": parent_img,
+        "aspect_ratio": "2:3",
+        "resolution_width": 1024,
+        "resolution_height": 1536,
+    })
+
+    # 2. Create wardrobe item with extracted text/graphic details
+    crop_file = tmp_path / "tshirt_crop.png"
+    crop_file.write_bytes(dummy_image_bytes)
+
+    await test_db.create_wardrobe_item({
+        "id": "wd_tshirt_01",
+        "source_image_path": str(parent_img),
+        "label": "Vintage Surf T-Shirt",
+        "category": "tops",
+        "cropped_image_path": str(crop_file),
+        "upscaled_image_path": str(crop_file),
+        "upscale_status": "completed",
+        "extracted_details_json": {
+            "has_text_or_logo": True,
+            "has_graphic_or_print": True,
+            "exact_text_content": ["RETRO SURF", "1984"],
+            "graphic_description": "Sunburst wave emblem",
+            "logo_and_print_placement": "Center chest",
+            "fabric_texture": "heavy cotton",
+        },
+    })
+
+    # 3. Setup mock GenerationService
+    wardrobe_service = WardrobeService(
+        db_manager=test_db,
+        api_key="fake-key",
+        storage_dir=storage_dir,
+    )
+    gen_service = GenerationService(
+        db_manager=test_db,
+        api_key="fake-key",
+        storage_dir=storage_dir,
+        wardrobe_service=wardrobe_service,
+    )
+    gen_service._call_multi_image_model = AsyncMock(return_value=dummy_image_bytes)
+
+    # Mock grounding
+    wardrobe_service.ground_wardrobe_pins = AsyncMock(return_value={
+        "grounded_pins": [{
+            "pin_number": 1,
+            "target_subject": "The model in center frame",
+            "body_location": "upper chest and torso",
+            "spatial_anchor": "mid-center quadrant",
+            "current_attire": "white undershirt",
+        }],
+        "unmodified_subjects_guardrail": "Preserve other subjects.",
+    })
+
+    # 4. Run compose_wardrobe
+    result = await gen_service.compose_wardrobe(
+        parent_id="gen_parent_01",
+        assignments=[{
+            "wardrobe_item_id": "wd_tshirt_01",
+            "pin_number": 1,
+            "drop_position": {"x": 0.5, "y": 0.4},
+            "target_description": "chest",
+        }],
+    )
+
+    assert result["generation_id"] is not None
+    assert result["aspect_ratio"] == "2:3"
+    assert "RETRO SURF" in result["compiled_prompt"]
+    assert "Center chest" in result["compiled_prompt"]
+    assert "scrambled text" in result["negative_prompt"]
+    assert "altered logos" in result["negative_prompt"]
+
+
+@pytest.mark.asyncio
+async def test_wardrobe_deletion_disk_and_assignment_cleanup(test_db, dummy_image_bytes, tmp_path):
+    storage_dir = str(tmp_path / "storage")
+    service = WardrobeService(
+        db_manager=test_db,
+        api_key="fake-key",
+        storage_dir=storage_dir,
+    )
+
+    crop_path = os.path.join(storage_dir, "wardrobe", "items", "del_test_crop.png")
+    upscale_path = os.path.join(storage_dir, "wardrobe", "items", "del_test_upscaled.png")
+    os.makedirs(os.path.dirname(crop_path), exist_ok=True)
+    with open(crop_path, "wb") as f:
+        f.write(dummy_image_bytes)
+    with open(upscale_path, "wb") as f:
+        f.write(dummy_image_bytes)
+
+    item_id = "wd_del_01"
+    await test_db.create_wardrobe_item({
+        "id": item_id,
+        "source_image_path": crop_path,
+        "label": "Silk Scarf",
+        "category": "accessories",
+        "cropped_image_path": crop_path,
+        "upscaled_image_path": upscale_path,
+        "upscale_status": "completed",
+    })
+
+    # Create associated composition assignment
+    await test_db.create_composition_assignment({
+        "id": "asgn_del_01",
+        "generation_id": "gen_del_parent",
+        "wardrobe_item_id": item_id,
+        "pin_number": 1,
+        "drop_position": {"x": 0.5, "y": 0.2},
+    })
+
+    assert os.path.exists(crop_path)
+    assert os.path.exists(upscale_path)
+
+    # Perform delete
+    deleted = await service.delete_item(item_id)
+    assert deleted is True
+
+    # Check files are deleted from disk
+    assert not os.path.exists(crop_path)
+    assert not os.path.exists(upscale_path)
+
+    # Check assignments are deleted
+    asgns = await test_db.list_composition_assignments("gen_del_parent")
+    assert len(asgns) == 0
+
+
+@pytest.mark.asyncio
+async def test_wardrobe_upscale_cost_and_token_tracking(test_db, dummy_image_bytes, tmp_path):
+    storage_dir = str(tmp_path / "storage")
+    mock_gen_service = MagicMock()
+    mock_gen_service._call_image_model = AsyncMock(return_value=dummy_image_bytes)
+    mock_gen_service._last_call_metrics = {
+        "cost_usd": 0.045,
+        "total_token_count": 1200,
+    }
+
+    service = WardrobeService(
+        db_manager=test_db,
+        api_key="fake-key",
+        storage_dir=storage_dir,
+        generation_service=mock_gen_service,
+    )
+
+    item_id = "wd_cost_test"
+    await test_db.create_wardrobe_item({
+        "id": item_id,
+        "source_image_path": str(tmp_path / "src.png"),
+        "label": "Tweed Overcoat",
+        "category": "outerwear",
+        "cropped_image_path": str(tmp_path / "crop.png"),
+        "cost_usd": 0.005,
+        "tokens": 200,
+    })
+
+    await service.upscale_garment_background(
+        item_id=item_id,
+        crop_bytes=dummy_image_bytes,
+        label="Tweed Overcoat",
+        category="outerwear",
+    )
+
+    item = await test_db.get_wardrobe_item(item_id)
+    assert item is not None
+    assert item["cost_usd"] == pytest.approx(0.050, 0.001)
+    assert item["tokens"] == 1400
+
+    cards = await service.list_items()
+    assert len(cards) == 1
+    assert cards[0]["cost_usd"] == pytest.approx(0.050, 0.001)
+    assert cards[0]["tokens"] == 1400
+
 
 

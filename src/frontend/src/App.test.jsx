@@ -13,7 +13,7 @@ describe('App Component Workflow', () => {
 
   it('renders Step 1 Art Direction layout on initial load', () => {
     render(<App />);
-    expect(screen.getByText('Image Gen Pipeline Studio')).toBeInTheDocument();
+    expect(screen.getByText('Fashion AI')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /1 Art Direction/i })).toBeInTheDocument();
     expect(screen.getByText(/Moodboard Ingestion/i)).toBeInTheDocument();
     expect(screen.getByText(/Direct Photo Ingestion/i)).toBeInTheDocument();
@@ -25,7 +25,8 @@ describe('App Component Workflow', () => {
     expect(screen.getByRole('button', { name: /1 Art Direction/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /2 Refinement/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /3 Canvas/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /4 Export/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /4 Wardrobe/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /5 Export/i })).toBeInTheDocument();
   });
 
   it('opens History Drawer when history button is clicked', async () => {

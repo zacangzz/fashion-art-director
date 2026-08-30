@@ -104,6 +104,32 @@ async def get_wardrobe_item_image(item_id: str):
     return FileResponse(item["cropped_image_path"], media_type="image/png")
 
 
+@router.get("/items/{item_id}/upscaled-image")
+async def get_wardrobe_item_upscaled_image(item_id: str):
+    """
+    Serves the high-definition AI-upscaled garment image.
+    Falls back to cropped image if upscale is pending/in-progress.
+    """
+    item = await db_manager.get_wardrobe_item(item_id)
+    if not item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Wardrobe item '{item_id}' not found.",
+        )
+    upscaled_path = item.get("upscaled_image_path")
+    if upscaled_path and os.path.exists(upscaled_path):
+        return FileResponse(upscaled_path, media_type="image/png")
+    
+    crop_path = item.get("cropped_image_path")
+    if crop_path and os.path.exists(crop_path):
+        return FileResponse(crop_path, media_type="image/png")
+    
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail=f"No image available for wardrobe item '{item_id}'.",
+    )
+
+
 @router.get("/sources/{filename}")
 async def get_wardrobe_source_image(filename: str):
     """
@@ -170,7 +196,7 @@ async def compose_wardrobe(request: WardrobeComposeRequest):
             parent_id=request.parent_id,
             assignments=request.assignments,
             seed=request.seed,
-            aspect_ratio=request.aspect_ratio or "2:3",
+            aspect_ratio=request.aspect_ratio,
             negative_prompt=request.negative_prompt,
             conversation_id=conv_id,
             custom_instruction=request.custom_instruction,

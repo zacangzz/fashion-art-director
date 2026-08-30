@@ -26,6 +26,7 @@ import {
   ShieldAlert,
   Calendar,
   Compass,
+  Coins,
 } from 'lucide-react';
 import {
   fetchTelemetryEvents,
@@ -626,12 +627,35 @@ export default function ObservabilityPage() {
                         </div>
                       </div>
                       <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800">
-                        <div className="text-[10px] text-slate-400 uppercase font-semibold">Locked Seed</div>
-                        <div className="text-xs font-bold font-mono text-slate-200 mt-0.5">
-                          {selectedEvent.seed !== undefined ? selectedEvent.seed : selectedEvent.config?.seed !== undefined ? selectedEvent.config.seed : 'unspecified'}
+                        <div className="text-[10px] text-slate-400 uppercase font-semibold">Cost (USD)</div>
+                        <div className="text-xs font-bold font-mono text-emerald-400 mt-0.5 flex items-center gap-1">
+                          <Coins size={12} className="text-emerald-500" />
+                          <span>
+                            {selectedEvent.cost_usd !== undefined ? `$${Number(selectedEvent.cost_usd).toFixed(4)}` : '$0.0000'}
+                            {selectedEvent.cumulative_cost_usd !== undefined && Math.abs(selectedEvent.cumulative_cost_usd - (selectedEvent.cost_usd || 0)) > 0.0001 && (
+                              <span className="text-[10px] text-slate-400 ml-1">(${Number(selectedEvent.cumulative_cost_usd).toFixed(4)})</span>
+                            )}
+                          </span>
                         </div>
                       </div>
                     </div>
+
+                    {/* Token Breakdown Insight Row if available */}
+                    {selectedEvent.tokens && (
+                      <div className="p-3 rounded-lg bg-slate-950/60 border border-slate-800 flex items-center justify-between font-mono text-xs">
+                        <div className="flex items-center gap-2">
+                          <Coins size={13} className="text-emerald-400" />
+                          <span className="text-slate-300 font-semibold text-[11px]">Token Attribution:</span>
+                        </div>
+                        <div className="flex items-center gap-4 text-slate-400 text-[11px]">
+                          <span>Prompt: <strong className="text-cyan-300">{typeof selectedEvent.tokens === 'object' ? (selectedEvent.tokens.prompt_token_count ?? 0) : selectedEvent.tokens}</strong></span>
+                          {typeof selectedEvent.tokens === 'object' && selectedEvent.tokens.candidates_token_count !== undefined && (
+                            <span>Candidates: <strong className="text-amber-300">{selectedEvent.tokens.candidates_token_count}</strong></span>
+                          )}
+                          <span>Total: <strong className="text-emerald-400">{typeof selectedEvent.tokens === 'object' ? (selectedEvent.tokens.total_token_count ?? 0) : selectedEvent.tokens}</strong></span>
+                        </div>
+                      </div>
+                    )}
 
                     {/* Final Prompt / Input Inspection */}
                     {selectedEvent.final_prompt && (
@@ -1087,35 +1111,77 @@ export default function ObservabilityPage() {
         {/* TAB 4: METRICS & COMPONENT DISTRIBUTION                                    */}
         {/* ========================================================================= */}
         {activeTab === 'stats' && stats && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Component Volume Card */}
-            <div className="p-5 rounded-xl bg-slate-900/60 border border-slate-800 flex flex-col gap-4">
-              <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                <Layers size={16} className="text-indigo-400" />
-                Component Request Volume
-              </h3>
-              <div className="space-y-3">
-                {Object.entries(stats.components || {}).map(([comp, count]) => {
-                  const pct = stats.total_events > 0 ? (count / stats.total_events) * 100 : 0;
-                  return (
-                    <div key={comp} className="space-y-1">
-                      <div className="flex justify-between text-xs">
-                        <span className="capitalize text-slate-300 font-medium">{comp}</span>
-                        <span className="font-mono text-slate-400">
-                          {count} ({pct.toFixed(1)}%)
-                        </span>
-                      </div>
-                      <div className="h-2 w-full rounded-full bg-slate-800 overflow-hidden">
-                        <div
-                          className="h-full rounded-full bg-indigo-500 transition-all duration-500"
-                          style={{ width: `${pct}%` }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
+          <div className="flex flex-col gap-6">
+            {/* Top KPI Metrics Row */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center justify-between">
+                <div>
+                  <div className="text-xs text-slate-400 font-medium">Estimated Total API Cost</div>
+                  <div className="text-2xl font-bold font-mono text-emerald-400 mt-1">
+                    ${Number(stats.total_cost_usd || 0).toFixed(4)}
+                  </div>
+                </div>
+                <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
+                  <Coins size={22} />
+                </div>
+              </div>
+
+              <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center justify-between">
+                <div>
+                  <div className="text-xs text-slate-400 font-medium">Total Tokens Processed</div>
+                  <div className="text-2xl font-bold font-mono text-cyan-300 mt-1">
+                    {Number(stats.total_tokens || 0).toLocaleString()}
+                  </div>
+                </div>
+                <div className="p-3 rounded-lg bg-cyan-500/10 border border-cyan-500/20 text-cyan-400">
+                  <Zap size={22} />
+                </div>
+              </div>
+
+              <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center justify-between">
+                <div>
+                  <div className="text-xs text-slate-400 font-medium">Total Audited Events</div>
+                  <div className="text-2xl font-bold font-mono text-indigo-400 mt-1">
+                    {Number(stats.total_events || 0).toLocaleString()}
+                  </div>
+                </div>
+                <div className="p-3 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-400">
+                  <Activity size={22} />
+                </div>
               </div>
             </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Component Volume Card */}
+              <div className="p-5 rounded-xl bg-slate-900/60 border border-slate-800 flex flex-col gap-4">
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Layers size={16} className="text-indigo-400" />
+                  Component Request Volume & Cost
+                </h3>
+                <div className="space-y-3">
+                  {Object.entries(stats.components || {}).map(([comp, count]) => {
+                    const pct = stats.total_events > 0 ? (count / stats.total_events) * 100 : 0;
+                    const compCost = stats.cost_by_component?.[comp] ?? 0;
+                    return (
+                      <div key={comp} className="space-y-1">
+                        <div className="flex justify-between text-xs">
+                          <span className="capitalize text-slate-300 font-medium">{comp}</span>
+                          <span className="font-mono text-slate-400 flex items-center gap-2">
+                            <span>{count} ({pct.toFixed(1)}%)</span>
+                            {compCost > 0 && <span className="text-emerald-400">${compCost.toFixed(4)}</span>}
+                          </span>
+                        </div>
+                        <div className="h-2 w-full rounded-full bg-slate-800 overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-indigo-500 transition-all duration-500"
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
 
             {/* Model Latencies Card */}
             <div className="p-5 rounded-xl bg-slate-900/60 border border-slate-800 flex flex-col gap-4">
@@ -1162,6 +1228,7 @@ export default function ObservabilityPage() {
               </div>
             </div>
           </div>
+        </div>
         )}
       </main>
     </div>

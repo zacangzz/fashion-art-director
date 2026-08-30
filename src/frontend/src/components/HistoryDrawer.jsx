@@ -16,6 +16,7 @@ import {
   Eye,
   Crosshair,
   Cpu,
+  Coins,
 } from 'lucide-react';
 
 export default function HistoryDrawer({
@@ -109,6 +110,11 @@ export default function HistoryDrawer({
               const isUpload = item.id?.startsWith('gen_upload_') || item.schema_json?.source === 'direct_upload';
               const modelDisplay = !isUpload && rawModel ? rawModel : 'N/A';
 
+              const accumCost = Number(item.accumulated_cost_usd ?? item.cost_usd ?? 0);
+              const stepCost = Number(item.cost_usd ?? 0);
+              const stepTokens = Number(item.tokens ?? 0);
+              const accumTokens = Number(item.accumulated_tokens ?? item.tokens ?? 0);
+
               return (
                 <div
                   key={item.id}
@@ -159,6 +165,21 @@ export default function HistoryDrawer({
                       <Cpu size={11} className="history-model-icon" />
                       <span className="history-model-label">Model:</span>
                       <span className="history-model-name">{modelDisplay}</span>
+                    </div>
+
+                    <div
+                      className="history-card-cost"
+                      title={`Total Accumulated Lineage Cost: $${accumCost.toFixed(4)}${accumTokens ? ` (${accumTokens} tokens)` : ''}\nStep Cost: $${stepCost.toFixed(4)}${stepTokens ? ` (${stepTokens} tokens)` : ''}`}
+                    >
+                      <Coins size={11} className="history-cost-icon" />
+                      <span className="history-cost-label">Total Cost:</span>
+                      <span className="history-cost-value">${accumCost.toFixed(4)}</span>
+                      {stepCost > 0 && Math.abs(accumCost - stepCost) > 0.0001 && (
+                        <span className="history-step-cost-sub">(+${stepCost.toFixed(4)})</span>
+                      )}
+                      {accumTokens > 0 && (
+                        <span className="history-step-tokens-sub">· {accumTokens.toLocaleString()} toks</span>
+                      )}
                     </div>
 
                     <div className="history-prompt-block">

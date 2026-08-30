@@ -28,6 +28,10 @@ def _to_generation_response(r: dict) -> GenerationRecordResponse:
         resolution_width=r.get("resolution_width", 3840),
         resolution_height=r.get("resolution_height", 3840),
         model_name=r.get("model_name"),
+        cost_usd=float(r.get("cost_usd") or 0.0),
+        tokens=int(r.get("tokens") or 0),
+        accumulated_cost_usd=float(r.get("accumulated_cost_usd") or 0.0),
+        accumulated_tokens=int(r.get("accumulated_tokens") or 0),
     )
 
 
