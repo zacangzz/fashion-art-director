@@ -11,6 +11,7 @@ PUBLIC_ROUTES = {
     "/telemetry",
     "/observability",
     "/api/config",
+    "/api/models/config",
 }
 
 
@@ -19,7 +20,13 @@ def get_current_user(request: Request) -> dict:
     path = request.url.path
 
     # Allow public routes without authentication
-    if path in PUBLIC_ROUTES or path.startswith("/assets/") or path.startswith("/api/images/") or path == "/favicon.ico":
+    if (
+        path in PUBLIC_ROUTES
+        or path.startswith("/assets/")
+        or path.startswith("/api/images/")
+        or path.startswith("/api/models")
+        or path == "/favicon.ico"
+    ):
         return {"uid": "public_anonymous", "email": None, "name": "Anonymous"}
 
     auth_header = request.headers.get("Authorization")
@@ -35,7 +42,7 @@ def get_current_user(request: Request) -> dict:
     if not auth_header or not auth_header.startswith("Bearer "):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing or malformed Authorization Bearer token header.",
+            detail="Authentication required: Please sign in with Google or Email in the top navigation to access the studio.",
         )
 
     token = auth_header.split("Bearer ")[1].strip()

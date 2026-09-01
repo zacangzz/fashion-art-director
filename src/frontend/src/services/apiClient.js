@@ -60,10 +60,17 @@ async function handleApiResponse(response, defaultMessage) {
     );
   }
 
-  if (response.status === 401 || response.status === 403) {
+  if (response.status === 401) {
     throw new Error(
       errorDetail ||
-        `Authentication/Permission error (${response.status}): Check your GEMINI_API_KEY in .env.`
+        'Authentication required: Please sign in via the top navigation bar to access the studio.'
+    );
+  }
+
+  if (response.status === 403) {
+    throw new Error(
+      errorDetail ||
+        'Access Forbidden (403): You do not have permission to perform this action or access this resource.'
     );
   }
 

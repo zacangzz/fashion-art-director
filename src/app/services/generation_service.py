@@ -5,6 +5,7 @@ import base64
 import random
 import hashlib
 import time
+import concurrent.futures
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Union
@@ -320,9 +321,8 @@ class GenerationService:
             seeds.append(random.randint(100000, 9999999))
             seeds = list(set(seeds))[:4]
 
-        results = []
-        for s in seeds:
-            res = self.generate_single_baseline(
+        def _generate(s: int) -> Dict[str, Any]:
+            return self.generate_single_baseline(
                 moodboard_id=moodboard_id,
                 state_dict=state_dict,
                 positive_prompt=positive_prompt,
@@ -333,7 +333,11 @@ class GenerationService:
                 temperature=temperature,
                 user_id=user_id,
             )
-            results.append(res)
+
+        logger.info(f"Dispatching 4 concurrent baseline generation workers for seeds: {seeds}")
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+            results = list(executor.map(_generate, seeds))
+
         return results
 
     def generate_baselines(self, *args, **kwargs):

@@ -5,6 +5,7 @@ import uuid
 import time
 import base64
 import unittest.mock
+import concurrent.futures
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 from PIL import Image, ImageFilter
@@ -327,7 +328,7 @@ class WardrobeService:
         cost_per_item = seg_cost / max(len(items_raw), 1)
         tokens_per_item = seg_tokens // max(len(items_raw), 1)
 
-        for item_data in items_raw:
+        def _process_item(item_data: Dict[str, Any]) -> Dict[str, Any]:
             item_id = f"item_{uuid.uuid4().hex[:8]}"
             label = item_data.get("label", "Garment Item")
             category = item_data.get("category", "tops")
@@ -389,7 +390,11 @@ class WardrobeService:
             res_item = dict(db_payload)
             res_item["bbox"] = norm_box
             res_item["extracted_details"] = details
-            results.append(res_item)
+            return res_item
+
+        max_workers = min(4, max(1, len(items_raw))) if items_raw else 1
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            results = list(executor.map(_process_item, items_raw))
 
         return results
 
