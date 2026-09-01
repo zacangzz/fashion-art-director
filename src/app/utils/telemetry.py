@@ -23,6 +23,83 @@ def generate_request_id(prefix: str = "req") -> str:
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
 
 
+def format_image_url(img_ref: Any) -> Optional[str]:
+    """
+    Normalizes local or remote image references to a standard HTTP or API endpoint URL.
+    """
+    if not img_ref:
+        return None
+    if isinstance(img_ref, dict):
+        img_ref = img_ref.get("url") or img_ref.get("image_url") or img_ref.get("path")
+    if not isinstance(img_ref, str) or not img_ref.strip():
+        return None
+    s = img_ref.strip()
+    if s.startswith("http://") or s.startswith("https://") or s.startswith("data:") or s.startswith("blob:"):
+        return s
+    if s.startswith("/api/images/"):
+        return s
+    return f"/api/images/{s.lstrip('/')}"
+
+
+def extract_prompt_fields_from_event(e: Dict[str, Any]) -> Dict[str, Optional[str]]:
+    """
+    Modular extractor for positive prompt, system instruction, negative prompt,
+    master prompt, and narrative across different telemetry event formats.
+    """
+    prompt = None
+    system_instruction = None
+    negative_prompt = None
+    master_prompt = None
+    narrative = None
+
+    # 1. Direct prompts payload
+    prompts = e.get("prompts")
+    if isinstance(prompts, dict):
+        prompt = prompts.get("user_prompt") or prompts.get("positive_prompt") or prompts.get("prompt")
+        system_instruction = prompts.get("system_instruction")
+        negative_prompt = prompts.get("negative_prompt")
+    elif isinstance(prompts, str):
+        prompt = prompts
+
+    # 2. Direct inputs payload
+    inputs = e.get("inputs")
+    if isinstance(inputs, dict):
+        if not prompt:
+            prompt = inputs.get("prompt") or inputs.get("user_prompt") or inputs.get("text_prompt")
+        if not system_instruction:
+            system_instruction = inputs.get("system_instruction")
+
+    # 3. Direct event attributes
+    if not prompt:
+        prompt = (
+            e.get("extracted_master_prompt")
+            or e.get("master_prompt")
+            or e.get("compiled_prompt")
+            or e.get("prompt")
+        )
+
+    if not system_instruction:
+        system_instruction = e.get("instruction") or e.get("system_instruction")
+        if not system_instruction and isinstance(e.get("config"), dict):
+            system_instruction = e["config"].get("system_instruction")
+
+    if not negative_prompt:
+        negative_prompt = e.get("negative_prompt")
+        if not negative_prompt and isinstance(e.get("config"), dict):
+            negative_prompt = e["config"].get("negative_prompt")
+
+    master_prompt = e.get("extracted_master_prompt") or e.get("master_prompt") or e.get("compiled_prompt")
+    narrative = e.get("extracted_narrative") or e.get("narrative")
+
+    return {
+        "prompt": prompt,
+        "system_instruction": system_instruction,
+        "negative_prompt": negative_prompt,
+        "master_prompt": master_prompt,
+        "narrative": narrative,
+    }
+
+
 class TelemetryLogger:
     """
     Standardized telemetry and audit event logger with Firestore backend.
@@ -297,6 +374,36 @@ def get_generation_runs(
     all_events = res.get("events", [])
 
     # Group by request_id
+    # Pre-cache recent generation records from Firestore if db provided
+    gens_by_id: Dict[str, Dict[str, Any]] = {}
+    gens_by_seed: Dict[Any, Dict[str, Any]] = {}
+    if db and hasattr(db, "collection"):
+        try:
+            gens_stream = (
+                db.collection("generations")
+                .order_by("created_at", direction="DESCENDING")
+                .limit(60)
+                .stream()
+            )
+            for g in gens_stream:
+                gd = g.to_dict() if hasattr(g, "to_dict") else {}
+                g_id = getattr(g, "id", None) or gd.get("id")
+                if g_id:
+                    gens_by_id[g_id] = gd
+                if gd.get("seed") is not None:
+                    gens_by_seed[gd["seed"]] = gd
+        except Exception:
+            try:
+                for g in db.collection("generations").limit(60).stream():
+                    gd = g.to_dict() if hasattr(g, "to_dict") else {}
+                    g_id = getattr(g, "id", None) or gd.get("id")
+                    if g_id:
+                        gens_by_id[g_id] = gd
+                    if gd.get("seed") is not None:
+                        gens_by_seed[gd["seed"]] = gd
+            except Exception as e:
+                logger.debug(f"Could not pre-fetch generations for telemetry prompt enrichment: {e}")
+
     runs_map: Dict[str, List[Dict[str, Any]]] = {}
     for ev in all_events:
         req_id = ev.get("request_id") or "req_unknown"
@@ -311,6 +418,12 @@ def get_generation_runs(
         first_ev = events[0]
         last_ev = events[-1]
 
+        components = set(e.get("component") for e in events if e.get("component"))
+
+        # If filtering all or not specified, exclude standalone pure middleware HTTP request/response logs
+        if (not component or component == "all") and components == {"api"}:
+            continue
+
         # Determine overall status
         has_error = any(
             e.get("status") == "error" or "error" in (e.get("event") or "").lower()
@@ -324,14 +437,16 @@ def get_generation_runs(
         total_tokens = 0
         models_used = set()
         prompt_snippet = ""
+        system_instruction = ""
+        negative_prompt = ""
+        master_prompt = ""
+        narrative = ""
+        seed = None
+        gen_id = None
         input_images = []
         output_images = []
-        components = set()
 
         for e in events:
-            comp = e.get("component")
-            if comp:
-                components.add(comp)
             dur = e.get("duration_ms")
             if dur is not None:
                 try:
@@ -363,34 +478,72 @@ def get_generation_runs(
             if mod:
                 models_used.add(mod)
 
-            # Prompt extraction
-            prompts = e.get("prompts")
-            if isinstance(prompts, dict) and not prompt_snippet:
-                prompt_snippet = prompts.get("user_prompt") or prompts.get("positive_prompt") or prompts.get("prompt") or ""
-            elif isinstance(prompts, str) and not prompt_snippet:
-                prompt_snippet = prompts
+            # Extract Prompt text and directives via modular helper
+            extracted_fields = extract_prompt_fields_from_event(e)
+            if not prompt_snippet and extracted_fields.get("prompt"):
+                prompt_snippet = extracted_fields["prompt"]
+            if not system_instruction and extracted_fields.get("system_instruction"):
+                system_instruction = extracted_fields["system_instruction"]
+            if not negative_prompt and extracted_fields.get("negative_prompt"):
+                negative_prompt = extracted_fields["negative_prompt"]
+            if not master_prompt and extracted_fields.get("master_prompt"):
+                master_prompt = extracted_fields["master_prompt"]
+            if not narrative and extracted_fields.get("narrative"):
+                narrative = extracted_fields["narrative"]
 
+            # Extract Seed and Generation ID
+            if seed is None and isinstance(e.get("config"), dict):
+                seed = e["config"].get("seed")
+            if seed is None and e.get("seed") is not None:
+                seed = e.get("seed")
+            if not gen_id:
+                gen_id = e.get("generation_id")
+
+            # Extract Images
             inputs = e.get("inputs")
             if isinstance(inputs, dict):
-                if not prompt_snippet:
-                    prompt_snippet = inputs.get("prompt") or inputs.get("user_prompt") or inputs.get("text_prompt") or ""
-                inp_imgs = inputs.get("image_urls") or inputs.get("input_images") or inputs.get("files") or []
+                inp_imgs = inputs.get("image_urls") or inputs.get("input_images") or inputs.get("files") or inputs.get("image_paths") or []
                 if isinstance(inp_imgs, list):
                     for img in inp_imgs:
-                        if img and img not in input_images:
-                            input_images.append(img)
+                        formatted = format_image_url(img)
+                        if formatted and formatted not in input_images:
+                            input_images.append(formatted)
+
+            raw_paths = e.get("image_paths") or []
+            if isinstance(raw_paths, list):
+                for img in raw_paths:
+                    formatted = format_image_url(img)
+                    if formatted and formatted not in input_images:
+                        input_images.append(formatted)
 
             outputs = e.get("outputs")
             if isinstance(outputs, dict):
                 out_imgs = outputs.get("image_urls") or outputs.get("images") or outputs.get("results") or []
                 if isinstance(out_imgs, list):
                     for img in out_imgs:
-                        if isinstance(img, dict) and img.get("url"):
-                            if img["url"] not in output_images:
-                                output_images.append(img["url"])
-                        elif isinstance(img, str) and img:
-                            if img not in output_images:
-                                output_images.append(img)
+                        formatted = format_image_url(img)
+                        if formatted and formatted not in output_images:
+                            output_images.append(formatted)
+
+        # Cross-reference with Firestore generations if prompt or outputs are missing
+        matched_gen = None
+        if gen_id and gen_id in gens_by_id:
+            matched_gen = gens_by_id[gen_id]
+        elif seed is not None and seed in gens_by_seed:
+            matched_gen = gens_by_seed[seed]
+
+        if matched_gen:
+            if not prompt_snippet:
+                prompt_snippet = matched_gen.get("compiled_prompt") or matched_gen.get("prompt") or ""
+            if not negative_prompt:
+                negative_prompt = matched_gen.get("negative_prompt") or ""
+            if not master_prompt:
+                master_prompt = matched_gen.get("compiled_prompt") or ""
+            gen_img = matched_gen.get("master_image_path")
+            if gen_img:
+                fmt_gen_img = format_image_url(gen_img)
+                if fmt_gen_img and fmt_gen_img not in output_images:
+                    output_images.append(fmt_gen_img)
 
         run_summary = {
             "request_id": req_id,
@@ -404,6 +557,10 @@ def get_generation_runs(
             "component": list(components)[0] if components else "generation",
             "components": list(components),
             "prompt": prompt_snippet,
+            "system_instruction": system_instruction,
+            "negative_prompt": negative_prompt,
+            "master_prompt": master_prompt,
+            "narrative": narrative,
             "step_count": len(events),
             "events": events,
             "input_images": input_images,
@@ -420,6 +577,7 @@ def get_generation_runs(
             match_search = (
                 s_low in req_id.lower()
                 or s_low in prompt_snippet.lower()
+                or s_low in system_instruction.lower()
                 or any(s_low in m.lower() for m in models_used)
                 or any(s_low in c.lower() for c in components)
             )

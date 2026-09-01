@@ -62,15 +62,21 @@ def list_generation_runs(
     """
     Returns grouped end-to-end generation runs with stage events, prompts, latencies, and images.
     """
-    res = get_generation_runs(
-        db=db_manager.client,
-        component=component,
-        status=status,
-        search=search,
-        limit=limit,
-        offset=offset,
-    )
-    return TelemetryRunsResponse(**res)
+    try:
+        res = get_generation_runs(
+            db=db_manager.db,
+            component=component,
+            status=status,
+            search=search,
+            limit=limit,
+            offset=offset,
+        )
+        return TelemetryRunsResponse(**res)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to load telemetry runs: {exc}",
+        )
 
 
 @router.get("/events", response_model=TelemetryEventsResponse)
@@ -88,17 +94,23 @@ def list_telemetry_events(
     """
     Queries and filters structured audit events across Firestore telemetry collection.
     """
-    res = query_audit_events(
-        db=db_manager.client,
-        component=component,
-        event=event,
-        request_id=request_id,
-        status=status,
-        search=search,
-        limit=limit,
-        offset=offset,
-    )
-    return TelemetryEventsResponse(**res)
+    try:
+        res = query_audit_events(
+            db=db_manager.db,
+            component=component,
+            event=event,
+            request_id=request_id,
+            status=status,
+            search=search,
+            limit=limit,
+            offset=offset,
+        )
+        return TelemetryEventsResponse(**res)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to query telemetry events: {exc}",
+        )
 
 
 @router.get("/events/{request_id}", response_model=List[Dict[str, Any]])
@@ -110,11 +122,17 @@ def get_request_trace(
     """
     Fetches the full chronological lifecycle trace events for a specific request ID.
     """
-    trace = get_request_lifecycle_trace(
-        db=db_manager.client,
-        request_id=request_id,
-    )
-    return trace
+    try:
+        trace = get_request_lifecycle_trace(
+            db=db_manager.db,
+            request_id=request_id,
+        )
+        return trace
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to load request trace for {request_id}: {exc}",
+        )
 
 
 @router.get("/stats", response_model=TelemetryStatsResponse)
@@ -125,8 +143,14 @@ def get_telemetry_stats(
     """
     Returns aggregated metrics and performance telemetry across logged operations.
     """
-    stats = get_telemetry_summary_stats(db=db_manager.client)
-    return TelemetryStatsResponse(**stats)
+    try:
+        stats_data = get_telemetry_summary_stats(db=db_manager.db)
+        return TelemetryStatsResponse(**stats_data)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to compute telemetry statistics: {exc}",
+        )
 
 
 @router.get("/logs", response_model=SystemLogsResponse)
@@ -152,8 +176,14 @@ def get_database_summary(
     """
     Returns collection metadata and document counts for Firestore collections.
     """
-    summary = db_manager.get_tables_summary()
-    return {"tables": summary}
+    try:
+        summary = db_manager.get_tables_summary()
+        return {"tables": summary}
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to inspect database summary: {exc}",
+        )
 
 
 @router.get("/db/{table_name}")

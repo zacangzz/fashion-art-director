@@ -664,6 +664,8 @@ class GenerationService:
                 req_id,
                 parent_id=parent_id,
                 background_reference_id=background_reference_id,
+                prompts={"prompt": full_refine_prompt, "user_prompt": prompt, "negative_prompt": eff_neg_prompt},
+                instruction=base_refine_instruction,
                 perspective_mode=eff_perspective,
                 depth_of_field=eff_dof,
                 lighting_mode=eff_lighting,
@@ -692,6 +694,18 @@ class GenerationService:
             )
             full_refine_prompt = base_refine_instruction + chromatic_anchor
             all_refs = [root_image_bytes, parent_bytes]
+
+            self._audit(
+                "refinement_request",
+                req_id,
+                parent_id=parent_id,
+                turn_num=turn_num,
+                prompts={"prompt": full_refine_prompt, "user_prompt": prompt, "negative_prompt": eff_neg_prompt},
+                instruction=base_refine_instruction,
+                model=active_model,
+                seed=seed,
+            )
+
             image_bytes = self._call_multi_image_model(
                 contents=all_refs + [full_refine_prompt],
                 aspect_ratio=aspect_ratio,
@@ -703,6 +717,18 @@ class GenerationService:
         else:
             base_refine_instruction = self.prompt_compiler.format_refinement_prompt(prompt)
             full_refine_prompt = base_refine_instruction
+
+            self._audit(
+                "refinement_request",
+                req_id,
+                parent_id=parent_id,
+                turn_num=1,
+                prompts={"prompt": full_refine_prompt, "user_prompt": prompt, "negative_prompt": eff_neg_prompt},
+                instruction=base_refine_instruction,
+                model=active_model,
+                seed=seed,
+            )
+
             image_bytes = self._call_image_model(
                 prompt=full_refine_prompt,
                 aspect_ratio=aspect_ratio,
@@ -852,6 +878,8 @@ class GenerationService:
             "inpaint_request",
             req_id,
             parent_id=parent_id,
+            prompts={"prompt": spatial_prompt, "user_prompt": prompt, "negative_prompt": eff_neg_prompt},
+            instruction=spatial_prompt,
             prompt=prompt,
             mask=mask_stats,
             source_image={"width": mask_stats.get("width", 0), "height": mask_stats.get("height", 0)},

@@ -6,6 +6,7 @@
 * always ensure that code is written in a way that is easy to understand and maintain.
     * apply OOP principles, especially using Composition over Inheritance.
     * do not overly engineer code or create exessive redundancies when simple modular methods work.
+* avoid using in-line prompts, always create prompt templates in a separate file and import them.
 
 ## LESSONS.md
 * when something new about API is learnt or discovered throuought the iteration and development process, request permission from the user to allow update of the lessons learnt in LESSONS.md

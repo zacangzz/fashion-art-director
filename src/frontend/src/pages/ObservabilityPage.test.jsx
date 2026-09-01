@@ -4,6 +4,15 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import ObservabilityPage from './ObservabilityPage';
 import * as apiClient from '../services/apiClient';
 
+vi.mock('../contexts/AuthContext', () => ({
+  useAuth: () => ({
+    currentUser: { uid: 'test_user', email: 'test@example.com' },
+    userProfile: { role: 'admin', is_approved: true, is_admin: true },
+    loading: false,
+    isDevBypass: false,
+  }),
+}));
+
 vi.mock('../services/apiClient', () => ({
   fetchGenerationRuns: vi.fn(),
   fetchTelemetryEvents: vi.fn(),
@@ -12,6 +21,7 @@ vi.mock('../services/apiClient', () => ({
   fetchSystemLogs: vi.fn(),
   fetchDatabaseSummary: vi.fn(),
   fetchDatabaseTableRecords: vi.fn(),
+  resolveImageUrl: vi.fn((url) => url),
 }));
 
 describe('ObservabilityPage', () => {
@@ -185,5 +195,18 @@ describe('ObservabilityPage', () => {
       expect(screen.getAllByText(/generations/i).length).toBeGreaterThan(0);
       expect(screen.getByText('gen_001')).toBeInTheDocument();
     });
+  });
+
+  it('renders error banner when stats fails to load and allows retry', async () => {
+    apiClient.fetchTelemetryStats.mockRejectedValue(new Error('Network connection timeout'));
+    apiClient.fetchGenerationRuns.mockRejectedValue(new Error('Network connection timeout'));
+    render(<ObservabilityPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Network connection timeout/i)).toBeInTheDocument();
+    });
+
+    const retryBtn = screen.getByRole('button', { name: /Retry/i });
+    expect(retryBtn).toBeInTheDocument();
   });
 });

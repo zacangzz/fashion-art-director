@@ -173,6 +173,7 @@ class ImageGenerator:
                 request_id=audit_request_id,
                 component="generation",
                 model=active_model,
+                prompts={"prompt": prompt, "negative_prompt": negative_prompt},
                 config={
                     "aspect_ratio": norm_aspect,
                     "image_size": effective_image_size,
@@ -180,7 +181,7 @@ class ImageGenerator:
                     "negative_prompt": negative_prompt,
                     "temperature": temperature,
                 },
-                inputs={"parts_count": len(input_items)},
+                inputs={"prompt": prompt, "parts_count": len(input_items)},
             )
 
         try:

@@ -22,28 +22,32 @@ class FakeDocumentSnapshot:
 
 
 class FakeQuery:
-    def __init__(self, collection, filters=None, orders=None, limit_val=None, start_after_doc=None):
+    def __init__(self, collection, filters=None, orders=None, limit_val=None, start_after_doc=None, offset_val=None):
         self.collection = collection
         self.filters = filters or []
         self.orders = orders or []
         self.limit_val = limit_val
         self.start_after_doc = start_after_doc
+        self.offset_val = offset_val
 
     def where(self, field, op, val):
         new_filters = list(self.filters)
         new_filters.append((field, op, val))
-        return FakeQuery(self.collection, new_filters, self.orders, self.limit_val, self.start_after_doc)
+        return FakeQuery(self.collection, new_filters, self.orders, self.limit_val, self.start_after_doc, self.offset_val)
 
     def order_by(self, field, direction="ASCENDING"):
         new_orders = list(self.orders)
         new_orders.append((field, direction))
-        return FakeQuery(self.collection, self.filters, new_orders, self.limit_val, self.start_after_doc)
+        return FakeQuery(self.collection, self.filters, new_orders, self.limit_val, self.start_after_doc, self.offset_val)
 
     def limit(self, n):
-        return FakeQuery(self.collection, self.filters, self.orders, n, self.start_after_doc)
+        return FakeQuery(self.collection, self.filters, self.orders, n, self.start_after_doc, self.offset_val)
+
+    def offset(self, n):
+        return FakeQuery(self.collection, self.filters, self.orders, self.limit_val, self.start_after_doc, n)
 
     def start_after(self, doc):
-        return FakeQuery(self.collection, self.filters, self.orders, self.limit_val, doc)
+        return FakeQuery(self.collection, self.filters, self.orders, self.limit_val, doc, self.offset_val)
 
     def stream(self):
         docs = list(self.collection._docs.values())
@@ -74,6 +78,8 @@ class FakeQuery:
                     break
             if found_idx != -1:
                 filtered = filtered[found_idx + 1 :]
+        elif self.offset_val:
+            filtered = filtered[self.offset_val :]
 
         if self.limit_val is not None:
             filtered = filtered[: self.limit_val]
@@ -142,6 +148,12 @@ class FakeCollection:
 
     def limit(self, n):
         return FakeQuery(self).limit(n)
+
+    def offset(self, n):
+        return FakeQuery(self).offset(n)
+
+    def start_after(self, doc):
+        return FakeQuery(self).start_after(doc)
 
     def stream(self):
         return FakeQuery(self).stream()

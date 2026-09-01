@@ -27,6 +27,11 @@ class FirestoreManager:
     def __init__(self, db: Client):
         self.db = db
 
+    @property
+    def client(self) -> Client:
+        """Compatibility property to access underlying Firestore Client."""
+        return self.db
+
     def _now_iso(self) -> str:
         return datetime.now(timezone.utc).isoformat()
 
@@ -650,6 +655,7 @@ class FirestoreManager:
         self,
         table_name: str,
         limit: int = 50,
+        offset: int = 0,
         start_after_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         if table_name not in ALLOWED_COLLECTIONS:
@@ -657,12 +663,15 @@ class FirestoreManager:
 
         coll = self.db.collection(table_name)
         # Order by created_at desc if field exists, else document ID
-        query = coll.limit(limit)
+        query = coll
         if start_after_id:
             start_doc = coll.document(start_after_id).get()
             if start_doc.exists:
                 query = query.start_after(start_doc)
+        elif offset > 0:
+            query = query.offset(offset)
 
+        query = query.limit(limit)
         docs = list(query.stream())
         rows = [d.to_dict() for d in docs]
         next_cursor = docs[-1].id if len(docs) == limit else None
@@ -671,6 +680,7 @@ class FirestoreManager:
             "table": table_name,
             "total": len(rows),
             "limit": limit,
+            "offset": offset,
             "next_cursor": next_cursor,
             "rows": rows,
         }

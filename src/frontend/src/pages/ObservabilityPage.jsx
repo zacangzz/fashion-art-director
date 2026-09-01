@@ -35,6 +35,7 @@ import {
   Tag,
   Hash,
 } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
 import {
   fetchGenerationRuns,
   fetchTelemetryEvents,
@@ -43,7 +44,9 @@ import {
   fetchSystemLogs,
   fetchDatabaseSummary,
   fetchDatabaseTableRecords,
+  resolveImageUrl,
 } from '../services/apiClient';
+import PromptInspector from '../components/PromptInspector';
 
 const COMPONENT_TAG_CLASSES = {
   generation: 'obs-badge-generation',
@@ -64,6 +67,8 @@ const STAGE_COLORS = {
 };
 
 export default function ObservabilityPage() {
+  const { currentUser, userProfile, loading: isAuthLoading, isDevBypass } = useAuth();
+
   // Navigation tabs: 'runs' | 'events' | 'logs' | 'db'
   const [activeTab, setActiveTab] = useState('runs');
 
@@ -71,6 +76,7 @@ export default function ObservabilityPage() {
   const [stats, setStats] = useState(null);
   const [isLoadingStats, setIsLoadingStats] = useState(false);
   const [copiedKey, setCopiedKey] = useState(null);
+  const [loadError, setLoadError] = useState(null);
 
   // Tab 1: Generation Runs & Visual Pipeline state
   const [runs, setRuns] = useState([]);
@@ -119,9 +125,13 @@ export default function ObservabilityPage() {
     setIsLoadingStats(true);
     try {
       const statsRes = await fetchTelemetryStats();
-      if (statsRes) setStats(statsRes);
+      if (statsRes) {
+        setStats(statsRes);
+        setLoadError(null);
+      }
     } catch (err) {
       console.warn('Could not load telemetry stats:', err);
+      setLoadError(err.message || 'Failed to load telemetry metrics');
     } finally {
       setIsLoadingStats(false);
     }
@@ -154,6 +164,7 @@ export default function ObservabilityPage() {
       }
     } catch (err) {
       console.error('Failed to load generation runs:', err);
+      setLoadError(err.message || 'Failed to load generation runs');
     } finally {
       setIsLoadingRuns(false);
     }
@@ -219,22 +230,19 @@ export default function ObservabilityPage() {
     }
   }, [selectedTable, dbPageOffset]);
 
-  // Initial load
+  // Initial load & Auth synchronization
   useEffect(() => {
-    loadStats();
-    loadRuns();
-  }, [loadStats, loadRuns]);
-
-  // Tab change triggers
-  useEffect(() => {
-    if (activeTab === 'runs') loadRuns();
-    if (activeTab === 'events') loadEvents();
-    if (activeTab === 'logs') loadLogs();
-    if (activeTab === 'db') {
-      loadDbSummary();
-      loadDbTable();
+    if (!isAuthLoading) {
+      loadStats();
+      if (activeTab === 'runs') loadRuns();
+      if (activeTab === 'events') loadEvents();
+      if (activeTab === 'logs') loadLogs();
+      if (activeTab === 'db') {
+        loadDbSummary();
+        loadDbTable();
+      }
     }
-  }, [activeTab, loadRuns, loadEvents, loadLogs, loadDbSummary, loadDbTable]);
+  }, [isAuthLoading, currentUser, isDevBypass, activeTab, loadStats, loadRuns, loadEvents, loadLogs, loadDbSummary, loadDbTable]);
 
   // Auto-refresh logs timer
   useEffect(() => {
@@ -400,6 +408,46 @@ export default function ObservabilityPage() {
               </button>
             </div>
           </div>
+
+          {/* Error Banner */}
+          {loadError && (
+            <div style={{
+              margin: '0.75rem 0',
+              padding: '0.6rem 0.9rem',
+              backgroundColor: 'rgba(239, 68, 68, 0.12)',
+              border: '1px solid rgba(239, 68, 68, 0.3)',
+              borderRadius: '8px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '0.75rem',
+              color: '#fca5a5',
+              fontSize: '0.78rem'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <AlertCircle size={15} color="#ef4444" />
+                <span>{loadError}</span>
+              </div>
+              <button
+                type="button"
+                className="obs-copy-btn"
+                style={{ color: '#fff', borderColor: 'rgba(239, 68, 68, 0.4)' }}
+                onClick={() => {
+                  setLoadError(null);
+                  loadStats();
+                  if (activeTab === 'runs') loadRuns();
+                  if (activeTab === 'events') loadEvents();
+                  if (activeTab === 'logs') loadLogs();
+                  if (activeTab === 'db') {
+                    loadDbSummary();
+                    loadDbTable();
+                  }
+                }}
+              >
+                Retry
+              </button>
+            </div>
+          )}
 
           {/* Global KPI Strip */}
           {stats && (
@@ -686,7 +734,7 @@ export default function ObservabilityPage() {
                       {selectedRun.input_images?.map((url, idx) => (
                         <div key={`input_${idx}`} className="obs-media-card">
                           <div className="obs-media-thumb-wrap" onClick={() => setPreviewImage(url)} style={{ cursor: 'pointer' }}>
-                            <img src={url} alt={`Reference Input ${idx + 1}`} className="obs-media-thumb" />
+                            <img src={resolveImageUrl(url)} alt={`Reference Input ${idx + 1}`} className="obs-media-thumb" />
                           </div>
                           <div className="obs-media-label">
                             <span>Input Ref #{idx + 1}</span>
@@ -698,7 +746,7 @@ export default function ObservabilityPage() {
                       {selectedRun.output_images?.map((url, idx) => (
                         <div key={`out_${idx}`} className="obs-media-card">
                           <div className="obs-media-thumb-wrap" onClick={() => setPreviewImage(url)} style={{ cursor: 'pointer' }}>
-                            <img src={url} alt={`Generated Baseline ${idx + 1}`} className="obs-media-thumb" />
+                            <img src={resolveImageUrl(url)} alt={`Generated Baseline ${idx + 1}`} className="obs-media-thumb" />
                           </div>
                           <div className="obs-media-label">
                             <span>Baseline #{idx + 1}</span>
@@ -711,33 +759,11 @@ export default function ObservabilityPage() {
                 )}
 
                 {/* Prompt & Compiler Inspector */}
-                <div className="obs-panel-card">
-                  <div className="obs-panel-header">
-                    <div className="obs-panel-title">
-                      <FileText size={18} style={{ color: '#a855f7' }} />
-                      <span>Prompt Formulation & System Instructions</span>
-                    </div>
-                    <button
-                      type="button"
-                      className="obs-copy-btn"
-                      onClick={() => copyToClipboard(selectedRun.prompt || '', 'full_prompt')}
-                    >
-                      {copiedKey === 'full_prompt' ? <Check size={12} color="#10b981" /> : <Copy size={12} />}
-                      <span>{copiedKey === 'full_prompt' ? 'Copied' : 'Copy Full Prompt'}</span>
-                    </button>
-                  </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '0.85rem' }}>
-                    <div className="obs-prompt-block">
-                      <div className="obs-prompt-label-row">
-                        <span className="obs-prompt-label">Primary Generation Prompt / Narrative</span>
-                      </div>
-                      <div className="obs-prompt-text">
-                        {selectedRun.prompt || 'No plain prompt recorded for this trace.'}
-                      </div>
-                    </div>
-                  </div>
-                </div>
+                <PromptInspector
+                  run={selectedRun}
+                  activeStep={activeTraceStep}
+                  onResetStep={() => setActiveTraceStep(null)}
+                />
 
                 {/* Selected Stage Step Detailed Inspector (if clicked) */}
                 {activeTraceStep && (
@@ -1030,7 +1056,7 @@ export default function ObservabilityPage() {
                 {dbSummary && Object.keys(dbSummary).length > 0 ? (
                   Object.entries(dbSummary).map(([colName, meta]) => {
                     const isSelected = selectedTable === colName;
-                    const docCount = typeof meta === 'object' ? meta.count ?? meta.total ?? '—' : meta;
+                    const docCount = typeof meta === 'object' ? meta.row_count ?? meta.count ?? meta.total ?? '—' : meta;
                     return (
                       <button
                         key={colName}
@@ -1250,7 +1276,7 @@ export default function ObservabilityPage() {
               <X size={16} />
             </button>
             <img
-              src={previewImage}
+              src={resolveImageUrl(previewImage)}
               alt="Asset Preview"
               style={{ maxWidth: '100%', maxHeight: '85vh', objectFit: 'contain', borderRadius: 'var(--radius-md)' }}
             />
