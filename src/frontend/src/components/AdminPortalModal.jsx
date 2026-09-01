@@ -4,14 +4,11 @@ import {
   Users,
   UserPlus,
   Shield,
-  ShieldCheck,
-  ShieldAlert,
   Trash2,
   CheckCircle2,
   Clock,
   Ban,
   Search,
-  DollarSign,
   Loader2,
   RefreshCw,
   AlertCircle,
@@ -134,93 +131,90 @@ export default function AdminPortalModal({ isOpen, onClose }) {
   });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
-      <div className="relative w-full max-w-4xl max-h-[90vh] bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col text-slate-200">
+    <div className="admin-modal-backdrop">
+      <div className="admin-modal-container animate-fade-in">
         
         {/* Header */}
-        <div className="p-6 border-b border-slate-800/80 flex items-center justify-between bg-slate-950/40">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400">
+        <div className="admin-modal-header">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <div style={{ padding: '0.5rem', borderRadius: '12px', background: 'rgba(99, 102, 241, 0.12)', border: '1px solid rgba(99, 102, 241, 0.3)', color: '#818cf8' }}>
               <Users size={20} />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                <span>Studio Whitelist & Team Management</span>
-              </h2>
-              <p className="text-xs text-slate-400">
+              <h2 className="admin-modal-title">Studio Whitelist & Team Management</h2>
+              <p className="admin-modal-subtitle">
                 Pre-authorize team members, manage permissions, and monitor compute spend.
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition"
+            className="modal-close-btn"
+            title="Close modal"
           >
-            <X size={20} />
+            <X size={18} />
           </button>
         </div>
 
         {/* Scrollable Content */}
-        <div className="p-6 overflow-y-auto flex flex-col gap-6">
+        <div className="admin-modal-body">
           
           {/* Summary Stats Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 flex flex-col gap-1">
-              <span className="text-[11px] font-mono uppercase text-slate-400 tracking-wider">Total Members</span>
-              <span className="text-2xl font-bold text-white">{summary.total_users}</span>
+          <div className="admin-stats-grid">
+            <div className="admin-stat-card">
+              <span className="admin-stat-label">Total Members</span>
+              <span className="admin-stat-value">{summary.total_users}</span>
             </div>
-            <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 flex flex-col gap-1">
-              <span className="text-[11px] font-mono uppercase text-emerald-400 tracking-wider">Approved</span>
-              <span className="text-2xl font-bold text-emerald-400">{summary.approved_count}</span>
+            <div className="admin-stat-card">
+              <span className="admin-stat-label" style={{ color: '#10b981' }}>Approved</span>
+              <span className="admin-stat-value" style={{ color: '#10b981' }}>{summary.approved_count}</span>
             </div>
-            <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 flex flex-col gap-1">
-              <span className="text-[11px] font-mono uppercase text-amber-400 tracking-wider">Pending Invites</span>
-              <span className="text-2xl font-bold text-amber-400">{summary.pending_count}</span>
+            <div className="admin-stat-card">
+              <span className="admin-stat-label" style={{ color: '#f59e0b' }}>Pending Invites</span>
+              <span className="admin-stat-value" style={{ color: '#f59e0b' }}>{summary.pending_count}</span>
             </div>
-            <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 flex flex-col gap-1">
-              <span className="text-[11px] font-mono uppercase text-cyan-400 tracking-wider">Studio Spend</span>
-              <span className="text-2xl font-bold text-cyan-400">${summary.total_spend_usd.toFixed(2)}</span>
+            <div className="admin-stat-card">
+              <span className="admin-stat-label" style={{ color: '#818cf8' }}>Studio Spend</span>
+              <span className="admin-stat-value" style={{ color: '#818cf8' }}>${summary.total_spend_usd.toFixed(2)}</span>
             </div>
           </div>
 
           {/* Feedback alerts */}
           {error && (
-            <div className="flex items-center gap-2 p-3.5 rounded-xl bg-red-950/50 border border-red-800 text-red-300 text-xs animate-fade-in">
-              <AlertCircle size={16} className="shrink-0 text-red-400" />
+            <div className="auth-alert-error">
+              <AlertCircle size={16} style={{ flexShrink: 0 }} />
               <span>{error}</span>
             </div>
           )}
 
           {actionSuccess && (
-            <div className="flex items-center gap-2 p-3.5 rounded-xl bg-emerald-950/50 border border-emerald-800 text-emerald-300 text-xs animate-fade-in">
-              <CheckCircle2 size={16} className="shrink-0 text-emerald-400" />
+            <div style={{ padding: '0.75rem 1rem', borderRadius: '10px', background: 'rgba(16, 185, 129, 0.12)', border: '1px solid rgba(16, 185, 129, 0.3)', color: '#6ee7b7', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <CheckCircle2 size={16} style={{ flexShrink: 0 }} />
               <span>{actionSuccess}</span>
             </div>
           )}
 
           {/* Invite Form */}
-          <div className="p-5 rounded-2xl bg-slate-950/40 border border-slate-800/80 flex flex-col gap-4">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-300 font-mono flex items-center gap-2">
-              <UserPlus size={15} className="text-cyan-400" />
+          <div className="admin-invite-form">
+            <h3 style={{ fontSize: '0.72rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <UserPlus size={14} style={{ color: '#818cf8' }} />
               <span>Pre-authorize New Member</span>
             </h3>
 
-            <form onSubmit={handleInvite} className="flex flex-col sm:flex-row gap-3">
-              <div className="flex-1">
-                <input
-                  type="email"
-                  required
-                  value={inviteEmail}
-                  onChange={(e) => setInviteEmail(e.target.value)}
-                  placeholder="designer@fashionstudio.com"
-                  className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 focus:border-cyan-500 text-xs text-white placeholder-slate-500 outline-none transition"
-                />
-              </div>
+            <form onSubmit={handleInvite} className="admin-form-row">
+              <input
+                type="email"
+                required
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+                placeholder="designer@fashionstudio.com"
+                className="admin-input-email"
+              />
 
               <select
                 value={inviteRole}
                 onChange={(e) => setInviteRole(e.target.value)}
-                className="px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white outline-none focus:border-cyan-500"
+                className="admin-select-role"
               >
                 <option value="user">Studio Member (User)</option>
                 <option value="admin">Fashion Director (Admin)</option>
@@ -229,7 +223,7 @@ export default function AdminPortalModal({ isOpen, onClose }) {
               <button
                 type="submit"
                 disabled={isInviting}
-                className="py-2.5 px-5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold flex items-center justify-center gap-2 shadow-lg shadow-cyan-600/20 transition disabled:opacity-50"
+                className="admin-btn-primary"
               >
                 {isInviting ? <Loader2 size={15} className="animate-spin" /> : <UserPlus size={15} />}
                 <span>Add to Whitelist</span>
@@ -238,23 +232,24 @@ export default function AdminPortalModal({ isOpen, onClose }) {
           </div>
 
           {/* Users Table Controls */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2">
-            <div className="flex items-center gap-2 flex-1 max-w-sm relative">
-              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+          <div style={{ display: 'flex', flexWrap: 'wrap', itemsCenter: 'center', justifyBetween: 'space-between', gap: '0.75rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', position: 'relative', flex: 1, minWidth: '220px', maxWidth: '360px' }}>
+              <Search size={14} style={{ position: 'absolute', left: '0.75rem', color: 'var(--text-muted)', pointerEvents: 'none' }} />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search member email or name..."
-                className="w-full pl-9 pr-3.5 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-600 outline-none focus:border-cyan-500 transition"
+                className="admin-input-email"
+                style={{ paddingLeft: '2.2rem', width: '100%' }}
               />
             </div>
 
-            <div className="flex items-center gap-2">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
-                className="px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-300 outline-none focus:border-cyan-500"
+                className="admin-select-role"
               >
                 <option value="all">All Statuses ({users.length})</option>
                 <option value="approved">Approved</option>
@@ -266,86 +261,73 @@ export default function AdminPortalModal({ isOpen, onClose }) {
                 type="button"
                 onClick={loadUsers}
                 disabled={loading}
-                className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
+                className="admin-action-btn"
+                style={{ background: 'rgba(255, 255, 255, 0.06)', borderColor: 'var(--border-color)', color: 'var(--text-primary)' }}
                 title="Refresh user list"
               >
-                <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
+                <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
               </button>
             </div>
           </div>
 
           {/* Whitelist Table */}
-          <div className="rounded-2xl border border-slate-800 overflow-hidden bg-slate-950/30">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
+          <div className="admin-table-container">
+            <div style={{ overflowX: 'auto' }}>
+              <table className="admin-table">
                 <thead>
-                  <tr className="border-b border-slate-800/80 bg-slate-950/60 text-slate-400 font-mono uppercase text-[10px] tracking-wider">
-                    <th className="py-3 px-4">Member</th>
-                    <th className="py-3 px-4">Role</th>
-                    <th className="py-3 px-4">Status</th>
-                    <th className="py-3 px-4">Spend</th>
-                    <th className="py-3 px-4 text-right">Actions</th>
+                  <tr>
+                    <th>Member</th>
+                    <th>Role</th>
+                    <th>Status</th>
+                    <th>Spend</th>
+                    <th style={{ textAlign: 'right' }}>Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-800/60">
+                <tbody>
                   {loading && users.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="py-8 text-center text-slate-500">
-                        <Loader2 size={20} className="animate-spin mx-auto mb-2 text-cyan-400" />
+                      <td colSpan={5} style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                        <Loader2 size={20} className="animate-spin" style={{ margin: '0 auto 0.5rem auto', color: '#818cf8' }} />
                         Loading studio whitelist...
                       </td>
                     </tr>
                   ) : filteredUsers.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="py-8 text-center text-slate-500">
+                      <td colSpan={5} style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
                         No members match the current filter.
                       </td>
                     </tr>
                   ) : (
                     filteredUsers.map((u) => (
-                      <tr key={u.id || u.email} className="hover:bg-slate-800/30 transition">
+                      <tr key={u.id || u.email}>
                         {/* Member */}
-                        <td className="py-3 px-4">
-                          <div className="flex items-center gap-2.5">
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
                             {u.photo_url ? (
-                              <img src={u.photo_url} alt="" className="w-7 h-7 rounded-full object-cover border border-slate-700" />
+                              <img src={u.photo_url} alt="" style={{ width: '28px', height: '28px', borderRadius: '50%', objectFit: 'cover' }} />
                             ) : (
-                              <div className="w-7 h-7 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-cyan-400 font-mono text-[11px] font-bold">
+                              <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'rgba(99, 102, 241, 0.2)', border: '1px solid rgba(99, 102, 241, 0.4)', display: 'flex', alignItems: 'center', justifyCenter: 'center', color: '#818cf8', fontFamily: 'var(--font-mono)', fontSize: '0.75rem', fontWeight: 700 }}>
                                 {(u.email || 'U')[0].toUpperCase()}
                               </div>
                             )}
-                            <div className="flex flex-col">
-                              <span className="font-semibold text-white">{u.display_name || u.email}</span>
-                              <span className="text-[11px] text-slate-400 font-mono">{u.email}</span>
+                            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                              <span style={{ fontWeight: 600, color: '#ffffff' }}>{u.display_name || u.email}</span>
+                              <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{u.email}</span>
                             </div>
                           </div>
                         </td>
 
                         {/* Role */}
-                        <td className="py-3 px-4">
-                          <span
-                            className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-mono uppercase tracking-wider font-semibold ${
-                              u.role === 'admin'
-                                ? 'bg-purple-950/60 text-purple-300 border border-purple-800/50'
-                                : 'bg-slate-800 text-slate-300 border border-slate-700'
-                            }`}
-                          >
-                            {u.role === 'admin' ? <Shield size={10} /> : null}
+                        <td>
+                          <span className="admin-badge" style={u.role === 'admin' ? { background: 'rgba(168, 85, 247, 0.12)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.3)' } : { background: 'rgba(255, 255, 255, 0.06)', color: 'var(--text-secondary)', border: '1px solid var(--border-color)' }}>
+                            {u.role === 'admin' && <Shield size={10} />}
                             {u.role}
                           </span>
                         </td>
 
                         {/* Status */}
-                        <td className="py-3 px-4">
-                          <span
-                            className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-mono uppercase tracking-wider font-semibold ${
-                              u.status === 'approved'
-                                ? 'bg-emerald-950/60 text-emerald-300 border border-emerald-800/50'
-                                : u.status === 'pending_invite'
-                                ? 'bg-amber-950/60 text-amber-300 border border-amber-800/50'
-                                : 'bg-red-950/60 text-red-300 border border-red-800/50'
-                            }`}
-                          >
+                        <td>
+                          <span className={`admin-badge ${u.status === 'approved' ? 'admin-badge-approved' : u.status === 'pending_invite' ? 'admin-badge-pending' : 'admin-badge-disabled'}`}>
                             {u.status === 'approved' && <CheckCircle2 size={10} />}
                             {u.status === 'pending_invite' && <Clock size={10} />}
                             {u.status === 'disabled' && <Ban size={10} />}
@@ -354,21 +336,18 @@ export default function AdminPortalModal({ isOpen, onClose }) {
                         </td>
 
                         {/* Spend */}
-                        <td className="py-3 px-4 font-mono text-slate-300">
+                        <td style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>
                           ${(u.total_spend_usd || 0).toFixed(2)}
                         </td>
 
                         {/* Actions */}
-                        <td className="py-3 px-4 text-right">
-                          <div className="inline-flex items-center gap-1.5">
+                        <td style={{ textAlign: 'right' }}>
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
                             <button
                               type="button"
                               onClick={() => handleToggleStatus(u)}
-                              className={`p-1.5 rounded-lg border text-[11px] transition ${
-                                u.status === 'approved'
-                                  ? 'bg-amber-950/30 border-amber-800/50 text-amber-300 hover:bg-amber-900/40'
-                                  : 'bg-emerald-950/30 border-emerald-800/50 text-emerald-300 hover:bg-emerald-900/40'
-                              }`}
+                              className="admin-action-btn"
+                              style={u.status === 'approved' ? { background: 'rgba(245, 158, 11, 0.12)', color: '#f59e0b', borderColor: 'rgba(245, 158, 11, 0.3)' } : { background: 'rgba(16, 185, 129, 0.12)', color: '#10b981', borderColor: 'rgba(16, 185, 129, 0.3)' }}
                               title={u.status === 'approved' ? 'Disable Account' : 'Approve Account'}
                             >
                               {u.status === 'approved' ? 'Disable' : 'Approve'}
@@ -377,10 +356,11 @@ export default function AdminPortalModal({ isOpen, onClose }) {
                             <button
                               type="button"
                               onClick={() => handleDelete(u)}
-                              className="p-1.5 rounded-lg bg-red-950/30 border border-red-800/50 text-red-400 hover:bg-red-900/40 transition"
+                              className="admin-action-btn"
+                              style={{ background: 'rgba(239, 68, 68, 0.12)', color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.3)' }}
                               title="Delete / Revoke Member"
                             >
-                              <Trash2 size={13} />
+                              <Trash2 size={12} />
                             </button>
                           </div>
                         </td>
@@ -394,11 +374,12 @@ export default function AdminPortalModal({ isOpen, onClose }) {
         </div>
 
         {/* Modal Footer */}
-        <div className="p-4 border-t border-slate-800/80 flex items-center justify-between bg-slate-950/40 text-xs text-slate-500 font-mono">
+        <div style={{ padding: '1rem 1.5rem', borderTop: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyBetween: 'space-between', background: 'rgba(9, 11, 16, 0.5)', fontSize: '0.75rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
           <span>Whitelist synchronization is instant</span>
           <button
             onClick={onClose}
-            className="py-1.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-sans transition"
+            className="auth-btn-secondary"
+            style={{ width: 'auto', padding: '0.4rem 1rem' }}
           >
             Close
           </button>

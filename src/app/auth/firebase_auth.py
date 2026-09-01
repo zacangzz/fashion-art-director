@@ -33,6 +33,8 @@ def get_raw_user(request: Request) -> dict:
         or path.startswith("/assets/")
         or path.startswith("/api/images/")
         or path.startswith("/api/models")
+        or path.startswith("/api/wardrobe/sources/")
+        or (path.startswith("/api/wardrobe/items/") and ("/image" in path or "/upscaled-image" in path))
         or path == "/favicon.ico"
     ):
         auth_header = request.headers.get("Authorization")

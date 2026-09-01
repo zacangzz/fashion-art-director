@@ -924,28 +924,28 @@ export default function App() {
             </button>
 
             {currentUser && (
-              <div className="flex items-center gap-2 pl-2 border-l border-slate-800">
+              <div className="user-nav-group">
                 {userProfile?.is_admin && (
                   <button
                     type="button"
                     onClick={() => setIsAdminModalOpen(true)}
-                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-purple-950/60 hover:bg-purple-900/60 border border-purple-800/60 text-purple-300 text-xs font-semibold transition shadow-sm"
+                    className="admin-nav-btn"
                     title="Studio Whitelist & Team Management"
                     aria-label="Studio Whitelist"
                   >
-                    <UsersIcon size={14} />
-                    <span className="hidden sm:inline">Admin</span>
+                    <UsersIcon size={13} />
+                    <span>Admin</span>
                   </button>
                 )}
 
                 <div
-                  className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-slate-800/80 border border-slate-700 text-xs text-slate-200"
+                  className="user-profile-chip"
                   title={`Signed in as ${currentUser.email || currentUser.displayName || 'User'}`}
                 >
-                  <div className="w-5 h-5 rounded-full bg-gradient-to-tr from-cyan-600 to-blue-500 flex items-center justify-center text-[10px] font-bold text-white uppercase shadow-sm">
+                  <div className="user-profile-avatar">
                     {(currentUser.email || currentUser.displayName || 'U')[0]}
                   </div>
-                  <span className="max-w-[100px] truncate text-[11px] font-medium hidden sm:inline">
+                  <span className="user-profile-name">
                     {userProfile?.display_name || currentUser.displayName || currentUser.email?.split('@')[0]}
                   </span>
                 </div>
@@ -953,11 +953,12 @@ export default function App() {
                 <button
                   type="button"
                   onClick={signOutUser}
-                  className="nav-utility-btn text-slate-400 hover:text-red-400"
+                  className="nav-utility-btn"
                   title="Sign Out"
                   aria-label="Sign Out"
+                  style={{ color: '#f87171' }}
                 >
-                  <LogOut size={16} />
+                  <LogOut size={15} />
                 </button>
               </div>
             )}

@@ -385,11 +385,15 @@ class WardrobeService:
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }
 
-            self.db.create_wardrobe_item(user_id=user_id, item_data=db_payload)
+            created = self.db.create_wardrobe_item(user_id=user_id, item_data=db_payload)
 
-            res_item = dict(db_payload)
+            res_item = dict(created)
             res_item["bbox"] = norm_box
             res_item["extracted_details"] = details
+            if not res_item.get("image_url"):
+                res_item["image_url"] = f"/api/images/{crop_storage_path.lstrip('/')}"
+            if not res_item.get("source_image_url"):
+                res_item["source_image_url"] = f"/api/images/{source_storage_path.lstrip('/')}"
             return res_item
 
         max_workers = min(4, max(1, len(items_raw))) if items_raw else 1
@@ -486,7 +490,9 @@ class WardrobeService:
                 "label": label,
                 "category": category,
                 "upscaled_image_path": upscaled_storage_path,
+                "upscaled_image_url": f"/api/images/{upscaled_storage_path.lstrip('/')}",
                 "upscale_status": "completed",
+                "is_upscaled": True,
                 "cost_usd": upscale_cost,
                 "tokens": upscale_tokens,
             }

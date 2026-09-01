@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 # ==============================================================================
@@ -438,19 +438,61 @@ class GarmentExtractedDetails(BaseModel):
 
 
 class GarmentCard(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     id: str
     label: str
     category: Optional[str] = "tops"
-    image_url: str
+    image_url: Optional[str] = ""
     upscaled_image_url: Optional[str] = None
     source_image_url: Optional[str] = None
+    cropped_image_path: Optional[str] = None
+    source_image_path: Optional[str] = None
+    upscaled_image_path: Optional[str] = None
     bbox: Optional[List[float]] = None
+    bbox_json: Optional[Any] = None
     extracted_details: Optional[Union[GarmentExtractedDetails, Dict[str, Any]]] = None
+    extracted_details_json: Optional[Any] = None
     created_at: Optional[str] = None
     upscale_status: Optional[str] = "pending"
     is_upscaled: bool = False
     cost_usd: float = 0.0
     tokens: int = 0
+
+    @model_validator(mode="before")
+    @classmethod
+    def populate_image_urls(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            item_id = data.get("id", "")
+            if not data.get("image_url"):
+                crop = data.get("cropped_image_path")
+                if crop:
+                    data["image_url"] = (
+                        crop
+                        if (crop.startswith("http://") or crop.startswith("https://") or crop.startswith("/api/"))
+                        else f"/api/images/{crop.lstrip('/')}"
+                    )
+                elif item_id:
+                    data["image_url"] = f"/api/wardrobe/items/{item_id}/image"
+                else:
+                    data["image_url"] = ""
+
+            if not data.get("upscaled_image_url") and data.get("upscaled_image_path"):
+                up = data.get("upscaled_image_path")
+                data["upscaled_image_url"] = (
+                    up
+                    if (up.startswith("http://") or up.startswith("https://") or up.startswith("/api/"))
+                    else f"/api/images/{up.lstrip('/')}"
+                )
+
+            if not data.get("source_image_url") and data.get("source_image_path"):
+                src = data.get("source_image_path")
+                data["source_image_url"] = (
+                    src
+                    if (src.startswith("http://") or src.startswith("https://") or src.startswith("/api/"))
+                    else f"/api/images/{src.lstrip('/')}"
+                )
+        return data
 
 
 class WardrobeUploadResponse(BaseModel):
@@ -517,4 +559,20 @@ class WardrobeComposeResponse(BaseModel):
     tokens: Optional[int] = 0
     accumulated_cost_usd: Optional[float] = 0.0
     accumulated_tokens: Optional[int] = 0
+
+
+class UpscaleGarmentRequest(BaseModel):
+    imagen_model: Optional[str] = None
+
+
+class UpscaleGarmentResponse(BaseModel):
+    id: str
+    label: str
+    category: Optional[str] = "tops"
+    upscaled_image_path: Optional[str] = None
+    upscaled_image_url: Optional[str] = None
+    upscale_status: str = "completed"
+    is_upscaled: bool = True
+    cost_usd: float = 0.0
+    tokens: int = 0
 

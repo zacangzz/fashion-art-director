@@ -269,6 +269,7 @@ class FirestoreManager:
     # -------------------------------------------------------------------------
     def _normalize_wardrobe_doc(self, data: Dict[str, Any]) -> Dict[str, Any]:
         data = dict(data)
+        item_id = data.get("id", "")
         bbox = data.get("bbox_json") or data.get("bbox")
         if isinstance(bbox, str):
             import json
@@ -294,6 +295,42 @@ class FirestoreManager:
         data["is_upscaled"] = bool(data.get("upscaled_image_path") and data.get("upscale_status") == "completed")
         data["cost_usd"] = float(data.get("cost_usd") or 0.0)
         data["tokens"] = int(data.get("tokens") or 0)
+
+        # Ensure image URLs are populated for clients
+        cropped_path = data.get("cropped_image_path")
+        if not data.get("image_url"):
+            if cropped_path:
+                if cropped_path.startswith("http://") or cropped_path.startswith("https://") or cropped_path.startswith("/api/"):
+                    data["image_url"] = cropped_path
+                else:
+                    data["image_url"] = f"/api/images/{cropped_path.lstrip('/')}"
+            elif item_id:
+                data["image_url"] = f"/api/wardrobe/items/{item_id}/image"
+            else:
+                data["image_url"] = ""
+
+        upscaled_path = data.get("upscaled_image_path")
+        if not data.get("upscaled_image_url"):
+            if upscaled_path:
+                if upscaled_path.startswith("http://") or upscaled_path.startswith("https://") or upscaled_path.startswith("/api/"):
+                    data["upscaled_image_url"] = upscaled_path
+                else:
+                    data["upscaled_image_url"] = f"/api/images/{upscaled_path.lstrip('/')}"
+            elif item_id and data.get("is_upscaled"):
+                data["upscaled_image_url"] = f"/api/wardrobe/items/{item_id}/upscaled-image"
+            else:
+                data["upscaled_image_url"] = None
+
+        source_path = data.get("source_image_path")
+        if not data.get("source_image_url"):
+            if source_path:
+                if source_path.startswith("http://") or source_path.startswith("https://") or source_path.startswith("/api/"):
+                    data["source_image_url"] = source_path
+                else:
+                    data["source_image_url"] = f"/api/images/{source_path.lstrip('/')}"
+            else:
+                data["source_image_url"] = None
+
         return data
 
     def create_wardrobe_item(self, user_id: str, item_data: Dict[str, Any]) -> Dict[str, Any]:

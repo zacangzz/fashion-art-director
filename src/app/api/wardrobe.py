@@ -1,7 +1,7 @@
 import os
 import uuid
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, status, Depends
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import RedirectResponse
 from typing import Optional
 
 from app.config import get_settings
@@ -15,6 +15,8 @@ from app.schemas.domain import (
     ClothingRegion,
     WardrobeComposeRequest,
     WardrobeComposeResponse,
+    UpscaleGarmentRequest,
+    UpscaleGarmentResponse,
 )
 from app.utils.error_handler import parse_and_raise_http_error
 from app.dependencies import (
@@ -75,8 +77,34 @@ def list_wardrobe_items(
     """
     Lists all saved active wardrobe items for the authenticated user.
     """
-    items = db_manager.list_wardrobe_items(user_id=user["uid"])
-    return WardrobeListResponse(items=[GarmentCard(**item) for item in items])
+    try:
+        items = db_manager.list_wardrobe_items(user_id=user["uid"])
+        return WardrobeListResponse(items=[GarmentCard(**item) for item in items])
+    except Exception as exc:
+        parse_and_raise_http_error(exc, context="List Wardrobe Items")
+
+
+@router.post("/items/{item_id}/upscale", response_model=UpscaleGarmentResponse)
+def upscale_wardrobe_item(
+    item_id: str,
+    request: Optional[UpscaleGarmentRequest] = None,
+    user: dict = Depends(get_current_user),
+    wardrobe_service: WardrobeService = Depends(get_wardrobe_service),
+):
+    """
+    Triggers AI upscaling and enhancement for a single wardrobe item.
+    """
+    settings = get_settings()
+    eff_imagen_model = (request.imagen_model if request else None) or settings.IMAGEN_MODEL
+    try:
+        result = wardrobe_service.upscale_garment(
+            item_id=item_id,
+            user_id=user["uid"],
+            imagen_model=eff_imagen_model,
+        )
+        return UpscaleGarmentResponse(**result)
+    except Exception as exc:
+        parse_and_raise_http_error(exc, model_name=eff_imagen_model, context="Garment Upscale")
 
 
 @router.delete("/items/{item_id}")
@@ -88,13 +116,18 @@ def delete_wardrobe_item(
     """
     Soft-deletes an individual wardrobe item.
     """
-    deleted = db_manager.delete_wardrobe_item(item_id)
-    if not deleted:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Wardrobe item '{item_id}' not found.",
-        )
-    return {"status": "deleted", "id": item_id}
+    try:
+        deleted = db_manager.delete_wardrobe_item(item_id)
+        if not deleted:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Wardrobe item '{item_id}' not found.",
+            )
+        return {"status": "deleted", "id": item_id}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        parse_and_raise_http_error(exc, context="Delete Wardrobe Item")
 
 
 @router.delete("/items")
@@ -105,8 +138,11 @@ def delete_all_wardrobe_items(
     """
     Soft-deletes all wardrobe items in the user library.
     """
-    count = db_manager.delete_all_wardrobe_items(user_id=user["uid"])
-    return {"status": "deleted", "count": count}
+    try:
+        count = db_manager.delete_all_wardrobe_items(user_id=user["uid"])
+        return {"status": "deleted", "count": count}
+    except Exception as exc:
+        parse_and_raise_http_error(exc, context="Delete All Wardrobe Items")
 
 
 @router.get("/items/{item_id}/image")
@@ -117,7 +153,7 @@ def get_wardrobe_item_image(
     storage_service: StorageService = Depends(get_storage_service),
 ):
     """
-    Serves the cropped garment thumbnail image via signed URL redirect or local file.
+    Serves the cropped garment thumbnail image via the unified StorageService.
     """
     item = db_manager.get_wardrobe_item(item_id)
     if not item or not item.get("cropped_image_path"):
@@ -126,9 +162,6 @@ def get_wardrobe_item_image(
             detail=f"Image for wardrobe item '{item_id}' not found.",
         )
     crop_path = item["cropped_image_path"]
-    if os.path.exists(crop_path):
-        return FileResponse(crop_path, media_type="image/png")
-    
     url = storage_service.get_signed_download_url(crop_path)
     return RedirectResponse(url=url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
@@ -141,7 +174,7 @@ def get_wardrobe_item_upscaled_image(
     storage_service: StorageService = Depends(get_storage_service),
 ):
     """
-    Serves the high-definition AI-upscaled garment image.
+    Serves the high-definition AI-upscaled garment image via the unified StorageService.
     Falls back to cropped image if upscale is pending/in-progress.
     """
     item = db_manager.get_wardrobe_item(item_id)
@@ -150,24 +183,14 @@ def get_wardrobe_item_upscaled_image(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Wardrobe item '{item_id}' not found.",
         )
-    upscaled_path = item.get("upscaled_image_path")
-    if upscaled_path:
-        if os.path.exists(upscaled_path):
-            return FileResponse(upscaled_path, media_type="image/png")
-        url = storage_service.get_signed_download_url(upscaled_path)
-        return RedirectResponse(url=url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
-
-    crop_path = item.get("cropped_image_path")
-    if crop_path:
-        if os.path.exists(crop_path):
-            return FileResponse(crop_path, media_type="image/png")
-        url = storage_service.get_signed_download_url(crop_path)
-        return RedirectResponse(url=url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
-
-    raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail=f"No image available for wardrobe item '{item_id}'.",
-    )
+    target_path = item.get("upscaled_image_path") or item.get("cropped_image_path")
+    if not target_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No image available for wardrobe item '{item_id}'.",
+        )
+    url = storage_service.get_signed_download_url(target_path)
+    return RedirectResponse(url=url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
 
 @router.get("/sources/{filename}")
@@ -177,14 +200,10 @@ def get_wardrobe_source_image(
     storage_service: StorageService = Depends(get_storage_service),
 ):
     """
-    Serves the original source sheet image.
+    Serves the original source sheet image via the unified StorageService.
     """
-    settings = get_settings()
-    filepath = os.path.join(settings.STORAGE_DIR, "wardrobe", "sources", filename)
-    if os.path.exists(filepath):
-        return FileResponse(filepath)
-    
-    url = storage_service.get_signed_download_url(f"{user['uid']}/wardrobe/sources/{filename}")
+    target_path = f"{user['uid']}/wardrobe/sources/{filename}"
+    url = storage_service.get_signed_download_url(target_path)
     return RedirectResponse(url=url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
 

@@ -171,3 +171,106 @@ def test_upscale_garment_flow(test_db, dummy_image_bytes, tmp_path):
     updated = test_db.get_wardrobe_item("item_123")
     assert updated["upscale_status"] == "completed"
     assert updated["upscaled_image_path"] is not None
+
+
+def test_wardrobe_api_endpoints(test_db, dummy_image_bytes, tmp_path):
+    storage_dir = str(tmp_path / "storage")
+    fake_bucket = MagicMock()
+    fake_blob = MagicMock()
+    fake_blob.download_as_bytes.return_value = dummy_image_bytes
+    fake_bucket.blob.return_value = fake_blob
+    storage_service = StorageService(bucket=fake_bucket, environment="local")
+
+    mock_client = MagicMock()
+    mock_seg_response = MagicMock()
+    mock_seg_response.text = json.dumps({
+        "items": [
+            {
+                "label": "Emerald Silk Shirt",
+                "category": "tops",
+                "bounding_box": [10, 10, 80, 80],
+            }
+        ]
+    })
+    mock_client.models.generate_content.return_value = mock_seg_response
+
+    mock_interaction = MagicMock()
+    mock_interaction.output_image = MagicMock(data=dummy_image_bytes)
+    mock_interaction.text = json.dumps({
+        "items": [
+            {
+                "label": "Emerald Silk Shirt",
+                "category": "tops",
+                "bounding_box": [10, 10, 80, 80],
+            }
+        ]
+    })
+    mock_interaction.output_text = mock_interaction.text
+    mock_interaction.usage_metadata = MagicMock(prompt_token_count=100, candidates_token_count=100, total_token_count=200)
+    mock_client.interactions.create.return_value = mock_interaction
+
+    image_generator = ImageGenerator(client=mock_client)
+    wardrobe_service = WardrobeService(
+        db_manager=test_db,
+        storage_service=storage_service,
+        api_key="fake-key",
+        storage_dir=storage_dir,
+        client=mock_client,
+        image_generator=image_generator,
+    )
+
+    from app.dependencies import get_db_manager, get_storage_service, get_wardrobe_service
+    app.dependency_overrides[get_db_manager] = lambda: test_db
+    app.dependency_overrides[get_storage_service] = lambda: storage_service
+    app.dependency_overrides[get_wardrobe_service] = lambda: wardrobe_service
+
+    client = TestClient(app)
+
+    try:
+        # 1. Test GET /api/wardrobe/items when empty
+        res = client.get("/api/wardrobe/items")
+        assert res.status_code == 200
+        assert res.json() == {"items": []}
+
+        # 2. Test POST /api/wardrobe/upload
+        upload_res = client.post(
+            "/api/wardrobe/upload",
+            files={"file": ("test_sheet.png", dummy_image_bytes, "image/png")},
+        )
+        assert upload_res.status_code == 200
+        data = upload_res.json()
+        assert len(data["items"]) == 1
+        item = data["items"][0]
+        assert item["label"] == "Emerald Silk Shirt"
+        assert item["category"] == "tops"
+        assert item["image_url"].startswith("/api/images/")
+        item_id = item["id"]
+
+        # 3. Test GET /api/wardrobe/items with item populated
+        list_res = client.get("/api/wardrobe/items")
+        assert list_res.status_code == 200
+        items = list_res.json()["items"]
+        assert len(items) == 1
+        assert items[0]["id"] == item_id
+        assert items[0]["image_url"].startswith("/api/images/")
+
+        # 4. Test POST /api/wardrobe/items/{item_id}/upscale
+        upscale_res = client.post(f"/api/wardrobe/items/{item_id}/upscale", json={})
+        assert upscale_res.status_code == 200
+        upscale_data = upscale_res.json()
+        assert upscale_data["id"] == item_id
+        assert upscale_data["upscale_status"] == "completed"
+        assert upscale_data["is_upscaled"] is True
+        assert upscale_data["upscaled_image_url"].startswith("/api/images/")
+
+        # 5. Test DELETE /api/wardrobe/items/{item_id}
+        del_res = client.delete(f"/api/wardrobe/items/{item_id}")
+        assert del_res.status_code == 200
+        assert del_res.json()["status"] == "deleted"
+
+        # 6. Verify empty list after delete
+        list_res_after = client.get("/api/wardrobe/items")
+        assert list_res_after.status_code == 200
+        assert len(list_res_after.json()["items"]) == 0
+    finally:
+        app.dependency_overrides.clear()
