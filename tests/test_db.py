@@ -215,3 +215,59 @@ def test_firestore_pydantic_serialization(db_manager):
     assert fetched["schema_json"]["categories"]["camera_optics"][0]["label"] == "28mm wide-angle lens"
     assert fetched["schema_json"]["conflicts"][0]["explanation"] == "Lens focal length mismatch"
 
+
+def test_firestore_user_management(db_manager):
+    # 1. Invite a new user
+    invite = db_manager.create_user_invite("designer@fashion.com", role="user", invited_by="admin_1")
+    assert invite["email"] == "designer@fashion.com"
+    assert invite["status"] == "pending_invite"
+    assert invite["role"] == "user"
+
+    # 2. Get user by email
+    found = db_manager.get_user_by_email("designer@fashion.com")
+    assert found is not None
+    assert found["id"] == invite["id"]
+
+    # 3. User signs in with Firebase Auth UID
+    activated = db_manager.activate_user_on_login(
+        uid="firebase_uid_123",
+        email="designer@fashion.com",
+        display_name="Fashion Designer",
+        photo_url="https://example.com/avatar.jpg",
+    )
+    assert activated["id"] == "firebase_uid_123"
+    assert activated["status"] == "approved"
+    assert activated["role"] == "user"
+    assert activated["display_name"] == "Fashion Designer"
+
+    # 4. Bootstrap admin activation
+    admin_user = db_manager.activate_user_on_login(
+        uid="admin_uid_999",
+        email="chief@director.com",
+        display_name="Chief Director",
+        is_bootstrap_admin=True,
+    )
+    assert admin_user["id"] == "admin_uid_999"
+    assert admin_user["role"] == "admin"
+    assert admin_user["status"] == "approved"
+
+    # 5. List users
+    all_users = db_manager.list_users()
+    assert len(all_users) >= 2
+
+    # 6. Update user status
+    updated = db_manager.update_user_status("firebase_uid_123", status="disabled")
+    assert updated["status"] == "disabled"
+
+    # 7. Add spend
+    db_manager.add_user_spend("firebase_uid_123", cost_usd=0.25, tokens=500)
+    user_after_spend = db_manager.get_user("firebase_uid_123")
+    assert user_after_spend["total_spend_usd"] == 0.25
+    assert user_after_spend["total_tokens"] == 500
+
+    # 8. Delete user
+    deleted = db_manager.delete_user("firebase_uid_123")
+    assert deleted is True
+    assert db_manager.get_user("firebase_uid_123") is None
+
+

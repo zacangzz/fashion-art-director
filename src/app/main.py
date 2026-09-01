@@ -11,7 +11,7 @@ from app.config import get_settings
 from app.firebase_init import initialize_firebase
 from app.dependencies import get_db_manager, get_storage_service
 from app.services.storage_service import StorageService
-from app.api import moodboard, generation, history, export, inpaint, refinement, wardrobe, telemetry, config
+from app.api import moodboard, generation, history, export, inpaint, refinement, wardrobe, telemetry, config, auth
 from app.utils.telemetry import (
     set_current_request_id,
     generate_request_id,
@@ -112,6 +112,7 @@ app.add_middleware(
 
 # Include API Routers
 app.include_router(config.router)
+app.include_router(auth.router)
 app.include_router(moodboard.router)
 app.include_router(generation.router)
 app.include_router(history.router)

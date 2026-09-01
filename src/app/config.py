@@ -18,6 +18,13 @@ class Settings(BaseSettings):
     IMAGEN_MODEL: str = "gemini-3-pro-image"
     INPAINT_MODEL: str = "gemini-3-pro-image"
     GENAI_TIMEOUT_SECONDS: int = 300
+    ADMIN_EMAILS: str = ""
+
+    def is_admin_email(self, email: str | None) -> bool:
+        if not email:
+            return False
+        admin_list = [e.strip().lower() for e in self.ADMIN_EMAILS.split(",") if e.strip()]
+        return email.strip().lower() in admin_list
 
     @field_validator("VISION_MODEL", "IMAGEN_MODEL", "INPAINT_MODEL", mode="before")
     @classmethod

@@ -1,7 +1,7 @@
 # Technical Specification (SPEC)
 ## Fashion AI Studio (Image Gen Pipeline)
 
-**Document Version**: 6.0  
+**Document Version**: 7.0  
 **Status**: Active / Production Cloud-Native Specification  
 **Last Updated**: 2026-09-01  
 
@@ -16,7 +16,8 @@ Fashion AI Studio is a cloud-native, deterministic generative production pipelin
 │                    FIREBASE HOSTING & GLOBAL CDN EDGE                      │
 │  • Production URL: https://ai-art-director-prod.web.app                    │
 │  • Edge Rewrites: /api/** -> Cloud Run | /health -> Cloud Run | ** -> SPA  │
-│  • React SPA: 5-Step Workflow, Canvas Studio, Wardrobe Studio, AuthModal   │
+│  • React SPA: 5-Step Workflow, Canvas Studio, Wardrobe Studio, AuthPortal, │
+│    AdminPortalModal, History Drawer, Observability Dashboard               │
 └─────────────────────────────────────┬──────────────────────────────────────┘
                                       │ HTTPS / Same-Origin API Requests
                                       ▼
@@ -24,8 +25,8 @@ Fashion AI Studio is a cloud-native, deterministic generative production pipelin
 │                       GOOGLE CLOUD RUN BACKEND SERVICE                     │
 │  • Service Name: fashion-art-director (asia-southeast1, auto-scaling 0–5)  │
 │  • Runtime: Python 3.11-slim + uv + Uvicorn (FastAPI)                      │
-│  • Auth Dependency: Firebase Auth JWT Bearer Token Verification            │
-│  • API Routers: config, moodboard, generation, refinement, inpaint,        │
+│  • Auth Dependency: Firebase Auth JWT Token & Whitelist Verification       │
+│  • API Routers: auth, config, moodboard, generation, refinement, inpaint,  │
 │    wardrobe, export, history, telemetry                                    │
 │  • Edge Proxy: /api/images/{file_path:path} -> HTTP 307 Signed GCS URL     │
 └──────┬──────────────┬──────────────┬──────────────┬──────────────┬─────────┘
@@ -42,7 +43,7 @@ Fashion AI Studio is a cloud-native, deterministic generative production pipelin
 ┌────────────────────────────────────────────────────────────────────────────┐
 │                   MANAGED GOOGLE CLOUD INFRASTRUCTURE                      │
 │  • Google GenAI Interactions API (gemini-3.5-flash-lite, gemini-3-pro-image)│
-│  • Cloud Firestore: 7 Flat Collections with Multi-User Query Isolation     │
+│  • Cloud Firestore: 8 Flat Collections with Multi-User Query Isolation     │
 │  • Cloud Storage: gs://ai-art-director-prod-store (CORS + Signed URLs)     │
 │  • Secret Manager: GEMINI_API_KEY (Accessed by studio-runner SA)           │
 │  • CI/CD: GitHub Actions with Keyless Workload Identity Federation (WIF)   │
@@ -57,7 +58,26 @@ The database layer utilizes **Google Cloud Firestore** in Native Mode (`ai-art-d
 
 ### 2.1 Collections Schema
 
-#### 1. `moodboards`
+#### 1. `users`
+Tracks authorized studio team members, roles, approval statuses, and cumulative spend metrics.
+```json
+{
+  "id": "user_firebase_uid",
+  "email": "director@fashionstudio.com",
+  "display_name": "Fashion Director",
+  "photo_url": "https://example.com/avatar.jpg",
+  "role": "admin",
+  "status": "approved",
+  "invited_by": "system_bootstrap",
+  "created_at": "2026-09-01T12:00:00Z",
+  "approved_at": "2026-09-01T12:00:00Z",
+  "last_login_at": "2026-09-01T15:00:00Z",
+  "total_spend_usd": 2.45,
+  "total_tokens": 14200
+}
+```
+
+#### 2. `moodboards`
 Stores moodboard ingestion batches, uploaded file GCS paths, and upstream analysis costs.
 ```json
 {
@@ -72,7 +92,7 @@ Stores moodboard ingestion batches, uploaded file GCS paths, and upstream analys
 }
 ```
 
-#### 2. `generations`
+#### 3. `generations`
 Stores rendered images, prompts, seeds, aspect ratios, model names, parent lineage pointers, and pre-aggregated costs.
 ```json
 {
@@ -99,7 +119,7 @@ Stores rendered images, prompts, seeds, aspect ratios, model names, parent linea
 }
 ```
 
-#### 3. `conversations`
+#### 4. `conversations`
 Tracks multi-turn refinement threads anchored to a root baseline generation.
 ```json
 {
@@ -108,20 +128,6 @@ Tracks multi-turn refinement threads anchored to a root baseline generation.
   "baseline_generation_id": "gen_root_001",
   "moodboard_id": "mb_abc123",
   "created_at": "2026-09-01T12:01:00Z"
-}
-```
-
-#### 4. `conversation_messages`
-Stores individual conversation chat turns within a thread.
-```json
-{
-  "id": "msg_001",
-  "user_id": "user_firebase_uid",
-  "conversation_id": "conv_789",
-  "role": "user",
-  "content": "Make lighting warmer and change background to concrete loft.",
-  "generation_id": "gen_def456",
-  "created_at": "2026-09-01T12:05:00Z"
 }
 ```
 
@@ -181,6 +187,18 @@ Stores request lifecycle and audit logs dispatched asynchronously via background
 }
 ```
 
+#### 8. `usage_daily`
+Tracks aggregated daily spend per user to enforce optional budget caps.
+```json
+{
+  "id": "user_firebase_uid_2026-09-01",
+  "user_id": "user_firebase_uid",
+  "date": "2026-09-01",
+  "total_cost_usd": 1.45,
+  "request_count": 18
+}
+```
+
 ---
 
 ## 3. Storage Architecture & GCS Signed URLs
@@ -193,16 +211,47 @@ Stores request lifecycle and audit logs dispatched asynchronously via background
 
 ---
 
-## 4. Authentication & Security Architecture
+## 4. Authentication, Security & Whitelist Architecture
 
-1. **Firebase Authentication**:
-   - Web frontend initializes Firebase SDK (`src/frontend/src/config/firebase.js`).
-   - Supports Google OAuth popup & Email/Password login.
-   - `authFetch` in `apiClient.js` automatically obtains `getIdToken()` and appends `Authorization: Bearer <ID_TOKEN>`.
-2. **FastAPI Auth Dependency**:
-   - `get_current_user` in `src/app/auth/firebase_auth.py` validates JWT tokens via `firebase_admin.auth.verify_id_token(token)`.
-   - Resolves `UserContext(user_id=decoded["uid"], email=decoded["email"])`.
-   - In local development mode (`ENVIRONMENT=local`), falls back seamlessly to `local_dev_user`.
+```mermaid
+flowchart TD
+    A[Visitor Accesses App] --> B{Firebase Auth State}
+    B -- Not Signed In --> C[Full-Screen AuthPortal Lock]
+    C -- Google OAuth / Email Login --> D[Firebase Verify ID Token]
+    D --> E[Check Firestore 'users' & ADMIN_EMAILS]
+    E -- Whitelisted & Approved --> F[Unlock Studio Workspace]
+    E -- Unauthorized / Disabled --> G[Access Restricted View]
+    
+    F --> H{Is Admin?}
+    H -- Yes --> I[Show 'Admin / Whitelist' in Nav]
+    I --> J[AdminPortalModal: Pre-Authorize Emails, Toggle Status, View Spend]
+    H -- No --> K[Studio Access without Admin Tab]
+    
+    C -- Local Dev Mode --> L[Quick Developer Access Button]
+    L --> F
+```
+
+1. **Full-Screen Luxury AuthPortal & App Lock**:
+   - When unauthenticated or unapproved, the Studio workspace (canvas, tools, drawer) is completely unmounted and locked behind `AuthPortal.jsx`.
+   - Supports 1-click Google OAuth popup and Email/Password sign-in/registration.
+   - Includes a **Developer Quick Access** option in `ENVIRONMENT=local` mode.
+   - Displays an **Access Restricted** state for authenticated users who are not yet on the studio whitelist, preventing unauthorized access.
+
+2. **Invite-Only Whitelist & Admin Authorization**:
+   - **Initial Admin Bootstrap**: Configured via `ADMIN_EMAILS` environment variable (comma-separated). Matching emails are automatically granted `role="admin"` and `status="approved"`.
+   - **In-App Admin Management (`AdminPortalModal.jsx`)**: Allows administrators to pre-authorize new member emails (`user` vs `admin`), toggle account status (`approved`, `disabled`), revoke invites, and monitor real-time compute spend per member.
+   - **Auth API Endpoints (`/api/auth`)**:
+     - `GET /api/auth/me`: Returns user profile, role, and approval status without throwing 403.
+     - `GET /api/auth/users`: (Admin only) Lists all members, pending invites, and cumulative spend metrics.
+     - `POST /api/auth/invite`: (Admin only) Pre-authorizes a new member email.
+     - `PATCH /api/auth/users/{user_id}/status`: (Admin only) Updates approval status or role.
+     - `DELETE /api/auth/users/{user_id}`: (Admin only) Removes a member from the whitelist.
+
+3. **FastAPI Security Dependencies (`src/app/auth/firebase_auth.py`)**:
+   - `get_raw_user`: Extracts raw JWT token from `Authorization: Bearer <token>` or supports local dev bypass token.
+   - `get_current_user_profile`: Resolves and synchronizes the user profile in Firestore.
+   - `get_current_user`: Enforces `status == "approved"`, raising `403 Forbidden` for unauthorized or disabled users.
+   - `get_admin_user`: Enforces `role == "admin"`, raising `403 Forbidden` for non-administrators.
 
 ---
 
@@ -215,6 +264,6 @@ Continuous Integration and Deployment is fully automated via GitHub Actions with
 3. **Deployer Service Account**: `github-deployer@ai-art-director-prod.iam.gserviceaccount.com`
 4. **Pipeline Workflow (`.github/workflows/deploy.yml`)**:
    - Runs on push / pull request to `main`.
-   - Executes Pytest backend suite (79 tests) and Vitest frontend suite (104 tests).
+   - Executes Pytest backend suite (85 tests) and Vitest frontend suite (109 tests).
    - Builds multi-stage Docker container and deploys revision to Cloud Run.
    - Builds frontend dist and deploys Firebase Hosting rewrites, Firestore rules, and Firestore indexes.

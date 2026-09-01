@@ -1,7 +1,7 @@
 # Product Requirements Document (PRD)
 ## Fashion AI Studio (Image Gen Pipeline)
 
-**Document Version**: 6.0  
+**Document Version**: 7.0  
 **Status**: Active / Production Cloud-Native Studio  
 **Last Updated**: 2026-09-01  
 
@@ -11,50 +11,53 @@
 
 **Fashion AI Studio** is an enterprise-grade, deterministic creative studio and production pipeline designed for fashion art directors, visual artists, and creative teams. It transforms moodboard imagery and artistic intent into reproducible, high-fidelity visual assets powered by Google GenAI multimodal models (`gemini-3.5-flash-lite`, `gemini-3.7-flash`, `gemini-3.1-flash-image`, `gemini-3-pro-image`).
 
-The studio operates across a **5-Step Sequential Workflow**:
+The studio is locked behind an exclusive, **Invite-Only Luxury Authentication Portal** and operates across a **5-Step Sequential Workflow**:
 
 ```
+                 [Exclusive AuthPortal Gate & Whitelist Security]
+                                        │
+                                        ▼
 [Uploaded Moodboard (1–5) / Direct Photo] + [User Creative Intent]
-                                │
-                                ▼
-  ┌─────────────────────────────────────────────────────────────┐
-  │ Step 1: Art Direction (Vision Director & Baselines)         │
-  │ • Vision Director synthesizes Master Prompt & Levers        │
-  │ • Concurrently renders 4 Baseline Seeds across ratios       │
-  │ • Option to skip via Direct Photo Ingestion                 │
-  └─────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-  ┌─────────────────────────────────────────────────────────────┐
-  │ Step 2: Refinement (Conversation Studio)                    │
-  │ • Conversational natural-language prompts                   │
-  │ • Reference image conditioning + Seed lock                  │
-  │ • Multi-turn thread history with visual thumbnail timeline  │
-  └─────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-  ┌─────────────────────────────────────────────────────────────┐
-  │ Step 3: Canvas Studio (Micro Spatial Inpainting)            │
-  │ • Interactive brush masking on full canvas                  │
-  │ • Natural language localized spot editing                   │
-  │ • Seamless boundary-preserving generative diffusion         │
-  └─────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-  ┌─────────────────────────────────────────────────────────────┐
-  │ Step 4: Wardrobe Studio (Multi-Garment Styling & Pins)      │
-  │ • Sheet/lookbook auto-detection & segmentation into cards   │
-  │ • Drag-and-drop numbered pin placement (①, ②, ③) on subject │
-  │ • Multi-image composition conditioning simultaneously       │
-  └─────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-  ┌─────────────────────────────────────────────────────────────┐
-  │ Step 5: Export Studio (Production Delivery & 4K Master)     │
-  │ • Lossless PNG / Configurable JPEG single-image download    │
-  │ • AI-powered neural 4K master restoration & upscale         │
-  │ • 1-Click 5-Ratio ZIP Production Bundle with metadata       │
-  └─────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+   ┌─────────────────────────────────────────────────────────────┐
+   │ Step 1: Art Direction (Vision Director & Baselines)         │
+   │ • Vision Director synthesizes Master Prompt & Levers        │
+   │ • Concurrently renders 4 Baseline Seeds across ratios       │
+   │ • Option to skip via Direct Photo Ingestion                 │
+   └─────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+   ┌─────────────────────────────────────────────────────────────┐
+   │ Step 2: Refinement (Conversation Studio)                    │
+   │ • Conversational natural-language prompts                   │
+   │ • Reference image conditioning + Seed lock                  │
+   │ • Multi-turn thread history with visual thumbnail timeline  │
+   └─────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+   ┌─────────────────────────────────────────────────────────────┐
+   │ Step 3: Canvas Studio (Micro Spatial Inpainting)            │
+   │ • Interactive brush masking on full canvas                  │
+   │ • Natural language localized spot editing                   │
+   │ • Seamless boundary-preserving generative diffusion         │
+   └─────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+   ┌─────────────────────────────────────────────────────────────┐
+   │ Step 4: Wardrobe Studio (Multi-Garment Styling & Pins)      │
+   │ • Sheet/lookbook auto-detection & segmentation into cards   │
+   │ • Drag-and-drop numbered pin placement (①, ②, ③) on subject │
+   │ • Multi-image composition conditioning simultaneously       │
+   └─────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+   ┌─────────────────────────────────────────────────────────────┐
+   │ Step 5: Export Studio (Production Delivery & 4K Master)     │
+   │ • Lossless PNG / Configurable JPEG single-image download    │
+   │ • AI-powered neural 4K master restoration & upscale         │
+   │ • 1-Click 5-Ratio ZIP Production Bundle with metadata       │
+   └─────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -65,15 +68,16 @@ The studio operates across a **5-Step Sequential Workflow**:
 - **Iterative Edit Degradation**: Chaining edits in typical image generators re-compresses assets with lossy chroma subsampling ($\text{YUV 4:2:0}$), causing chromatic degradation and severe color shifts across iterations.
 - **Unstructured Prompt Drift**: Editing isolated details (e.g., lighting or clothing) often mutates character facial identity, composition, and physical environment unintentionally.
 - **Fragmented Tooling**: Creators waste significant time bouncing between disparate tools for moodboard analysis, prompt engineering, multi-seed exploration, localized inpainting, multi-garment styling, and production ratio export.
-- **Enterprise Collaboration & Scale**: Local-only file storage hinders multi-user creative review, scalable cloud generation, and automated multi-environment delivery.
+- **Enterprise Collaboration & Access Control**: Creative studios require strict whitelist access control, per-member compute budget tracking, and centralized team administration.
 
 ### 2.2 Core Value Proposition
 - **5-Step Unified Creative Pipeline**: Seamless transition from Art Direction → Refinement → Canvas → Wardrobe → Export.
+- **Full-Screen Luxury AuthPortal & Whitelist Gate**: App is completely locked behind an invite-only authentication gate with in-app Admin management.
 - **Chroma & Color Constancy Preservation**: Lossless PNG/WebP multi-turn conditioning, ICC profile preservation, and white balance locks eliminate color drift.
 - **Surgical Spatial Inpainting & Interactive Pinning**: Macro conversational refinement, micro canvas brush masking, and visual garment pin-dropping on subjects.
 - **Cloud-Native Scalability & Multi-Tenancy**: Built on Google Cloud Run, Cloud Storage, Cloud Firestore, and Firebase Authentication with secure user data isolation.
 - **Global CDN Edge Delivery**: Firebase Hosting CDN edge routing for ultra-low latency asset delivery and zero-CORS API proxying.
-- **Cost & Token Transparency**: Real-time token and USD cost estimation per operation and accumulated across the full lineage tree.
+- **Cost & Token Transparency**: Real-time token and USD cost estimation per operation, per user, and accumulated across lineage chains.
 
 ---
 
@@ -90,7 +94,10 @@ The studio operates across a **5-Step Sequential Workflow**:
 
 ```mermaid
 flowchart TD
-    A[Step 1: Moodboard Ingestion / Direct Photo] --> B[Gemini Vision Director Synthesis]
+    Gate[AuthPortal Lock: Google OAuth / Email Sign-In] --> AuthCheck{Approved Whitelist?}
+    AuthCheck -- No --> Restricted[Access Restricted Screen: Contact Administrator]
+    AuthCheck -- Yes --> A[Step 1: Moodboard Ingestion / Direct Photo]
+    A --> B[Gemini Vision Director Synthesis]
     B --> C[Synthesize Master Prompt & 9-Category Levers]
     C --> D[Concurrently Generate 4 Baseline Seeds]
     D --> E[Select Preferred Baseline Candidate]
@@ -105,6 +112,11 @@ flowchart TD
     L --> M2[AI Neural 4K Master Upscale]
     L --> M3[1-Click 5-Ratio ZIP Production Bundle]
 ```
+
+### Access Gate: Authentication & Whitelist Verification
+1. User arrives at the Studio app and is presented with the full-screen Haute Couture **AuthPortal**.
+2. User authenticates via single-click Google OAuth or Email/Password.
+3. If user email is approved or matches `ADMIN_EMAILS`, the full Studio workspace unlocks. If not on the whitelist, the user sees an **Access Restricted** screen with approval status polling.
 
 ### Step 1: Art Direction (Moodboard Ingestion & Baseline Sweep)
 1. User uploads 1 to 5 moodboard files (PNG, JPEG, WebP, PDF) and enters a creative prompt (or uploads a direct photo to skip analysis).
@@ -163,12 +175,14 @@ flowchart TD
 - **FR-5.2 AI Neural Master Upscale**: 4K texture and weave restoration via neural upscale pipeline.
 - **FR-5.3 Metadata Bundle**: Embed full generation lineage, seed, prompt, and token cost JSON in export archives.
 
-### 5.6 Cross-Cutting Capabilities & Cloud Services
-- **FR-6.1 Multi-User Authentication**: Firebase Auth supporting Google OAuth & Email/Password with per-user data tenancy.
-- **FR-6.2 Observability & Telemetry**: Dedicated `/telemetry` dashboard with live audit logs, request lifecycle tracing, Firestore collection inspector, and latency/cost metrics.
-- **FR-6.3 Lineage History & Split-Slider Diff**: History drawer tracking generation ancestry with side-by-side visual split-slider comparison.
-- **FR-6.4 Dynamic Model Switching**: Runtime selection between vision models (`gemini-3.5-flash-lite`, `gemini-3.7-flash`) and image models (`gemini-3.1-flash-lite-image`, `gemini-3.1-flash-image`, `gemini-3-pro-image`).
-- **FR-6.5 Automated CI/CD**: Keyless GitHub Actions deployment via Workload Identity Federation on push to `main`.
+### 5.6 Security, Authentication & Whitelist Management
+- **FR-6.1 Dedicated Full-Screen AuthPortal**: Luxury editorial lock screen completely securing the application against unauthenticated or unapproved visitors.
+- **FR-6.2 Invite-Only Whitelist Authorization**: Non-whitelisted visitors are rejected with an Access Restricted screen; initial admins configured via `ADMIN_EMAILS`.
+- **FR-6.3 In-App Admin Management Portal**: Modal interface for administrators to pre-authorize member emails, assign roles (`admin` vs `user`), toggle account statuses (`approved`, `disabled`), and monitor compute spend.
+- **FR-6.4 Local Dev Quick Access**: One-click local administrator bypass for offline testing when `ENVIRONMENT=local`.
+- **FR-6.5 Observability & Telemetry**: Dedicated `/telemetry` dashboard with live audit logs, request lifecycle tracing, Firestore collection inspector, and latency/cost metrics.
+- **FR-6.6 Lineage History & Split-Slider Diff**: History drawer tracking generation ancestry with side-by-side visual split-slider comparison.
+- **FR-6.7 Dynamic Model Switching**: Runtime selection between vision models (`gemini-3.5-flash-lite`, `gemini-3.7-flash`) and image models (`gemini-3.1-flash-lite-image`, `gemini-3.1-flash-image`, `gemini-3-pro-image`).
 
 ---
 
@@ -176,9 +190,9 @@ flowchart TD
 
 - **Compute & Deployment**: Google Cloud Run (Serverless container, multi-stage Docker build, Python 3.11 + `uv`).
 - **Edge CDN & Hosting**: Firebase Hosting with unified same-origin routing to Cloud Run.
-- **Database**: Google Cloud Firestore (Native mode, 7 flat collections, atomic transactions).
+- **Database**: Google Cloud Firestore (Native mode, 8 flat collections: `users`, `moodboards`, `generations`, `conversations`, `wardrobe_items`, `composition_assignments`, `telemetry_events`, `usage_daily`).
 - **Blob Storage**: Google Cloud Storage (`gs://ai-art-director-prod-store`) with HTTP 307 signed URL redirection.
-- **Authentication**: Firebase Authentication with JWT Bearer validation in FastAPI.
+- **Authentication & Security**: Firebase Authentication with JWT Bearer validation and Firestore user whitelist enforcement.
 - **Secrets Management**: Google Secret Manager (`GEMINI_API_KEY`).
 - **AI Framework**: Google GenAI SDK (`google-genai`) with Interactions API (`client.interactions.create`).
 - **Frontend**: React 18+ with Vite, Lucide React icons, and modern dark Vanilla CSS.
@@ -190,6 +204,6 @@ flowchart TD
 
 - **NFR-1 Color & Chroma Constancy**: Reference images encoded in lossless PNG/WebP with ICC profile preservation to eliminate multi-turn degradation.
 - **NFR-2 Latency & Concurrency**: 4-baseline generation dispatches concurrently for minimal turnaround (~300ms average edge latency).
-- **NFR-3 Enterprise Security**: Secret Manager key retrieval, keyless CI/CD, uniform bucket access, and least-privilege IAM service accounts.
+- **NFR-3 Enterprise Security**: Invite-only whitelist, Secret Manager key retrieval, keyless CI/CD, uniform bucket access, and least-privilege IAM service accounts.
 - **NFR-4 UI Fluidity**: 60 FPS canvas painting, drag-and-drop pin tracking, and responsive split-slider comparison.
 - **NFR-5 High Availability**: Serverless auto-scaling (0–5 instances) with zero idle compute cost.

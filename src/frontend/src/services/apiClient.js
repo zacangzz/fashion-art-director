@@ -12,6 +12,8 @@ async function authFetch(url, options = {}) {
       if (token) {
         headers.set('Authorization', `Bearer ${token}`);
       }
+    } else if (localStorage.getItem('dev_bypass_auth') === 'true') {
+      headers.set('Authorization', 'Bearer local_dev_token');
     }
   } catch (err) {
     console.warn('Failed to retrieve auth token for request:', err);
@@ -660,3 +662,64 @@ export async function fetchDatabaseTableRecords(tableName, { limit = 50, offset 
   const response = await authFetch(`/api/telemetry/db/${encodeURIComponent(tableName)}?${query.toString()}`);
   return handleApiResponse(response, `Failed to fetch records for collection ${tableName}`);
 }
+
+/**
+ * Fetches the authenticated user's profile and approval status from the backend.
+ * @returns {Promise<{id: string, uid: string, email: string, display_name: string, photo_url: string, role: string, status: string, is_approved: boolean, is_admin: boolean, total_spend_usd: number, total_tokens: number}>}
+ */
+export async function fetchCurrentUserProfile() {
+  const response = await authFetch('/api/auth/me');
+  return handleApiResponse(response, 'Failed to fetch user authentication profile');
+}
+
+/**
+ * (Admin only) Fetches the studio user list, pending invitations, and spend metrics.
+ * @returns {Promise<{users: Array, summary: Object}>}
+ */
+export async function fetchAdminUsersList() {
+  const response = await authFetch('/api/auth/users');
+  return handleApiResponse(response, 'Failed to fetch authorized studio users');
+}
+
+/**
+ * (Admin only) Pre-authorizes / invites an email to the studio whitelist.
+ * @param {string} email
+ * @param {string} [role='user']
+ * @returns {Promise<{status: string, message: string, user: Object}>}
+ */
+export async function inviteUser(email, role = 'user') {
+  const response = await authFetch('/api/auth/invite', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, role }),
+  });
+  return handleApiResponse(response, `Failed to pre-authorize user ${email}`);
+}
+
+/**
+ * (Admin only) Updates a user's approval status or role.
+ * @param {string} userId
+ * @param {Object} updates
+ * @returns {Promise<{status: string, message: string, user: Object}>}
+ */
+export async function updateUserStatus(userId, { status, role } = {}) {
+  const response = await authFetch(`/api/auth/users/${encodeURIComponent(userId)}/status`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status, role }),
+  });
+  return handleApiResponse(response, `Failed to update user status for ${userId}`);
+}
+
+/**
+ * (Admin only) Deletes / revokes a user invitation or account from the whitelist.
+ * @param {string} userId
+ * @returns {Promise<{status: string, message: string}>}
+ */
+export async function deleteUser(userId) {
+  const response = await authFetch(`/api/auth/users/${encodeURIComponent(userId)}`, {
+    method: 'DELETE',
+  });
+  return handleApiResponse(response, `Failed to delete user ${userId}`);
+}
+

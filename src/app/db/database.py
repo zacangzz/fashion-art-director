@@ -6,6 +6,7 @@ from app.utils.logger import get_logger
 logger = get_logger("database")
 
 ALLOWED_COLLECTIONS = [
+    "users",
     "generations",
     "moodboards",
     "conversations",
@@ -539,6 +540,180 @@ class FirestoreManager:
             "rows": rows,
         }
 
+    # -------------------------------------------------------------------------
+    # 7. USER & PERMISSIONS MANAGEMENT
+    # -------------------------------------------------------------------------
+    def get_user(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve user document by ID (UID or invite document ID)."""
+        doc = self.db.collection("users").document(user_id).get()
+        if doc.exists:
+            return doc.to_dict()
+        return None
+
+    def get_user_by_email(self, email: str) -> Optional[Dict[str, Any]]:
+        """Retrieve user document by normalized email address."""
+        if not email:
+            return None
+        norm_email = email.strip().lower()
+        docs = list(self.db.collection("users").where("email", "==", norm_email).limit(1).stream())
+        if docs:
+            return docs[0].to_dict()
+        return None
+
+    def create_user_invite(self, email: str, role: str = "user", invited_by: str = "admin") -> Dict[str, Any]:
+        """
+        Pre-authorizes / invites an email address to the Studio whitelist.
+        If an invite or user record already exists for this email, returns it.
+        """
+        norm_email = email.strip().lower()
+        existing = self.get_user_by_email(norm_email)
+        if existing:
+            return existing
+
+        invite_id = f"invite_{norm_email}"
+        doc_data = {
+            "id": invite_id,
+            "email": norm_email,
+            "display_name": norm_email.split("@")[0],
+            "photo_url": None,
+            "role": role if role in ("admin", "user") else "user",
+            "status": "pending_invite",
+            "invited_by": invited_by,
+            "created_at": self._now_iso(),
+            "approved_at": None,
+            "last_login_at": None,
+            "total_spend_usd": 0.0,
+            "total_tokens": 0,
+        }
+        self.db.collection("users").document(invite_id).set(doc_data)
+        logger.info(f"Created user invite for {norm_email} (role={role}, by={invited_by})")
+        return doc_data
+
+    def activate_user_on_login(
+        self,
+        uid: str,
+        email: str,
+        display_name: Optional[str] = None,
+        photo_url: Optional[str] = None,
+        is_bootstrap_admin: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Activates or updates a user upon successful Firebase sign-in.
+        - If user already exists with ID `uid`, updates `last_login_at` and profile info.
+        - If a pending invite doc exists for `email`, migrates it to document ID `uid` with status='approved'.
+        - If is_bootstrap_admin is True, forces role='admin' and status='approved'.
+        - If user is not invited and not bootstrap admin, creates an unapproved / unauthorized user record.
+        """
+        norm_email = (email or "").strip().lower()
+        now_ts = self._now_iso()
+
+        # Check existing doc by UID
+        user_doc_ref = self.db.collection("users").document(uid)
+        existing_doc = user_doc_ref.get()
+
+        if existing_doc.exists:
+            user_data = existing_doc.to_dict()
+            updates = {
+                "last_login_at": now_ts,
+            }
+            if display_name and not user_data.get("display_name"):
+                updates["display_name"] = display_name
+            if photo_url and not user_data.get("photo_url"):
+                updates["photo_url"] = photo_url
+            if is_bootstrap_admin and (user_data.get("role") != "admin" or user_data.get("status") != "approved"):
+                updates["role"] = "admin"
+                updates["status"] = "approved"
+                if not user_data.get("approved_at"):
+                    updates["approved_at"] = now_ts
+            user_doc_ref.update(updates)
+            user_data.update(updates)
+            return user_data
+
+        # Check if an invite doc exists for this email
+        invite_record = self.get_user_by_email(norm_email)
+        role = "admin" if is_bootstrap_admin else (invite_record.get("role", "user") if invite_record else "user")
+        status = "approved" if (is_bootstrap_admin or invite_record) else "unauthorized"
+        invited_by = invite_record.get("invited_by") if invite_record else ("system_bootstrap" if is_bootstrap_admin else None)
+        created_at = invite_record.get("created_at") if invite_record else now_ts
+
+        # Remove old invite doc if it had an invite_id key
+        if invite_record and invite_record.get("id") and invite_record["id"] != uid:
+            try:
+                self.db.collection("users").document(invite_record["id"]).delete()
+            except Exception as err:
+                logger.warning(f"Could not delete old invite doc {invite_record['id']}: {err}")
+
+        user_data = {
+            "id": uid,
+            "email": norm_email,
+            "display_name": display_name or norm_email.split("@")[0] if norm_email else "Studio User",
+            "photo_url": photo_url,
+            "role": role,
+            "status": status,
+            "invited_by": invited_by,
+            "created_at": created_at,
+            "approved_at": now_ts if status == "approved" else None,
+            "last_login_at": now_ts,
+            "total_spend_usd": invite_record.get("total_spend_usd", 0.0) if invite_record else 0.0,
+            "total_tokens": invite_record.get("total_tokens", 0) if invite_record else 0,
+        }
+        user_doc_ref.set(user_data)
+        logger.info(f"Activated user doc for {norm_email} (uid={uid}, role={role}, status={status})")
+        return user_data
+
+    def list_users(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """List all registered and invited users."""
+        docs = list(self.db.collection("users").order_by("created_at", direction="DESCENDING").limit(limit).stream())
+        return [d.to_dict() for d in docs]
+
+    def update_user_status(
+        self,
+        user_id: str,
+        status: Optional[str] = None,
+        role: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Update role or status of a user/invite."""
+        doc_ref = self.db.collection("users").document(user_id)
+        doc = doc_ref.get()
+        if not doc.exists:
+            return None
+
+        updates = {}
+        if status in ("approved", "pending_invite", "disabled", "unauthorized"):
+            updates["status"] = status
+            if status == "approved" and not doc.to_dict().get("approved_at"):
+                updates["approved_at"] = self._now_iso()
+        if role in ("admin", "user"):
+            updates["role"] = role
+
+        if updates:
+            doc_ref.update(updates)
+            updated = doc.to_dict()
+            updated.update(updates)
+            return updated
+        return doc.to_dict()
+
+    def delete_user(self, user_id: str) -> bool:
+        """Deletes a user or invite document."""
+        doc_ref = self.db.collection("users").document(user_id)
+        if doc_ref.get().exists:
+            doc_ref.delete()
+            return True
+        return False
+
+    def add_user_spend(self, user_id: str, cost_usd: float, tokens: int = 0) -> None:
+        """Increment cumulative spend and tokens for a user."""
+        try:
+            doc_ref = self.db.collection("users").document(user_id)
+            if doc_ref.get().exists:
+                doc_ref.update({
+                    "total_spend_usd": Increment(cost_usd),
+                    "total_tokens": Increment(tokens),
+                })
+        except Exception as err:
+            logger.warning(f"Failed to update spend for user {user_id}: {err}")
+
 
 # Alias for backward compatibility
 DatabaseManager = FirestoreManager
+

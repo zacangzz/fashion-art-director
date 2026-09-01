@@ -5,6 +5,27 @@
 // Source:  docs/publishing-plan1.md — Phase 2: DatabaseManager Rewrite
 // =============================================================================
 
+Table users {
+  id              string    [pk, note: 'Firebase Auth UID or email-based ID for pending invites']
+  email           string    [not null, unique, note: 'Normalized lowercase email']
+  display_name    string    [note: 'User display name']
+  photo_url       string    [note: 'Avatar URL']
+  role            string    [not null, default: 'user', note: 'admin | user']
+  status          string    [not null, default: 'approved', note: 'approved | pending_invite | disabled']
+  invited_by      string    [note: 'UID of the admin who created the invitation']
+  created_at      timestamp [not null, default: `now()`]
+  approved_at     timestamp [note: 'Timestamp when user was authorized/activated']
+  last_login_at   timestamp [note: 'Most recent sign-in timestamp']
+  total_spend_usd number    [default: 0.0, note: 'Lifetime AI generation & vision spend']
+  total_tokens    number    [default: 0, note: 'Lifetime token count']
+
+  indexes {
+    email [name: 'idx_users_email']
+    (role, status) [name: 'idx_users_role_status']
+    (status, created_at) [name: 'idx_users_status_created']
+  }
+}
+
 Table moodboards {
   id             string    [pk, note: 'Format: mb_{uuid12}']
   user_id        string    [not null, note: 'Firebase Auth UID']

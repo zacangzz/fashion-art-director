@@ -14,6 +14,7 @@ import {
   LogIn,
   LogOut,
   User as UserIcon,
+  Users as UsersIcon,
 } from 'lucide-react';
 
 import MoodboardUploader from './components/MoodboardUploader';
@@ -26,7 +27,8 @@ import CanvasViewport from './components/CanvasViewport';
 import ExportStudio from './components/ExportStudio';
 import HistoryDrawer from './components/HistoryDrawer';
 import ComparisonModal from './components/ComparisonModal';
-import AuthModal from './components/AuthModal';
+import AuthPortal from './components/AuthPortal';
+import AdminPortalModal from './components/AdminPortalModal';
 import { useAuth } from './contexts/AuthContext';
 
 import { DEFAULT_TAG_STATE } from './utils/defaultTags';
@@ -50,8 +52,8 @@ import {
 } from './services/apiClient';
 
 export default function App() {
-  const { currentUser, signOutUser } = useAuth();
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const { currentUser, userProfile, loading, signOutUser } = useAuth();
+  const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
 
   // 5-Step Sequential Workflow: 1: Art Direction, 2: Refinement, 3: Canvas, 4: Wardrobe, 5: Export
   const [currentStep, setCurrentStep] = useState(1);
@@ -118,11 +120,13 @@ export default function App() {
   const [errorMessage, setErrorMessage] = useState(null);
   const [isDirectUploading, setIsDirectUploading] = useState(false);
 
-  // Load history and model configuration on mount
+  // Load history and model configuration when approved user is active
   useEffect(() => {
-    loadHistoryList();
-    loadModelConfig();
-  }, []);
+    if (currentUser && userProfile?.status === 'approved') {
+      loadHistoryList();
+      loadModelConfig();
+    }
+  }, [currentUser, userProfile?.status]);
 
   const loadModelConfig = async () => {
     try {
@@ -774,6 +778,30 @@ export default function App() {
 
   const hasActiveImage = Boolean(generationResult?.master_image_url || activeBaseline?.image_url);
 
+  // 1. Loading splash while validating auth state
+  if (loading) {
+    return (
+      <div className="min-h-screen w-full flex flex-col items-center justify-center bg-[#07090e] text-slate-100 gap-4 font-sans select-none">
+        <div className="p-4 rounded-3xl bg-gradient-to-tr from-cyan-500/20 via-slate-800 to-purple-500/20 border border-cyan-500/30 text-cyan-400 shadow-xl shadow-cyan-500/10">
+          <Sparkles size={32} className="animate-spin" />
+        </div>
+        <div className="flex flex-col items-center gap-1">
+          <span className="text-xs font-mono uppercase tracking-[0.25em] text-cyan-400 font-semibold">
+            Fashion Art Director Studio
+          </span>
+          <span className="text-[11px] font-mono text-slate-500">
+            Verifying security credentials & whitelist...
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  // 2. Lock app behind AuthPortal if not authenticated or not approved
+  if (!currentUser || !userProfile || userProfile.status !== 'approved') {
+    return <AuthPortal />;
+  }
+
   return (
     <div className="app-container">
       {/* Top Header */}
@@ -895,8 +923,21 @@ export default function App() {
               <HistoryIcon size={18} className="text-slate-300" />
             </button>
 
-            {currentUser ? (
-              <div className="flex items-center gap-1.5 pl-2 border-l border-slate-800">
+            {currentUser && (
+              <div className="flex items-center gap-2 pl-2 border-l border-slate-800">
+                {userProfile?.is_admin && (
+                  <button
+                    type="button"
+                    onClick={() => setIsAdminModalOpen(true)}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-purple-950/60 hover:bg-purple-900/60 border border-purple-800/60 text-purple-300 text-xs font-semibold transition shadow-sm"
+                    title="Studio Whitelist & Team Management"
+                    aria-label="Studio Whitelist"
+                  >
+                    <UsersIcon size={14} />
+                    <span className="hidden sm:inline">Admin</span>
+                  </button>
+                )}
+
                 <div
                   className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-slate-800/80 border border-slate-700 text-xs text-slate-200"
                   title={`Signed in as ${currentUser.email || currentUser.displayName || 'User'}`}
@@ -904,10 +945,11 @@ export default function App() {
                   <div className="w-5 h-5 rounded-full bg-gradient-to-tr from-cyan-600 to-blue-500 flex items-center justify-center text-[10px] font-bold text-white uppercase shadow-sm">
                     {(currentUser.email || currentUser.displayName || 'U')[0]}
                   </div>
-                  <span className="max-w-[90px] truncate text-[11px] font-medium hidden sm:inline">
-                    {currentUser.displayName || currentUser.email?.split('@')[0]}
+                  <span className="max-w-[100px] truncate text-[11px] font-medium hidden sm:inline">
+                    {userProfile?.display_name || currentUser.displayName || currentUser.email?.split('@')[0]}
                   </span>
                 </div>
+
                 <button
                   type="button"
                   onClick={signOutUser}
@@ -918,15 +960,6 @@ export default function App() {
                   <LogOut size={16} />
                 </button>
               </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setIsAuthModalOpen(true)}
-                className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-semibold flex items-center gap-1.5 shadow-sm transition"
-              >
-                <LogIn size={13} />
-                <span>Sign In</span>
-              </button>
             )}
           </div>
         </div>
@@ -1216,11 +1249,13 @@ export default function App() {
         />
       )}
 
-      {/* Firebase Authentication Modal */}
-      <AuthModal
-        isOpen={isAuthModalOpen}
-        onClose={() => setIsAuthModalOpen(false)}
-      />
+      {/* Studio Admin & Whitelist Management Modal */}
+      {isAdminModalOpen && (
+        <AdminPortalModal
+          isOpen={isAdminModalOpen}
+          onClose={() => setIsAdminModalOpen(false)}
+        />
+      )}
     </div>
   );
 }
