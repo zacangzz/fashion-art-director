@@ -53,3 +53,29 @@ interaction = client.interactions.create(
     }
 )
 ```
+
+## Frontend Architecture & Design System Guidelines
+
+When modifying existing pages or creating new views in `src/frontend/`:
+
+1. **Design System & Aesthetics ([DESIGN.md](file:///Users/zacang/Documents/datascience/image-gen-pipeline/DESIGN.md))**:
+   - Adhere strictly to the **Luxury Obsidian Dark** theme:
+     - Base canvas: `--bg-dark` (`#07090e`), Panel surfaces: `--bg-surface` (`#10141e`), Elevated modals/popovers: `--bg-surface-elevated` (`#171d2b`).
+     - Accents: Electric Indigo (`#6366f1` / `#a855f7`), Vision Cyan (`#06b6d4`), Success Emerald (`#10b981`), Warning Amber (`#f59e0b`), Conflict Rose (`#ef4444`).
+     - Glassmorphism: Semi-transparent borders (`rgba(255, 255, 255, 0.08)`), multi-tier backdrop blurs (`backdrop-filter: blur(14px)`), and radial glow backdrops.
+   - Typography: Use `Inter` for UI copy, buttons, and headings; use `JetBrains Mono` for technical metadata, resolutions, aspect ratios, and seeds.
+
+2. **Atomic UI Primitives & Composition (`components/ui/`)**:
+   - **Always compose shared UI primitives** ([`Button`](file:///Users/zacang/Documents/datascience/image-gen-pipeline/src/frontend/src/components/ui/Button.jsx), [`Modal`](file:///Users/zacang/Documents/datascience/image-gen-pipeline/src/frontend/src/components/ui/Modal.jsx), [`Badge`](file:///Users/zacang/Documents/datascience/image-gen-pipeline/src/frontend/src/components/ui/Badge.jsx), [`Card`](file:///Users/zacang/Documents/datascience/image-gen-pipeline/src/frontend/src/components/ui/Card.jsx), [`Select`](file:///Users/zacang/Documents/datascience/image-gen-pipeline/src/frontend/src/components/ui/Select.jsx), [`Input`](file:///Users/zacang/Documents/datascience/image-gen-pipeline/src/frontend/src/components/ui/Input.jsx), [`Slider`](file:///Users/zacang/Documents/datascience/image-gen-pipeline/src/frontend/src/components/ui/Slider.jsx)) from `src/frontend/src/components/ui/` instead of writing ad-hoc raw elements.
+   - Avoid creating duplicate modal backdrops, button classes, or custom badges.
+   - Apply **Composition over Inheritance** with clear, modular props.
+
+3. **State Management & Custom Domain Hooks (`hooks/`)**:
+   - Keep page and coordinator components (like [`App.jsx`](file:///Users/zacang/Documents/datascience/image-gen-pipeline/src/frontend/src/App.jsx)) lean (~150–250 lines).
+   - Encapsulate domain workflows, API integrations, and transient state into custom React hooks in `src/frontend/src/hooks/` (e.g. `useMoodboardAnalysis`, `useRefinementStudio`, `useWardrobeComposer`, `useLineageHistory`).
+   - Do NOT introduce heavy external state management libraries when simple modular hooks work.
+
+4. **UX, Accessibility & Keyboard Ergonomics**:
+   - Modals and drawers must support `Esc` key dismissal, backdrop click dismiss, and body scroll locking.
+   - Support `Cmd/Ctrl + Enter` keyboard shortcuts for prompt submissions and refinement chats.
+   - Ensure high typographic contrast and semantic ARIA labeling for all interactive controls.

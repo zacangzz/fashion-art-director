@@ -87,3 +87,15 @@
   ```
 * **GitHub Actions Workflow**: Authenticate securely using `google-github-actions/auth@v2` without storing long-lived service account keys in repository secrets.
 
+---
+
+## Frontend & Styling Architecture
+
+### 7. Global CSS Consolidation & Component Class Preservation
+* **The Pitfall**: In large frontend refactorings, replacing a monolithic stylesheet (e.g., `index.css`) with a concise set of generic design-token classes without simultaneously rewriting the JSX class names in every component strips all component-specific CSS selectors (`.ratio-btn`, `.category-card`, `.tag-chip`, `.prompt-review-card`, `.lever-item`, etc.).
+* **Visual Symptom**: The app renders as raw unstyled HTML with broken grids, lost card backdrops, and unformatted controls.
+* **Best Practice**:
+  * **Additive Extension First**: Introduce new atomic UI primitive classes (`.btn-primitive`, `.modal-*`, `.badge-*`, `.card-*`) alongside existing component styles.
+  * **Component-by-Component Migration**: Migrate JSX components to use shared UI primitives in synchronized passes, only pruning legacy classes once zero JSX files reference them.
+
+
