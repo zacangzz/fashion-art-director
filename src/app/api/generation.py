@@ -1,30 +1,33 @@
 from typing import Dict, Any, List
-
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from app.config import get_settings
+from app.auth.firebase_auth import get_current_user
 from app.schemas.domain import (
     FineTuneGenerationRequest,
     FineTuneGenerationResponse,
     GenerationRequest,
     GenerationResponse,
 )
-from app.services.generation_service import compile_prompt
+from app.services.generation_service import GenerationService, compile_prompt
 from app.utils.error_handler import parse_and_raise_http_error
 from app.dependencies import get_generation_service
 
 router = APIRouter(prefix="/api", tags=["generation"])
-settings = get_settings()
-generation_service = get_generation_service()
 
 
 @router.post("/generate/fine-tune", response_model=FineTuneGenerationResponse)
-async def fine_tune_generation(request: FineTuneGenerationRequest):
+def fine_tune_generation(
+    request: FineTuneGenerationRequest,
+    user: dict = Depends(get_current_user),
+    generation_service: GenerationService = Depends(get_generation_service),
+):
     """
-    Step 3: Seed-locked multimodal fine-tuning generation using Prompt Compiler.
+    Step 3: Seed-locked multimodal fine-tuning generation using Prompt Compiler synchronously.
     """
+    settings = get_settings()
     eff_imagen_model = request.imagen_model or settings.IMAGEN_MODEL
     try:
-        result = await generation_service.fine_tune_generation(
+        result = generation_service.fine_tune_generation(
             parent_id=request.parent_id or "",
             state=request.schema_data,
             narrative=request.narrative,
@@ -38,6 +41,7 @@ async def fine_tune_generation(request: FineTuneGenerationRequest):
             aspect_ratio=request.aspect_ratio or "2:3",
             negative_prompt=request.negative_prompt,
             imagen_model=eff_imagen_model,
+            user_id=user["uid"],
         )
         return FineTuneGenerationResponse(**result)
     except Exception as exc:
@@ -62,10 +66,15 @@ def _serialize_legacy_input(request: GenerationRequest) -> str:
 
 
 @router.post("/generate", response_model=GenerationResponse)
-async def generate_image(request: GenerationRequest):
+def generate_image(
+    request: GenerationRequest,
+    user: dict = Depends(get_current_user),
+    generation_service: GenerationService = Depends(get_generation_service),
+):
     """
     Backwards-compatible legacy single generation route.
     """
+    settings = get_settings()
     compiled = _serialize_legacy_input(request)
     chips_snapshot = (
         request.schema_data
@@ -78,7 +87,7 @@ async def generate_image(request: GenerationRequest):
     )
 
     try:
-        result = await generation_service.generate_image(
+        result = generation_service.generate_image(
             prompt=compiled,
             negative_prompt=request.negative_prompt,
             seed=request.seed,
@@ -86,6 +95,7 @@ async def generate_image(request: GenerationRequest):
             parent_id=request.parent_generation_id,
             moodboard_id=request.moodboard_id,
             chips_snapshot=chips_snapshot,
+            user_id=user["uid"],
         )
         return GenerationResponse(**result)
     except Exception as exc:

@@ -894,7 +894,7 @@ export default function ObservabilityPage() {
         )}
 
         {/* ========================================================================= */}
-        {/* TAB 3: SQLITE DATABASE EXPLORER                                            */}
+        {/* TAB 3: FIRESTORE DATABASE EXPLORER                                         */}
         {/* ========================================================================= */}
         {activeTab === 'db' && (
           <div className="flex flex-col gap-4">
@@ -902,9 +902,9 @@ export default function ObservabilityPage() {
             <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 flex flex-wrap items-center justify-between gap-3 shadow">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs text-slate-400 font-semibold flex items-center gap-1.5">
-                  <Database size={13} className="text-cyan-400" /> Tables:
+                  <Database size={13} className="text-cyan-400" /> Collections:
                 </span>
-                {['generations', 'moodboards', 'conversations', 'wardrobe_items', 'composition_assignments'].map((tName) => {
+                {['generations', 'moodboards', 'conversations', 'wardrobe_items', 'composition_assignments', 'telemetry_events', 'usage_daily'].map((tName) => {
                   const count = dbSummary?.[tName]?.row_count;
                   return (
                     <button

@@ -110,7 +110,7 @@ describe('apiClient', () => {
     });
 
     const res = await fetchHistory();
-    expect(fetch).toHaveBeenCalledWith('/api/history');
+    expect(fetch).toHaveBeenCalledWith('/api/history', expect.anything());
     expect(res).toEqual(mockResult);
   });
 

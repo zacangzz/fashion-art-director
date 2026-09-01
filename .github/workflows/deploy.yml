@@ -1,0 +1,116 @@
+name: Test & Deploy Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: ai-art-director-prod
+  REGION: asia-southeast1
+  SERVICE_NAME: fashion-art-director
+  WIF_PROVIDER: projects/1012864945903/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider
+  WIF_SERVICE_ACCOUNT: github-deployer@ai-art-director-prod.iam.gserviceaccount.com
+
+jobs:
+  # ============================================================================
+  # 1. Automated Test Matrix (Backend + Frontend)
+  # ============================================================================
+  test:
+    name: Run Unit & Integration Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python with uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Install Python Dependencies
+        run: uv sync --frozen
+
+      - name: Run Backend Pytest Suite
+        run: uv run pytest
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "npm"
+          cache-dependency-path: src/frontend/package-lock.json
+
+      - name: Install Frontend Dependencies
+        working-directory: src/frontend
+        run: npm ci
+
+      - name: Run Frontend Vitest Suite
+        working-directory: src/frontend
+        run: npm test
+
+      - name: Verify Frontend Production Build
+        working-directory: src/frontend
+        run: npm run build
+
+  # ============================================================================
+  # 2. Automated Production Deployment (Cloud Run + Firebase)
+  # ============================================================================
+  deploy:
+    name: Deploy to Cloud Run & Firebase Hosting
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud via WIF
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy Backend to Cloud Run
+        run: |
+          gcloud run deploy ${{ env.SERVICE_NAME }} \
+            --project=${{ env.PROJECT_ID }} \
+            --region=${{ env.REGION }} \
+            --source=. \
+            --service-account=studio-runner@${{ env.PROJECT_ID }}.iam.gserviceaccount.com \
+            --set-secrets="GEMINI_API_KEY=GEMINI_API_KEY:latest" \
+            --set-env-vars="GCP_PROJECT_ID=${{ env.PROJECT_ID }},GCS_BUCKET=${{ env.PROJECT_ID }}-store,ENVIRONMENT=production,DAILY_SPEND_CAP_USD=20.0,GENAI_TIMEOUT_SECONDS=300" \
+            --memory=2Gi \
+            --cpu=2 \
+            --timeout=300 \
+            --min-instances=0 \
+            --max-instances=5 \
+            --allow-unauthenticated
+
+      - name: Set up Node.js for Firebase Deployment
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build Frontend for Hosting
+        working-directory: src/frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Deploy Firebase Rules, Indexes & Hosting
+        run: |
+          npx -y firebase-tools deploy \
+            --project=${{ env.PROJECT_ID }} \
+            --only firestore:rules,firestore:indexes,hosting

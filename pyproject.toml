@@ -13,12 +13,11 @@ dependencies = [
     "python-dotenv>=1.0.1",
     "python-multipart>=0.0.9",
     "pytest>=8.0.0",
-    "pytest-asyncio>=0.23.0",
     "httpx>=0.27.0",
-    "aiosqlite>=0.20.0",
+    "firebase-admin>=6.5.0",
+    "google-cloud-storage>=2.14.0",
 ]
 
 [tool.pytest.ini_options]
-asyncio_mode = "auto"
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "tests"]

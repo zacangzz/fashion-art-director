@@ -84,9 +84,9 @@ describe('WardrobePanel Component', () => {
     fireEvent.click(deleteAllBtn);
 
     await waitFor(() => {
-      expect(window.fetch).toHaveBeenCalledWith('/api/wardrobe/items', {
+      expect(window.fetch).toHaveBeenCalledWith('/api/wardrobe/items', expect.objectContaining({
         method: 'DELETE',
-      });
+      }));
     });
   });
 

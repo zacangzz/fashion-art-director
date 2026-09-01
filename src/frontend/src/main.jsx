@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App.jsx';
 import ObservabilityPage from './pages/ObservabilityPage.jsx';
+import { AuthProvider } from './contexts/AuthContext.jsx';
 import './index.css';
 
 function Root() {
@@ -38,6 +39,8 @@ function Root() {
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <Root />
+    <AuthProvider>
+      <Root />
+    </AuthProvider>
   </React.StrictMode>
 );

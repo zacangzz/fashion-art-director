@@ -29,14 +29,13 @@ class ModelConfigResponse(BaseModel):
 
 
 @router.get("/config", response_model=ModelConfigResponse)
-async def get_models_config() -> Dict[str, Any]:
+def get_models_config() -> Dict[str, Any]:
     """
     Returns available vision models and image generation models,
     as well as default models configured in the environment.
     """
     settings = get_settings()
     
-    # Ensure current env default is included in available models if custom
     vision_models = list(AVAILABLE_VISION_MODELS)
     if settings.VISION_MODEL and settings.VISION_MODEL not in vision_models:
         vision_models.append(settings.VISION_MODEL)

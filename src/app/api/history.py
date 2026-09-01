@@ -1,16 +1,18 @@
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends
+from app.auth.firebase_auth import get_current_user
 from app.schemas.domain import (
     HistoryResponse,
     GenerationRecordResponse,
     LineageResponse,
 )
 from app.dependencies import get_db_manager
+from app.db.database import FirestoreManager
 
 router = APIRouter(prefix="/api", tags=["history"])
-db_manager = get_db_manager()
 
 
 def _to_generation_response(r: dict) -> GenerationRecordResponse:
+    master_path = r.get("master_image_path", "")
     return GenerationRecordResponse(
         id=r["id"],
         parent_id=r.get("parent_id"),
@@ -21,7 +23,7 @@ def _to_generation_response(r: dict) -> GenerationRecordResponse:
         compiled_prompt=r.get("compiled_prompt") or r.get("prompt", ""),
         negative_prompt=r.get("negative_prompt", "") or "",
         seed=r.get("seed", 0),
-        master_image_url=f"/api/images/{r['id']}_master.png",
+        master_image_url=f"/api/images/{master_path}" if master_path else f"/api/images/{r['id']}_master.png",
         mask_image_url=r.get("mask_image_url"),
         inpaint_metadata=r.get("inpaint_metadata"),
         aspect_ratio=r.get("aspect_ratio", "1:1"),
@@ -36,12 +38,15 @@ def _to_generation_response(r: dict) -> GenerationRecordResponse:
 
 
 @router.get("/history", response_model=HistoryResponse)
-async def get_history():
+def get_history(
+    user: dict = Depends(get_current_user),
+    db_manager: FirestoreManager = Depends(get_db_manager),
+):
     """
-    Returns full list of generations with lineage metadata and schema snapshots.
+    Returns full list of generations with lineage metadata and schema snapshots for authenticated user.
     """
     try:
-        records = await db_manager.list_generations()
+        records = db_manager.list_generations(user_id=user["uid"])
         return HistoryResponse(
             generations=[_to_generation_response(r) for r in records]
         )
@@ -53,11 +58,15 @@ async def get_history():
 
 
 @router.get("/generations/{generation_id}", response_model=GenerationRecordResponse)
-async def get_generation(generation_id: str):
+def get_generation(
+    generation_id: str,
+    user: dict = Depends(get_current_user),
+    db_manager: FirestoreManager = Depends(get_db_manager),
+):
     """
     Fetches single generation record by ID.
     """
-    rec = await db_manager.get_generation(generation_id)
+    rec = db_manager.get_generation(generation_id)
     if not rec:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -67,11 +76,15 @@ async def get_generation(generation_id: str):
 
 
 @router.get("/generations/{generation_id}/lineage", response_model=LineageResponse)
-async def get_generation_lineage(generation_id: str):
+def get_generation_lineage(
+    generation_id: str,
+    user: dict = Depends(get_current_user),
+    db_manager: FirestoreManager = Depends(get_db_manager),
+):
     """
     Returns ancestors and direct descendants for a generation.
     """
-    lineage = await db_manager.get_lineage(generation_id)
+    lineage = db_manager.get_lineage(generation_id)
     return LineageResponse(
         root_id=lineage["root_id"],
         ancestors=[_to_generation_response(r) for r in lineage["ancestors"]],
@@ -80,11 +93,15 @@ async def get_generation_lineage(generation_id: str):
 
 
 @router.post("/generations/{generation_id}/restore", response_model=GenerationRecordResponse)
-async def restore_generation(generation_id: str):
+def restore_generation(
+    generation_id: str,
+    user: dict = Depends(get_current_user),
+    db_manager: FirestoreManager = Depends(get_db_manager),
+):
     """
     Returns state for workspace restoration.
     """
-    rec = await db_manager.get_generation(generation_id)
+    rec = db_manager.get_generation(generation_id)
     if not rec:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

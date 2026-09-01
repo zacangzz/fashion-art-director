@@ -6,8 +6,7 @@ from app.services.vision_service import VisionService
 from app.schemas.domain import TagCategory
 
 
-@pytest.mark.asyncio
-async def test_extract_tag_studio_state_mocked():
+def test_extract_tag_studio_state_mocked():
     mock_client = MagicMock()
 
     extracted_payload = {
@@ -29,8 +28,8 @@ async def test_extract_tag_studio_state_mocked():
     mock_client.models.generate_content.return_value = mock_response
 
     with patch("app.services.vision_service.genai.Client", return_value=mock_client):
-        service = VisionService(api_key="fake_key", model_name="gemini-3.1-flash-lite")
-        state = await service.extract_tag_studio_state([b"fake_image_bytes"])
+        service = VisionService(api_key="fake_key", model_name="gemini-3.5-flash-lite", client=mock_client)
+        state = service.extract_tag_studio_state([b"fake_image_bytes"])
 
         assert state["narrative"] == "A high-fashion summer editorial in Milan with vibrant colors."
         assert "subject_details" in state["categories"]
@@ -39,8 +38,7 @@ async def test_extract_tag_studio_state_mocked():
         assert state["categories"]["wardrobe_hair"][0]["label"] == "silk emerald green slip dress"
 
 
-@pytest.mark.asyncio
-async def test_extract_tag_studio_state_preserves_locked_categories():
+def test_extract_tag_studio_state_preserves_locked_categories():
     mock_client = MagicMock()
 
     extracted_payload = {
@@ -61,280 +59,139 @@ async def test_extract_tag_studio_state_preserves_locked_categories():
     }
 
     with patch("app.services.vision_service.genai.Client", return_value=mock_client):
-        service = VisionService(api_key="fake_key")
-        state = await service.extract_tag_studio_state(
+        service = VisionService(api_key="fake_key", model_name="gemini-3.5-flash-lite", client=mock_client)
+        state = service.extract_tag_studio_state(
             [b"fake_image_bytes"],
             locked_categories=["camera_optics"],
             existing_categories=existing_categories,
         )
 
         assert "camera_optics" in state["categories"]
+        assert len(state["categories"]["camera_optics"]) == 1
         assert state["categories"]["camera_optics"][0]["label"] == "85mm prime f/1.4"
+        assert state["categories"]["camera_optics"][0]["locked"] is True
 
 
-@pytest.mark.asyncio
-async def test_analyze_moodboard_returns_all_chips():
+def test_extract_tag_studio_state_fallback_when_empty():
     mock_client = MagicMock()
-    extracted_payload = {
-        "narrative": "Scene narrative",
+    mock_response = MagicMock()
+    mock_response.text = "invalid json response"
+    mock_client.models.generate_content.return_value = mock_response
+
+    with patch("app.services.vision_service.genai.Client", return_value=mock_client):
+        service = VisionService(api_key="fake_key", model_name="gemini-3.5-flash-lite", client=mock_client)
+        state = service.extract_tag_studio_state([b"fake_image_bytes"])
+
+        assert state is not None
+        assert "categories" in state
+        assert "subject_details" in state["categories"]
+        assert len(state["categories"]["subject_details"]) >= 1
+
+
+def test_extract_scene_schema_backwards_compatibility():
+    mock_client = MagicMock()
+    mock_response = MagicMock()
+    mock_response.text = json.dumps({
+        "narrative": "Compatible narrative",
         "categories": {
-            "subject_details": [{"label": "test subject", "weight": 1.0}],
-            "lighting": [{"label": "test lighting", "weight": 1.0}],
-        },
-    }
-    mock_response = MagicMock()
-    mock_response.text = json.dumps(extracted_payload)
+            "lighting": [{"label": "soft diffused window light", "weight": 1.0}]
+        }
+    })
     mock_client.models.generate_content.return_value = mock_response
 
     with patch("app.services.vision_service.genai.Client", return_value=mock_client):
-        service = VisionService(api_key="fake_key")
-        chips = await service.analyze_moodboard([b"fake_image_bytes"])
+        service = VisionService(api_key="fake_key", model_name="gemini-3.5-flash-lite", client=mock_client)
+        schema = service.extract_scene_schema([b"fake_image_bytes"])
 
-        assert len(chips) >= 2
-        labels = [c.label for c in chips]
-        assert "test subject" in labels
-        assert "test lighting" in labels
+        assert schema["narrative"] == "Compatible narrative"
+        assert "lighting" in schema["categories"]
 
 
-@pytest.mark.asyncio
-async def test_resync_prompt_from_levers_synthesizes_master_prompt():
+def test_resync_prompt_from_levers():
     mock_client = MagicMock()
-    resync_payload = {
-        "master_prompt": "A chic model in a ruby red satin evening gown on a Venetian canal at sunset.",
-        "narrative": "A high-fashion evening editorial in Venice.",
-        "conflicts": [],
-    }
     mock_response = MagicMock()
-    mock_response.text = json.dumps(resync_payload)
+    mock_response.text = json.dumps({
+        "master_prompt": "Haute couture masterpiece featuring a silk emerald slip dress in an Italian courtyard.",
+        "narrative": "Refined Italian courtyard elegance.",
+        "conflicts": [
+            {
+                "id": "c1",
+                "severity": "info",
+                "conflicting_elements": ["warm tone", "cool dress"],
+                "categories": ["lighting", "wardrobe_hair"],
+                "explanation": "Harmonious contrast.",
+            }
+        ]
+    })
     mock_client.models.generate_content.return_value = mock_response
 
     with patch("app.services.vision_service.genai.Client", return_value=mock_client):
-        service = VisionService(api_key="fake_key")
-        result = await service.resync_prompt_from_levers(
-            narrative="Venice evening",
+        service = VisionService(api_key="fake_key", model_name="gemini-3.5-flash-lite", client=mock_client)
+        result = service.resync_prompt_from_levers(
+            narrative="Starting narrative",
             categories={
-                "wardrobe_hair": [{"label": "ruby red satin evening gown", "enabled": True}],
-                "environment": [{"label": "Venetian canal", "enabled": True}],
-            },
+                "wardrobe_hair": [{"label": "silk emerald slip dress", "enabled": True}]
+            }
         )
 
-        assert result["master_prompt"] == "A chic model in a ruby red satin evening gown on a Venetian canal at sunset."
-        assert result["narrative"] == "A high-fashion evening editorial in Venice."
-        assert result["conflicts"] == []
+        assert "Haute couture masterpiece" in result["master_prompt"]
+        assert result["narrative"] == "Refined Italian courtyard elegance."
+        assert len(result["conflicts"]) == 1
 
 
-@pytest.mark.asyncio
-async def test_resync_levers_from_prompt_extracts_categories():
+def test_resync_levers_from_prompt():
     mock_client = MagicMock()
-    resync_payload = {
-        "categories": {
-            "subject_details": ["chic model with sleek dark hair"],
-            "wardrobe_hair": ["ruby red satin evening gown"],
-            "environment": ["Venetian canal", "waterway architecture"],
-            "lighting": ["sunset ambient lighting"],
-            "camera_optics": ["85mm prime lens f/1.4"],
-        },
-        "narrative": "A high-fashion evening editorial in Venice.",
-        "conflicts": [],
-    }
     mock_response = MagicMock()
-    mock_response.text = json.dumps(resync_payload)
+    mock_response.text = json.dumps({
+        "narrative": "Extracted runway narrative.",
+        "categories": {
+            "subject_details": ["tall avant-garde model"],
+            "wardrobe_hair": ["architectural black blazer"],
+            "lighting": ["stark high-contrast spotlight"],
+        },
+        "conflicts": []
+    })
     mock_client.models.generate_content.return_value = mock_response
 
     with patch("app.services.vision_service.genai.Client", return_value=mock_client):
-        service = VisionService(api_key="fake_key")
-        result = await service.resync_levers_from_prompt(
-            master_prompt="A chic model in a ruby red satin evening gown on a Venetian canal at sunset.",
-            narrative="Venice evening",
+        service = VisionService(api_key="fake_key", model_name="gemini-3.5-flash-lite", client=mock_client)
+        result = service.resync_levers_from_prompt(
+            master_prompt="A stunning avant-garde runway shot with architectural black blazer under stark spotlight."
         )
 
-        assert "categories" in result
+        assert result["narrative"] == "Extracted runway narrative."
         assert "wardrobe_hair" in result["categories"]
-        assert len(result["categories"]["wardrobe_hair"]) == 1
-        assert result["categories"]["wardrobe_hair"][0]["label"] == "ruby red satin evening gown"
-        assert result["categories"]["environment"][0]["label"] == "Venetian canal"
-        assert result["narrative"] == "A high-fashion evening editorial in Venice."
+        assert result["categories"]["wardrobe_hair"][0]["label"] == "architectural black blazer"
+        assert result["categories"]["lighting"][0]["label"] == "stark high-contrast spotlight"
 
 
-@pytest.mark.asyncio
-async def test_resync_master_prompt_extracts_and_updates_categories():
+def test_check_prompt_conflicts():
     mock_client = MagicMock()
-    resync_payload = {
-        "master_prompt": "A chic model in a ruby red satin evening gown on a Venetian canal at sunset.",
-        "narrative": "A high-fashion evening editorial in Venice.",
-        "categories": {
-            "subject_details": ["chic model with sleek dark hair"],
-            "wardrobe_hair": ["ruby red satin evening gown"],
-            "environment": ["Venetian canal", "waterway architecture"],
-            "lighting": ["sunset ambient lighting"],
-            "camera_optics": ["85mm prime lens f/1.4"],
-        },
-        "conflicts": [],
-    }
     mock_response = MagicMock()
-    mock_response.text = json.dumps(resync_payload)
-    mock_client.models.generate_content.return_value = mock_response
-
-    with patch("app.services.vision_service.genai.Client", return_value=mock_client):
-        service = VisionService(api_key="fake_key")
-        result = await service.resync_master_prompt(
-            previous_master_prompt="User typed a new prompt with ruby red evening gown in Venice",
-            narrative="Venice evening",
-            categories={},
-        )
-
-        assert result["master_prompt"] == "A chic model in a ruby red satin evening gown on a Venetian canal at sunset."
-        assert result["narrative"] == "A high-fashion evening editorial in Venice."
-        assert "categories" in result
-        assert "wardrobe_hair" in result["categories"]
-        assert len(result["categories"]["wardrobe_hair"]) == 1
-        assert result["categories"]["wardrobe_hair"][0]["label"] == "ruby red satin evening gown"
-        assert result["categories"]["environment"][0]["label"] == "Venetian canal"
-
-
-@pytest.mark.asyncio
-async def test_vision_service_interactions_api_execution():
-    mock_client = MagicMock()
-    extracted_payload = {
-        "master_prompt": "A chic model in high-fashion couture in Paris.",
-        "narrative": "Parisian luxury editorial.",
-        "categories": {
-            "subject_details": ["Parisian female model"],
-            "wardrobe_hair": ["haute couture silk trench coat"],
-        },
-    }
-    mock_interaction = MagicMock()
-    mock_interaction.output_text = json.dumps(extracted_payload)
-    mock_interaction.usage.prompt_tokens = 120
-    mock_interaction.usage.candidates_tokens = 80
-    mock_interaction.usage.total_tokens = 200
-    mock_client.interactions.create.return_value = mock_interaction
-
-    with patch("app.services.vision_service.genai.Client", return_value=mock_client):
-        service = VisionService(api_key="fake_key")
-        result = await service.extract_tag_studio_state([b"fake_image_bytes"])
-
-        assert result["master_prompt"] == "A chic model in high-fashion couture in Paris."
-        assert result["narrative"] == "Parisian luxury editorial."
-        assert "subject_details" in result["categories"]
-        assert mock_client.interactions.create.called
-        _, kwargs = mock_client.interactions.create.call_args
-        assert kwargs["response_format"] == {
-            "type": "text",
-            "mime_type": "application/json",
-        }
-
-
-@pytest.mark.asyncio
-async def test_resync_prompt_from_levers_interactions_api():
-    mock_client = MagicMock()
-    payload = {
-        "master_prompt": "A stylish model in emerald green couture.",
-        "narrative": "Milan fashion week editorial.",
-        "conflicts": [],
-    }
-    mock_interaction = MagicMock()
-    mock_interaction.output_text = json.dumps(payload)
-    mock_interaction.usage.prompt_tokens = 50
-    mock_interaction.usage.candidates_tokens = 30
-    mock_interaction.usage.total_tokens = 80
-    mock_client.interactions.create.return_value = mock_interaction
-
-    with patch("app.services.vision_service.genai.Client", return_value=mock_client):
-        service = VisionService(api_key="fake_key")
-        result = await service.resync_prompt_from_levers(
-            narrative="Milan fashion",
-            categories={
-                "wardrobe_hair": [{"label": "emerald green couture", "enabled": True}],
-            },
-        )
-
-        assert result["master_prompt"] == "A stylish model in emerald green couture."
-        assert result["narrative"] == "Milan fashion week editorial."
-        assert mock_client.interactions.create.called
-        _, kwargs = mock_client.interactions.create.call_args
-        assert isinstance(kwargs["input"], str)
-        assert len(kwargs["input"]) > 0
-        assert "emerald green couture" in kwargs["input"]
-        assert kwargs["response_format"] == {
-            "type": "text",
-            "mime_type": "application/json",
-        }
-
-
-@pytest.mark.asyncio
-async def test_resync_levers_from_prompt_interactions_api():
-    mock_client = MagicMock()
-    payload = {
-        "categories": {
-            "wardrobe_hair": ["emerald green couture"],
-        },
-        "narrative": "Milan fashion week editorial.",
-        "conflicts": [],
-    }
-    mock_interaction = MagicMock()
-    mock_interaction.output_text = json.dumps(payload)
-    mock_interaction.usage.prompt_tokens = 50
-    mock_interaction.usage.candidates_tokens = 30
-    mock_interaction.usage.total_tokens = 80
-    mock_client.interactions.create.return_value = mock_interaction
-
-    with patch("app.services.vision_service.genai.Client", return_value=mock_client):
-        service = VisionService(api_key="fake_key")
-        result = await service.resync_levers_from_prompt(
-            master_prompt="A stylish model in emerald green couture.",
-            narrative="Milan fashion",
-        )
-
-        assert "categories" in result
-        assert "wardrobe_hair" in result["categories"]
-        assert mock_client.interactions.create.called
-        _, kwargs = mock_client.interactions.create.call_args
-        assert isinstance(kwargs["input"], str)
-        assert len(kwargs["input"]) > 0
-        assert "emerald green couture" in kwargs["input"]
-        assert kwargs["response_format"] == {
-            "type": "text",
-            "mime_type": "application/json",
-        }
-
-
-@pytest.mark.asyncio
-async def test_check_prompt_conflicts_interactions_api():
-    mock_client = MagicMock()
-    payload = {
+    mock_response.text = json.dumps({
         "conflicts": [
             {
                 "id": "conflict_1",
-                "severity": "warning",
-                "conflicting_elements": ["sunlight", "night"],
+                "severity": "critical",
+                "conflicting_elements": ["pitch dark night", "bright midday sun"],
                 "categories": ["lighting", "environment"],
-                "explanation": "Direct sunlight at night is contradictory.",
+                "explanation": "Contradictory environmental lighting conditions specified.",
+                "recommendation": "Choose either daylight or nighttime setting."
             }
         ]
-    }
-    mock_interaction = MagicMock()
-    mock_interaction.output_text = json.dumps(payload)
-    mock_interaction.usage.prompt_tokens = 40
-    mock_interaction.usage.candidates_tokens = 20
-    mock_interaction.usage.total_tokens = 60
-    mock_client.interactions.create.return_value = mock_interaction
+    })
+    mock_client.models.generate_content.return_value = mock_response
 
     with patch("app.services.vision_service.genai.Client", return_value=mock_client):
-        service = VisionService(api_key="fake_key")
-        conflicts = await service.check_prompt_conflicts(
-            master_prompt="Night photoshoot with direct sunlight.",
-            narrative="Night photoshoot",
-            categories={"lighting": [{"label": "direct sunlight", "enabled": True}]},
+        service = VisionService(api_key="fake_key", model_name="gemini-3.5-flash-lite", client=mock_client)
+        conflicts = service.check_prompt_conflicts(
+            master_prompt="A model in pitch dark night with bright midday sun illuminating the background.",
+            categories={
+                "lighting": [{"label": "bright midday sun"}],
+                "environment": [{"label": "pitch dark night"}],
+            }
         )
 
         assert len(conflicts) == 1
-        assert conflicts[0]["id"] == "conflict_1"
-        assert mock_client.interactions.create.called
-        _, kwargs = mock_client.interactions.create.call_args
-        assert isinstance(kwargs["input"], str)
-        assert len(kwargs["input"]) > 0
-        assert "Night photoshoot" in kwargs["input"]
-
-
-
+        assert conflicts[0]["severity"] == "critical"
+        assert "Contradictory" in conflicts[0]["explanation"]

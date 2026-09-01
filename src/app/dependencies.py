@@ -5,7 +5,9 @@ from google import genai
 from google.genai import types
 
 from app.config import get_settings
-from app.db.database import DatabaseManager
+from app.firebase_init import get_storage_bucket, get_firestore_client
+from app.db.database import DatabaseManager, FirestoreManager
+from app.services.storage_service import StorageService
 from app.services.image_generator import ImageGenerator
 from app.services.vision_service import VisionService
 from app.services.wardrobe_service import WardrobeService
@@ -15,9 +17,17 @@ from app.utils.telemetry import TelemetryLogger
 
 
 @lru_cache()
-def get_db_manager() -> DatabaseManager:
+def get_db_manager() -> FirestoreManager:
     settings = get_settings()
-    return DatabaseManager(settings.DATABASE_URL)
+    client = get_firestore_client(settings.GCP_PROJECT_ID)
+    return FirestoreManager(client)
+
+
+@lru_cache()
+def get_storage_service() -> StorageService:
+    settings = get_settings()
+    bucket = get_storage_bucket(settings.GCS_BUCKET)
+    return StorageService(bucket=bucket, environment=settings.ENVIRONMENT)
 
 
 @lru_cache()
@@ -33,9 +43,7 @@ def get_image_generator() -> ImageGenerator:
     settings = get_settings()
     client = get_gemini_client()
     telemetry = TelemetryLogger(
-        audit_path=os.path.join(settings.STORAGE_DIR, "logs", "generation_audit.jsonl"),
         component="generation",
-        storage_dir=settings.STORAGE_DIR,
     )
     return ImageGenerator(
         client=client,
@@ -50,7 +58,6 @@ def get_vision_service() -> VisionService:
     return VisionService(
         api_key=settings.GEMINI_API_KEY,
         model_name=settings.VISION_MODEL,
-        audit_path=os.path.join(settings.STORAGE_DIR, "logs", "vision_audit.jsonl"),
         client=get_gemini_client(),
     )
 
@@ -60,11 +67,10 @@ def get_wardrobe_service() -> WardrobeService:
     settings = get_settings()
     return WardrobeService(
         db_manager=get_db_manager(),
+        storage_service=get_storage_service(),
         api_key=settings.GEMINI_API_KEY,
-        storage_dir=settings.STORAGE_DIR,
         vision_model=settings.VISION_MODEL,
         imagen_model=settings.IMAGEN_MODEL,
-        audit_path=os.path.join(settings.STORAGE_DIR, "logs", "wardrobe_audit.jsonl"),
         client=get_gemini_client(),
         image_generator=get_image_generator(),
     )
@@ -74,26 +80,22 @@ def get_wardrobe_service() -> WardrobeService:
 def get_generation_service() -> GenerationService:
     settings = get_settings()
     ws = get_wardrobe_service()
-    gs = GenerationService(
+    return GenerationService(
         db_manager=get_db_manager(),
+        storage_service=get_storage_service(),
         api_key=settings.GEMINI_API_KEY,
-        storage_dir=settings.STORAGE_DIR,
         model_name=settings.IMAGEN_MODEL,
         inpaint_model_name=settings.INPAINT_MODEL,
-        audit_path=os.path.join(settings.STORAGE_DIR, "logs", "generation_audit.jsonl"),
         wardrobe_service=ws,
         client=get_gemini_client(),
         image_generator=get_image_generator(),
     )
-    ws.set_generation_service(gs)
-    return gs
 
 
 @lru_cache()
 def get_export_service() -> ExportService:
-    settings = get_settings()
     return ExportService(
         db_manager=get_db_manager(),
+        storage_service=get_storage_service(),
         image_generator=get_image_generator(),
-        storage_dir=settings.STORAGE_DIR,
     )

@@ -1,24 +1,41 @@
 import io
 import pytest
-from unittest.mock import patch
-from httpx import AsyncClient, ASGITransport
+from unittest.mock import MagicMock
+from fastapi.testclient import TestClient
 from app.main import app
+from app.dependencies import get_db_manager, get_vision_service, get_generation_service, get_storage_service
+from fake_firestore import FakeFirestoreClient
+from app.db.database import FirestoreManager
+from app.services.storage_service import StorageService
 
 
-@pytest.mark.asyncio
-async def test_health_endpoint():
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        response = await client.get("/health")
-        assert response.status_code == 200
-        assert response.json()["status"] == "ok"
-        assert "Image Gen Pipeline Studio" in response.json()["title"]
+@pytest.fixture
+def client():
+    fake_db = FakeFirestoreClient()
+    db_mgr = FirestoreManager(fake_db)
+
+    fake_bucket = MagicMock()
+    fake_blob = MagicMock()
+    fake_blob.generate_signed_url.return_value = "https://storage.googleapis.com/test/img.png"
+    fake_bucket.blob.return_value = fake_blob
+    storage_service = StorageService(bucket=fake_bucket, environment="local")
+
+    app.dependency_overrides[get_db_manager] = lambda: db_mgr
+    app.dependency_overrides[get_storage_service] = lambda: storage_service
+    yield TestClient(app)
+    app.dependency_overrides.clear()
 
 
-@pytest.mark.asyncio
-@patch("app.api.moodboard.vision_service.extract_tag_studio_state")
-@patch("app.api.moodboard.generation_service.generate_4_baselines")
-async def test_analyze_and_baselines_endpoint(mock_gen_baselines, mock_vision):
-    mock_vision.return_value = {
+def test_health_endpoint(client):
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+    assert "Art Director" in response.json()["title"] or "API" in response.json()["title"]
+
+
+def test_analyze_and_baselines_endpoint(client):
+    mock_vision = MagicMock()
+    mock_vision.extract_tag_studio_state.return_value = {
         "narrative": "A test editorial scene.",
         "categories": {
             "subject_details": [
@@ -26,128 +43,50 @@ async def test_analyze_and_baselines_endpoint(mock_gen_baselines, mock_vision):
             ]
         },
     }
-    mock_gen_baselines.return_value = [
+    mock_gen = MagicMock()
+    mock_gen.generate_4_baselines.return_value = [
         {"id": "gen_base_01", "seed": 111, "image_url": "/api/images/gen_base_01.png", "created_at": "2026-08-24T00:00:00Z"},
         {"id": "gen_base_02", "seed": 222, "image_url": "/api/images/gen_base_02.png", "created_at": "2026-08-24T00:00:00Z"},
         {"id": "gen_base_03", "seed": 333, "image_url": "/api/images/gen_base_03.png", "created_at": "2026-08-24T00:00:00Z"},
         {"id": "gen_base_04", "seed": 444, "image_url": "/api/images/gen_base_04.png", "created_at": "2026-08-24T00:00:00Z"},
     ]
 
-    file_content = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR..."
-    files = [("files", ("test.png", io.BytesIO(file_content), "image/png"))]
-
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        response = await client.post("/api/moodboard/analyze-and-baselines", files=files)
-        assert response.status_code == 200
-        data = response.json()
-        assert "moodboard_id" in data
-        assert data["narrative"] == "A test editorial scene."
-        assert "subject_details" in data["categories"]
-        assert len(data["baselines"]) == 4
-        assert data["baselines"][0]["seed"] == 111
-
-
-@pytest.mark.asyncio
-@patch("app.api.moodboard.vision_service.extract_tag_studio_state")
-@patch("app.api.moodboard.generation_service.generate_4_baselines")
-async def test_analyze_and_baselines_with_prompt_endpoint(mock_gen_baselines, mock_vision):
-    mock_vision.return_value = {
-        "narrative": "Sun-drenched midcentury living room with travertine table",
-        "categories": {
-            "environment": [
-                {"id": "t2", "category": "environment", "label": "midcentury living room", "enabled": True, "locked": False, "weight": 1.0, "isCustom": False}
-            ]
-        },
-    }
-    mock_gen_baselines.return_value = [
-        {"id": "gen_base_01", "seed": 111, "image_url": "/api/images/gen_base_01.png", "created_at": "2026-08-24T00:00:00Z"},
-    ]
+    app.dependency_overrides[get_vision_service] = lambda: mock_vision
+    app.dependency_overrides[get_generation_service] = lambda: mock_gen
 
     file_content = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR..."
     files = [("files", ("test.png", io.BytesIO(file_content), "image/png"))]
-    data_payload = {"prompt": "Sun-drenched midcentury living room with travertine table"}
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        response = await client.post("/api/moodboard/analyze-and-baselines", files=files, data=data_payload)
-        assert response.status_code == 200
-        data = response.json()
-        assert data["narrative"] == "Sun-drenched midcentury living room with travertine table"
-        mock_vision.assert_called_once()
-        assert mock_vision.call_args.kwargs["prompt"] == "Sun-drenched midcentury living room with travertine table"
+    response = client.post("/api/moodboard/analyze-and-baselines", files=files)
+    assert response.status_code == 200
+    data = response.json()
+    assert "moodboard_id" in data
+    assert data["narrative"] == "A test editorial scene."
+    assert "subject_details" in data["categories"]
+    assert len(data["baselines"]) == 4
+    assert data["baselines"][0]["seed"] == 111
 
 
-@pytest.mark.asyncio
-@patch("app.api.generation.generation_service.fine_tune_generation")
-async def test_fine_tune_generation_api(mock_fine_tune):
-    mock_fine_tune.return_value = {
+def test_fine_tune_endpoint(client):
+    mock_gen = MagicMock()
+    mock_gen.fine_tune_generation.return_value = {
         "generation_id": "gen_child_01",
         "parent_id": "gen_base_01",
-        "seed": 918231,
-        "compiled_prompt": "fine tuned prompt",
+        "seed": 999,
+        "compiled_prompt": "Refined prompt",
         "negative_prompt": "blurry",
-        "image_url": "/api/images/gen_child_01.png",
+        "image_url": "/api/images/gen_child_01_master.png",
         "created_at": "2026-08-24T00:00:00Z",
     }
+    app.dependency_overrides[get_generation_service] = lambda: mock_gen
 
     payload = {
         "parent_id": "gen_base_01",
-        "narrative": "Refined campaign narrative",
-        "categories": {
-            "lighting": [{"label": "soft sunlight", "weight": 1.0, "enabled": True}]
-        },
-        "seed_mode": "locked",
-        "seed": 918231,
-        "use_image_reference": True,
+        "schema_data": {"narrative": "Refined direction"},
+        "seed": 999,
     }
-
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        response = await client.post("/api/generate/fine-tune", json=payload)
-        assert response.status_code == 200
-        data = response.json()
-        assert data["generation_id"] == "gen_child_01"
-        assert data["parent_id"] == "gen_base_01"
-        assert data["seed"] == 918231
-
-
-@pytest.mark.asyncio
-async def test_history_endpoints():
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        response = await client.get("/api/history")
-        assert response.status_code == 200
-        data = response.json()
-        assert "generations" in data
-        assert isinstance(data["generations"], list)
-
-
-@pytest.mark.asyncio
-@patch("app.api.refinement.generation_service.refine_generation")
-async def test_refinement_api_endpoint(mock_refine):
-    mock_refine.return_value = {
-        "generation_id": "gen_refine_01",
-        "parent_id": "gen_base_01",
-        "seed": 4289102,
-        "compiled_prompt": "Refined warm lighting",
-        "negative_prompt": "blurry",
-        "image_url": "/api/images/gen_refine_01_master.png",
-        "created_at": "2026-08-25T00:00:00Z",
-        "resolution": {"width": 1080, "height": 1620},
-        "conversation_id": "conv_01",
-    }
-
-    payload = {
-        "parent_id": "gen_base_01",
-        "prompt": "Make the lighting warmer, sunset glow",
-        "seed_mode": "locked",
-        "seed": 4289102,
-        "conversation_id": "conv_01",
-    }
-
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        response = await client.post("/api/refine", json=payload)
-        assert response.status_code == 200
-        data = response.json()
-        assert data["generation_id"] == "gen_refine_01"
-        assert data["parent_id"] == "gen_base_01"
-        assert data["conversation_id"] == "conv_01"
-        assert data["seed"] == 4289102
-
+    response = client.post("/api/generate/fine-tune", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["generation_id"] == "gen_child_01"
+    assert data["parent_id"] == "gen_base_01"

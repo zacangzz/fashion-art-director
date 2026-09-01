@@ -117,8 +117,8 @@ export default function WardrobePanel({
     try {
       await deleteWardrobeItem(id);
       setItems((prev) => prev.filter((item) => item.id !== id));
-      if (previewItem?.id === id) {
-        setPreviewItem(null);
+      if (previewItemId === id) {
+        setPreviewItemId(null);
       }
       // Remove any active assignment using this item
       assignments.forEach((asgn) => {
@@ -138,7 +138,7 @@ export default function WardrobePanel({
       setIsLoading(true);
       await deleteAllWardrobeItems();
       setItems([]);
-      setPreviewItem(null);
+      setPreviewItemId(null);
       onClearAssignments?.();
     } catch (err) {
       setErrorMessage(err.message || 'Failed to delete all garments.');

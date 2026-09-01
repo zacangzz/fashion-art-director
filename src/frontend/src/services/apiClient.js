@@ -1,3 +1,28 @@
+import { auth } from '../config/firebase';
+
+/**
+ * Enhanced fetch wrapper that attaches Firebase ID token if user is signed in.
+ */
+async function authFetch(url, options = {}) {
+  const headers = new Headers(options.headers || {});
+
+  try {
+    if (auth && auth.currentUser) {
+      const token = await auth.currentUser.getIdToken();
+      if (token) {
+        headers.set('Authorization', `Bearer ${token}`);
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to retrieve auth token for request:', err);
+  }
+
+  return fetch(url, {
+    ...options,
+    headers,
+  });
+}
+
 /**
  * Helper to parse and format descriptive error messages from API responses.
  * @param {Response} response
@@ -53,7 +78,7 @@ async function handleApiResponse(response, defaultMessage) {
  * @returns {Promise<{available_vision_models: string[], available_imagen_models: string[], default_vision_model: string, default_imagen_model: string, inpaint_model: string}>}
  */
 export async function fetchModelConfig() {
-  const response = await fetch('/api/models/config');
+  const response = await authFetch('/api/models/config');
   return handleApiResponse(response, 'Failed to fetch model configuration');
 }
 
@@ -100,7 +125,7 @@ export async function analyzeAndGenerateBaselines(
     formData.append('imagen_model', imagenModel);
   }
 
-  const response = await fetch('/api/moodboard/analyze-and-baselines', {
+  const response = await authFetch('/api/moodboard/analyze-and-baselines', {
     method: 'POST',
     body: formData,
   });
@@ -121,7 +146,7 @@ export async function uploadDirectPhoto(file, aspectRatio = null) {
     formData.append('aspect_ratio', aspectRatio);
   }
 
-  const response = await fetch('/api/moodboard/upload-direct-photo', {
+  const response = await authFetch('/api/moodboard/upload-direct-photo', {
     method: 'POST',
     body: formData,
   });
@@ -169,7 +194,7 @@ export async function analyzeMoodboard(
     formData.append('vision_model', visionModel);
   }
 
-  const response = await fetch('/api/moodboard/analyze', {
+  const response = await authFetch('/api/moodboard/analyze', {
     method: 'POST',
     body: formData,
   });
@@ -183,7 +208,7 @@ export async function analyzeMoodboard(
  * @returns {Promise<{moodboard_id: string, baselines: Array}>}
  */
 export async function generateBaselines(payload) {
-  const response = await fetch('/api/moodboard/generate-baselines', {
+  const response = await authFetch('/api/moodboard/generate-baselines', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -200,7 +225,7 @@ export async function generateBaselines(payload) {
  * @returns {Promise<{master_prompt: string, narrative: string, conflicts: Array}>}
  */
 export async function resyncPromptFromLevers(payload) {
-  const response = await fetch('/api/moodboard/resync-prompt', {
+  const response = await authFetch('/api/moodboard/resync-prompt', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -217,7 +242,7 @@ export async function resyncPromptFromLevers(payload) {
  * @returns {Promise<{categories: Object, narrative: string, conflicts: Array}>}
  */
 export async function resyncLeversFromPrompt(payload) {
-  const response = await fetch('/api/moodboard/resync-levers', {
+  const response = await authFetch('/api/moodboard/resync-levers', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -239,7 +264,7 @@ export const resyncMasterPrompt = resyncPromptFromLevers;
  * @returns {Promise<{conflicts: Array}>}
  */
 export async function checkPromptConflicts(payload) {
-  const response = await fetch('/api/moodboard/check-conflicts', {
+  const response = await authFetch('/api/moodboard/check-conflicts', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -256,7 +281,7 @@ export async function checkPromptConflicts(payload) {
  * @returns {Promise<{generation_id: string, parent_id: string, seed: number, compiled_prompt: string, negative_prompt: string, image_url: string, created_at: string}>}
  */
 export async function fineTuneGeneration(payload) {
-  const response = await fetch('/api/generate/fine-tune', {
+  const response = await authFetch('/api/generate/fine-tune', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -273,7 +298,7 @@ export async function fineTuneGeneration(payload) {
  * @returns {Promise<{generation_id: string, parent_id: string, seed: number, compiled_prompt: string, image_url: string, created_at: string, resolution: Object, conversation_id: string}>}
  */
 export async function refineGeneration(payload) {
-  const response = await fetch('/api/refine', {
+  const response = await authFetch('/api/refine', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -290,7 +315,7 @@ export async function refineGeneration(payload) {
  * @returns {Promise<{conversation_id: string, baseline_generation_id: string, messages: Array}>}
  */
 export async function fetchConversation(conversationId) {
-  const response = await fetch(`/api/conversations/${conversationId}`);
+  const response = await authFetch(`/api/conversations/${conversationId}`);
   return handleApiResponse(response, 'Failed to fetch conversation history');
 }
 
@@ -299,7 +324,7 @@ export async function fetchConversation(conversationId) {
  * @returns {Promise<{generations: Array}>}
  */
 export async function fetchHistory() {
-  const response = await fetch('/api/history');
+  const response = await authFetch('/api/history');
   return handleApiResponse(response, 'Failed to fetch history');
 }
 
@@ -309,7 +334,7 @@ export async function fetchHistory() {
  * @returns {Promise<Object>}
  */
 export async function fetchGeneration(id) {
-  const response = await fetch(`/api/generations/${id}`);
+  const response = await authFetch(`/api/generations/${id}`);
   return handleApiResponse(response, 'Failed to fetch generation');
 }
 
@@ -319,7 +344,7 @@ export async function fetchGeneration(id) {
  * @returns {Promise<{root_id: string, ancestors: Array, descendants: Array}>}
  */
 export async function fetchLineage(id) {
-  const response = await fetch(`/api/generations/${id}/lineage`);
+  const response = await authFetch(`/api/generations/${id}/lineage`);
   return handleApiResponse(response, 'Failed to fetch lineage');
 }
 
@@ -329,7 +354,7 @@ export async function fetchLineage(id) {
  * @returns {Promise<Object>}
  */
 export async function restoreGeneration(id) {
-  const response = await fetch(`/api/generations/${id}/restore`, {
+  const response = await authFetch(`/api/generations/${id}/restore`, {
     method: 'POST',
   });
   return handleApiResponse(response, 'Failed to restore generation');
@@ -346,7 +371,7 @@ export async function prepareExport(generationId, promptOverride = null) {
   if (promptOverride && typeof promptOverride === 'string' && promptOverride.trim()) {
     payload.prompt_override = promptOverride.trim();
   }
-  const response = await fetch('/api/export/prepare', {
+  const response = await authFetch('/api/export/prepare', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -363,7 +388,7 @@ export async function prepareExport(generationId, promptOverride = null) {
  * @returns {Promise<Blob>}
  */
 export async function exportBundle(generationId) {
-  const response = await fetch('/api/export/bundle', {
+  const response = await authFetch('/api/export/bundle', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -408,7 +433,7 @@ export async function inpaintRegion({ generationId, imageBlob, maskBlob, prompt,
     formData.append('aspect_ratio', aspectRatio);
   }
 
-  const response = await fetch('/api/inpaint', {
+  const response = await authFetch('/api/inpaint', {
     method: 'POST',
     body: formData,
   });
@@ -417,7 +442,7 @@ export async function inpaintRegion({ generationId, imageBlob, maskBlob, prompt,
 }
 
 export async function generateImage(payload) {
-  const response = await fetch('/api/generate', {
+  const response = await authFetch('/api/generate', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -441,7 +466,7 @@ export async function uploadWardrobeSheet(file, visionModel = null) {
     formData.append('vision_model', visionModel);
   }
 
-  const response = await fetch('/api/wardrobe/upload', {
+  const response = await authFetch('/api/wardrobe/upload', {
     method: 'POST',
     body: formData,
   });
@@ -450,11 +475,11 @@ export async function uploadWardrobeSheet(file, visionModel = null) {
 }
 
 /**
- * Fetches all saved wardrobe items.
+ * Fetches all saved wardrobe garment items for user.
  * @returns {Promise<{items: Array}>}
  */
 export async function fetchWardrobeItems() {
-  const response = await fetch('/api/wardrobe/items');
+  const response = await authFetch('/api/wardrobe/items');
   return handleApiResponse(response, 'Failed to fetch wardrobe items');
 }
 
@@ -464,38 +489,68 @@ export async function fetchWardrobeItems() {
  * @returns {Promise<{status: string, id: string}>}
  */
 export async function deleteWardrobeItem(id) {
-  const response = await fetch(`/api/wardrobe/items/${id}`, {
+  const response = await authFetch(`/api/wardrobe/items/${id}`, {
     method: 'DELETE',
   });
-
   return handleApiResponse(response, 'Failed to delete wardrobe item');
 }
 
 /**
- * Deletes all wardrobe items in the library.
- * @returns {Promise<{status: string, count: number}>}
+ * Deletes all wardrobe items for the current user.
+ * @returns {Promise<{status: string, deleted_count: number}>}
  */
 export async function deleteAllWardrobeItems() {
-  const response = await fetch('/api/wardrobe/items', {
+  const response = await authFetch('/api/wardrobe/items', {
     method: 'DELETE',
   });
-
-  return handleApiResponse(response, 'Failed to delete all wardrobe items');
+  return handleApiResponse(response, 'Failed to clear wardrobe items');
 }
 
+/**
+ * Upscales a garment item to 4K definition.
+ * @param {string} itemId
+ * @param {Object} [options]
+ * @returns {Promise<Object>}
+ */
+export async function upscaleGarment(itemId, { imagenModel } = {}) {
+  const response = await authFetch(`/api/wardrobe/items/${encodeURIComponent(itemId)}/upscale`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ imagen_model: imagenModel }),
+  });
+  return handleApiResponse(response, 'Failed to upscale garment');
+}
 
 /**
- * Detects clothing regions on the active generated image.
+ * Creates or updates a manual cropped garment item in wardrobe.
+ * @param {Object} itemData
+ * @returns {Promise<Object>}
+ */
+export async function createWardrobeItem(itemData) {
+  const response = await authFetch('/api/wardrobe/items', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(itemData),
+  });
+  return handleApiResponse(response, 'Failed to save wardrobe item');
+}
+
+/**
+ * Sends a vision region detection request to find subject/clothing bounding boxes.
  * @param {string} generationId
  * @param {string} [visionModel]
- * @returns {Promise<{regions: Array}>}
+ * @returns {Promise<{regions: Array, image_url: string}>}
  */
 export async function detectClothingRegions(generationId, visionModel = null) {
   const payload = { generation_id: generationId };
   if (visionModel) {
     payload.vision_model = visionModel;
   }
-  const response = await fetch('/api/wardrobe/detect-regions', {
+  const response = await authFetch('/api/wardrobe/detect-regions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -512,7 +567,7 @@ export async function detectClothingRegions(generationId, visionModel = null) {
  * @returns {Promise<Object>}
  */
 export async function composeWardrobe(payload) {
-  const response = await fetch('/api/wardrobe/compose', {
+  const response = await authFetch('/api/wardrobe/compose', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -538,7 +593,7 @@ export async function fetchTelemetryEvents({ component, event, requestId, status
   query.set('limit', String(limit));
   query.set('offset', String(offset));
 
-  const response = await fetch(`/api/telemetry/events?${query.toString()}`);
+  const response = await authFetch(`/api/telemetry/events?${query.toString()}`);
   return handleApiResponse(response, 'Failed to fetch telemetry events');
 }
 
@@ -548,7 +603,7 @@ export async function fetchTelemetryEvents({ component, event, requestId, status
  * @returns {Promise<Array>}
  */
 export async function fetchRequestTrace(requestId) {
-  const response = await fetch(`/api/telemetry/events/${encodeURIComponent(requestId)}`);
+  const response = await authFetch(`/api/telemetry/events/${encodeURIComponent(requestId)}`);
   return handleApiResponse(response, `Failed to fetch trace for request ${requestId}`);
 }
 
@@ -557,7 +612,7 @@ export async function fetchRequestTrace(requestId) {
  * @returns {Promise<Object>}
  */
 export async function fetchTelemetryStats() {
-  const response = await fetch('/api/telemetry/stats');
+  const response = await authFetch('/api/telemetry/stats');
   return handleApiResponse(response, 'Failed to fetch telemetry statistics');
 }
 
@@ -571,21 +626,21 @@ export async function fetchSystemLogs({ lines = 200, level } = {}) {
   query.set('lines', String(lines));
   if (level) query.set('level', level);
 
-  const response = await fetch(`/api/telemetry/logs?${query.toString()}`);
+  const response = await authFetch(`/api/telemetry/logs?${query.toString()}`);
   return handleApiResponse(response, 'Failed to fetch system logs');
 }
 
 /**
- * Fetches SQLite database tables summary with row counts.
+ * Fetches Firestore database collections summary with document counts.
  * @returns {Promise<{tables: Object}>}
  */
 export async function fetchDatabaseSummary() {
-  const response = await fetch('/api/telemetry/db/summary');
+  const response = await authFetch('/api/telemetry/db/summary');
   return handleApiResponse(response, 'Failed to fetch database summary');
 }
 
 /**
- * Fetches paginated records for a database table.
+ * Fetches paginated records for a Firestore database collection.
  * @param {string} tableName
  * @param {Object} [params]
  * @returns {Promise<{table: string, total: number, limit: number, offset: number, rows: Array}>}
@@ -595,10 +650,6 @@ export async function fetchDatabaseTableRecords(tableName, { limit = 50, offset 
   query.set('limit', String(limit));
   query.set('offset', String(offset));
 
-  const response = await fetch(`/api/telemetry/db/${encodeURIComponent(tableName)}?${query.toString()}`);
-  return handleApiResponse(response, `Failed to fetch records for table ${tableName}`);
+  const response = await authFetch(`/api/telemetry/db/${encodeURIComponent(tableName)}?${query.toString()}`);
+  return handleApiResponse(response, `Failed to fetch records for collection ${tableName}`);
 }
-
-
-
-

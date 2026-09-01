@@ -7,7 +7,8 @@ from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 from PIL import Image
 
-from app.db.database import DatabaseManager
+from app.db.database import FirestoreManager, DatabaseManager
+from app.services.storage_service import StorageService
 from app.services.image_generator import ImageGenerator
 from app.utils.image_utils import (
     ASPECT_RATIO_RESOLUTIONS,
@@ -40,34 +41,37 @@ BUNDLE_PRESETS: Dict[str, tuple[int, int]] = {
 
 class ExportService:
     """
-    Service responsible for high-resolution 4K master restoration exports and archive bundling.
-    Composes ImageGenerator, DatabaseManager, and TelemetryLogger.
+    Synchronous service responsible for high-resolution 4K master restoration exports
+    and in-memory archive bundling.
+    Composes ImageGenerator, StorageService, FirestoreManager, and TelemetryLogger.
     """
 
     def __init__(
         self,
-        db_manager: DatabaseManager,
+        db_manager: FirestoreManager,
         image_generator: Optional[ImageGenerator] = None,
+        storage_service: Optional[StorageService] = None,
         storage_dir: Optional[str] = None,
         audit_path: Optional[str] = None,
         generation_service: Optional[Any] = None,
     ):
         self._db = db_manager
         self.db = db_manager
+        self.storage_service = storage_service
         self.image_generator = image_generator
         if self.image_generator is None and generation_service is not None:
             self.image_generator = getattr(generation_service, "image_generator", None) or generation_service
         self.storage_dir = storage_dir or "./storage"
         self.telemetry = TelemetryLogger(
-            audit_path or os.path.join(self.storage_dir, "logs", "generation_audit.jsonl")
+            component="export_service",
         )
 
     @property
-    def db_manager(self) -> DatabaseManager:
+    def db_manager(self) -> FirestoreManager:
         return self._db
 
     @db_manager.setter
-    def db_manager(self, value: DatabaseManager) -> None:
+    def db_manager(self, value: FirestoreManager) -> None:
         self._db = value
         self.db = value
 
@@ -82,209 +86,187 @@ class ExportService:
         except Exception as err:
             logger.warning(f"Could not write export audit event: {err}")
 
-    async def prepare_export_master(
+    def _load_image_bytes(self, image_path: str) -> bytes:
+        if self.storage_service is not None and not os.path.exists(image_path):
+            return self.storage_service.download_bytes(image_path)
+        if os.path.exists(image_path):
+            with open(image_path, "rb") as f:
+                return f.read()
+        if self.storage_service is not None:
+            return self.storage_service.download_bytes(image_path)
+        raise FileNotFoundError(f"Image not found at {image_path}")
+
+    def prepare_export_master(
         self,
         generation_id: str,
         prompt_override: Optional[str] = None,
+        user_id: str = "local_dev_user",
     ) -> Dict[str, Any]:
         """
         Sends the chosen generation image to Gemini with an image restoration and upscale prompt,
-        saves the high-quality 4K master file, and links the new generation record to parent generation_id.
+        saves the high-quality 4K master file in Cloud Storage, and links the new generation record.
         """
         audit_request_id = f"req_export_{uuid.uuid4().hex[:8]}"
         self._audit("export_prepare_started", audit_request_id, source_generation_id=generation_id)
 
-        gen = await self.db.get_generation(generation_id)
+        gen = self.db.get_generation(generation_id)
         if not gen:
             self._audit("export_prepare_error", audit_request_id, error=f"Generation '{generation_id}' not found")
             raise ValueError(f"Generation '{generation_id}' not found")
 
-        master_path = gen.get("master_image_path")
-        if not master_path or not os.path.exists(master_path):
-            self._audit("export_prepare_error", audit_request_id, error=f"Master image file not found at '{master_path}'")
-            raise FileNotFoundError(f"Master image file for generation '{generation_id}' not found at path '{master_path}'")
+        source_path = gen.get("master_image_path")
+        source_bytes = self._load_image_bytes(source_path)
 
-        with open(master_path, "rb") as f:
-            source_image_bytes = f.read()
-
+        prompt = prompt_override or DEFAULT_UPSCALE_PROMPT
         aspect_ratio = gen.get("aspect_ratio", "2:3")
         seed = gen.get("seed", 4289102)
-        negative_prompt = gen.get("negative_prompt", "")
-        prompt_text = (prompt_override or "").strip() or DEFAULT_UPSCALE_PROMPT
 
         if not self.image_generator:
-            raise RuntimeError("ImageGenerator instance is required for AI master export restoration.")
+            raise RuntimeError("ImageGenerator not configured on ExportService")
 
-        logger.info(f"Preparing AI upscale export master for gen_id={generation_id}, aspect_ratio={aspect_ratio}")
-        
-        if hasattr(self.image_generator, "generate"):
-            enhanced_image_bytes = await self.image_generator.generate(
-                prompt=prompt_text,
-                negative_prompt=negative_prompt,
-                seed=seed,
-                aspect_ratio=aspect_ratio,
-                reference_images=[source_image_bytes],
-                audit_request_id=audit_request_id,
-            )
-        elif hasattr(self.image_generator, "_call_image_model"):
-            enhanced_image_bytes = await self.image_generator._call_image_model(
-                prompt=prompt_text,
-                negative_prompt=negative_prompt,
-                seed=seed,
-                aspect_ratio=aspect_ratio,
-                reference_image_bytes=source_image_bytes,
-                audit_request_id=audit_request_id,
-                reference_image_path=master_path,
+        upscaled_bytes = self.image_generator.generate(
+            prompt=prompt,
+            aspect_ratio=aspect_ratio,
+            reference_images=[source_bytes],
+            seed=seed,
+            image_size="4K",
+            audit_request_id=audit_request_id,
+        )
+
+        export_id = f"export_{uuid.uuid4().hex[:8]}"
+        filename = f"{export_id}_4k.png"
+
+        pil_img = Image.open(io.BytesIO(upscaled_bytes))
+        width, height = pil_img.size
+
+        if self.storage_service is not None:
+            export_storage_path = self.storage_service.upload_bytes(
+                user_id=user_id,
+                category="generations",
+                filename=filename,
+                data=upscaled_bytes,
+                content_type="image/png",
             )
         else:
-            raise RuntimeError("Unsupported image generator instance for export restoration.")
+            export_path = os.path.join(self.storage_dir, "generations", filename)
+            os.makedirs(os.path.dirname(export_path), exist_ok=True)
+            with open(export_path, "wb") as f:
+                f.write(upscaled_bytes)
+            export_storage_path = export_path
 
-        # Process and ensure 4K Master resolution
-        target_4k = ASPECT_RATIO_RESOLUTIONS.get(aspect_ratio, (3840, 3840))
-        try:
-            pil_img = Image.open(io.BytesIO(enhanced_image_bytes))
-            if pil_img.mode not in ("RGB", "RGBA"):
-                pil_img = pil_img.convert("RGB")
-
-            curr_w, curr_h = pil_img.size
-            if target_4k and (curr_w < target_4k[0] or curr_h < target_4k[1]):
-                logger.info(f"Upscaling restored image from {curr_w}x{curr_h} to 4K target {target_4k[0]}x{target_4k[1]}")
-                pil_img = pil_img.resize(target_4k, Image.Resampling.LANCZOS)
-
-            img_width, img_height = pil_img.size
-            buffer = io.BytesIO()
-            pil_img.save(buffer, format="PNG", dpi=(600, 600))
-            final_bytes = buffer.getvalue()
-        except Exception as img_err:
-            logger.warning(f"Error processing image dimensions: {img_err}")
-            final_bytes = enhanced_image_bytes
-            img_width, img_height = target_4k if target_4k else (3840, 3840)
-
-        export_gen_id = f"gen_export_{uuid.uuid4().hex[:8]}"
-        out_filename = f"{export_gen_id}_master.png"
-        out_dir = os.path.join(self.storage_dir, "generations")
-        os.makedirs(out_dir, exist_ok=True)
-        out_path = os.path.join(out_dir, out_filename)
-
-        with open(out_path, "wb") as f:
-            f.write(final_bytes)
-
-        created_at_str = datetime.now(timezone.utc).isoformat()
-        schema_json = {
-            "is_export_master": True,
-            "source_generation_id": generation_id,
-            "task": "image_restoration_upscale",
-            "aspect_ratio": aspect_ratio,
-        }
+        metrics = self.image_generator.last_call_metrics or {}
+        call_cost = float(metrics.get("cost_usd", 0.04))
+        call_tokens = int(metrics.get("total_token_count", 1500))
 
         export_record = {
-            "id": export_gen_id,
+            "id": export_id,
             "parent_id": generation_id,
             "moodboard_id": gen.get("moodboard_id"),
             "is_baseline": False,
-            "created_at": created_at_str,
-            "prompt": prompt_text,
-            "compiled_prompt": prompt_text,
-            "negative_prompt": negative_prompt,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "schema_json": {
+                "task": "4k_export_master",
+                "source_generation_id": generation_id,
+                "prompt": prompt,
+            },
+            "compiled_prompt": prompt,
+            "negative_prompt": "",
             "seed": seed,
-            "schema_json": json.dumps(schema_json),
-            "tags_snapshot": gen.get("tags_snapshot", "[]"),
-            "master_image_path": out_path,
+            "master_image_path": export_storage_path,
             "aspect_ratio": aspect_ratio,
-            "resolution_width": img_width,
-            "resolution_height": img_height,
+            "resolution_width": width,
+            "resolution_height": height,
+            "model_name": "gemini-3-pro-image",
+            "cost_usd": call_cost,
+            "tokens": call_tokens,
+            "accumulated_cost_usd": round(float(gen.get("accumulated_cost_usd", 0.0)) + call_cost, 6),
+            "accumulated_tokens": int(gen.get("accumulated_tokens", 0)) + call_tokens,
         }
 
-        await self.db.create_generation(export_record)
+        self.db.create_generation(user_id=user_id, gen_data=export_record)
 
         self._audit(
-            "export_prepare_completed",
+            "export_prepare_success",
             audit_request_id,
-            export_generation_id=export_gen_id,
-            source_generation_id=generation_id,
-            dimensions={"width": img_width, "height": img_height},
-            bytes=len(enhanced_image_bytes),
+            export_id=export_id,
+            dimensions={"width": width, "height": height},
+            cost_usd=call_cost,
         )
 
         return {
-            "generation_id": export_gen_id,
-            "parent_id": generation_id,
-            "seed": seed,
-            "compiled_prompt": prompt_text,
-            "negative_prompt": negative_prompt,
-            "master_image_url": f"/api/images/{out_filename}",
+            "export_generation_id": export_id,
+            "source_generation_id": generation_id,
+            "master_image_url": f"/api/images/{export_storage_path}",
+            "width": width,
+            "height": height,
             "aspect_ratio": aspect_ratio,
-            "resolution": {"width": img_width, "height": img_height},
-            "created_at": created_at_str,
+            "cost_usd": call_cost,
+            "tokens": call_tokens,
         }
 
-    async def create_bundle_zip(self, generation_id: str) -> bytes:
+    def bundle_export_presets(
+        self,
+        generation_id: str,
+        export_format: str = "PNG",
+        jpeg_quality: int = 95,
+        user_id: str = "local_dev_user",
+    ) -> bytes:
         """
-        Looks up generation metadata by generation_id, generates all resolution presets,
-        and packs them into an in-memory ZIP bundle with schema.json and metadata.json.
+        Takes the chosen generation master image, crops and resizes it to all 8 standard publication
+        aspect ratios and resolutions, and packages them in-memory into a ZIP archive.
         """
-        gen = await self.db.get_generation(generation_id)
+        audit_request_id = f"req_bundle_{uuid.uuid4().hex[:8]}"
+        self._audit("export_bundle_started", audit_request_id, generation_id=generation_id)
+
+        gen = self.db.get_generation(generation_id)
         if not gen:
+            self._audit("export_bundle_error", audit_request_id, error=f"Generation '{generation_id}' not found")
             raise ValueError(f"Generation '{generation_id}' not found")
 
-        master_path = gen.get("master_image_path")
-        if not master_path or not os.path.exists(master_path):
-            raise FileNotFoundError(f"Master image file for generation '{generation_id}' not found at path '{master_path}'")
+        source_path = gen.get("master_image_path")
+        source_bytes = self._load_image_bytes(source_path)
 
-        master_img = Image.open(master_path)
-        if master_img.mode not in ("RGB", "RGBA"):
+        master_img = Image.open(io.BytesIO(source_bytes))
+        if master_img.mode != "RGB":
             master_img = master_img.convert("RGB")
 
-        presets_dict = {}
-        for preset_name, (w, h) in BUNDLE_PRESETS.items():
-            processed_img = resize_and_crop(master_img, w, h)
-            buf = io.BytesIO()
-            processed_img.save(buf, format="PNG", dpi=(600, 600))
-            presets_dict[f"{preset_name}.png"] = buf.getvalue()
+        zip_buf = io.BytesIO()
+        ext = export_format.lower()
+        if ext == "jpeg":
+            ext = "jpg"
 
-        schema_json = gen.get("schema_json", {})
-        if isinstance(schema_json, str):
-            try:
-                schema_json = json.loads(schema_json)
-            except json.JSONDecodeError:
-                schema_json = {}
+        with zipfile.ZipFile(zip_buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zip_file:
+            # 1. Include the pristine original master image
+            orig_buf = io.BytesIO()
+            if ext == "jpg":
+                master_img.save(orig_buf, format="JPEG", quality=jpeg_quality)
+            else:
+                master_img.save(orig_buf, format="PNG")
+            zip_file.writestr(f"00_Master_Original_{master_img.width}x{master_img.height}.{ext}", orig_buf.getvalue())
 
-        prompt_str = gen.get("compiled_prompt") or gen.get("prompt", "")
+            # 2. Render and package all 8 presets
+            for preset_name, (target_w, target_h) in BUNDLE_PRESETS.items():
+                cropped = resize_and_crop(master_img, target_w, target_h)
+                img_buf = io.BytesIO()
+                if ext == "jpg":
+                    cropped.save(img_buf, format="JPEG", quality=jpeg_quality)
+                else:
+                    cropped.save(img_buf, format="PNG")
+                zip_file.writestr(f"{preset_name}.{ext}", img_buf.getvalue())
 
-        inpaint_meta = schema_json.get("inpaint_metadata") if isinstance(schema_json, dict) else None
-        mask_path = inpaint_meta.get("mask_path") if isinstance(inpaint_meta, dict) else None
-        if not mask_path or not os.path.exists(mask_path):
-            fallback_mask = master_path.replace("_master.png", "_mask.png")
-            if os.path.exists(fallback_mask):
-                mask_path = fallback_mask
+            # 3. Include lineage metadata manifest
+            manifest = {
+                "generation_id": generation_id,
+                "exported_at": datetime.now(timezone.utc).isoformat(),
+                "aspect_ratio": gen.get("aspect_ratio"),
+                "seed": gen.get("seed"),
+                "model_name": gen.get("model_name"),
+                "compiled_prompt": gen.get("compiled_prompt"),
+                "negative_prompt": gen.get("negative_prompt"),
+                "accumulated_cost_usd": gen.get("accumulated_cost_usd"),
+                "presets_included": list(BUNDLE_PRESETS.keys()),
+            }
+            zip_file.writestr("manifest.json", json.dumps(manifest, indent=2))
 
-        metadata = {
-            "generation_id": gen["id"],
-            "parent_id": gen.get("parent_id"),
-            "moodboard_id": gen.get("moodboard_id"),
-            "is_baseline": gen.get("is_baseline", False),
-            "created_at": gen.get("created_at"),
-            "prompt": prompt_str,
-            "compiled_prompt": prompt_str,
-            "negative_prompt": gen.get("negative_prompt", ""),
-            "seed": gen.get("seed"),
-            "aspect_ratio": gen.get("aspect_ratio", "1:1"),
-            "resolution": {
-                "width": gen.get("resolution_width", 3840),
-                "height": gen.get("resolution_height", 3840),
-            },
-        }
-        if inpaint_meta:
-            metadata["inpaint_metadata"] = inpaint_meta
-
-        zip_buffer = io.BytesIO()
-        with zipfile.ZipFile(zip_buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-            for filename, data in presets_dict.items():
-                zf.writestr(filename, data)
-            if mask_path and os.path.exists(mask_path):
-                with open(mask_path, "rb") as mf:
-                    zf.writestr("inpaint_mask.png", mf.read())
-            zf.writestr("schema.json", json.dumps(schema_json, indent=2))
-            zf.writestr("metadata.json", json.dumps(metadata, indent=2))
-
-        return zip_buffer.getvalue()
+        self._audit("export_bundle_success", audit_request_id, presets_count=len(BUNDLE_PRESETS))
+        return zip_buf.getvalue()

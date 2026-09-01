@@ -1,37 +1,21 @@
-import json
+import threading
 import uuid
-from contextvars import ContextVar
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
+from google.cloud.firestore import Client
 
-from app.utils.logger import get_logger
+from app.utils.logger import (
+    get_logger,
+    get_current_request_id,
+    set_current_request_id,
+    get_current_trace_id,
+    set_current_trace_id,
+    set_request_context,
+    request_id_var,
+    trace_id_var,
+)
 
 logger = get_logger("telemetry")
-
-# Context variable for correlating async execution flow with HTTP request IDs
-request_id_var: ContextVar[Optional[str]] = ContextVar("request_id", default=None)
-trace_id_var: ContextVar[Optional[str]] = ContextVar("trace_id", default=None)
-
-
-def get_current_request_id() -> Optional[str]:
-    """Returns the current request ID from the execution context, if set."""
-    return request_id_var.get()
-
-
-def set_current_request_id(req_id: Optional[str]) -> None:
-    """Sets the current request ID in the execution context."""
-    request_id_var.set(req_id)
-
-
-def get_current_trace_id() -> Optional[str]:
-    """Returns the current trace ID from the execution context, if set."""
-    return trace_id_var.get()
-
-
-def set_current_trace_id(tr_id: Optional[str]) -> None:
-    """Sets the current trace ID in the execution context."""
-    trace_id_var.set(tr_id)
 
 
 def generate_request_id(prefix: str = "req") -> str:
@@ -41,30 +25,36 @@ def generate_request_id(prefix: str = "req") -> str:
 
 class TelemetryLogger:
     """
-    Standardized telemetry and audit event logger for all studio services.
-    Appends structured JSON Lines events to local audit logs with schema consistency,
-    timing analysis, prompt/state captures, and error telemetry.
+    Standardized telemetry and audit event logger with Firestore backend.
+    Dispatches events asynchronously via daemon background threads to ensure zero
+    filesystem I/O and zero latency impact on model response times.
     """
 
     def __init__(
         self,
-        audit_path: Optional[Union[str, Path]] = None,
+        db: Optional[Any] = None,
         component: str = "general",
-        storage_dir: Optional[Union[str, Path]] = None,
+        audit_path: Optional[Any] = None,
+        storage_dir: Optional[Any] = None,
     ):
+        self.db = db
         self.component = component
-        self.storage_dir = Path(storage_dir or "./storage")
-        if audit_path:
-            self.audit_path = Path(audit_path)
-        else:
-            self.audit_path = self.storage_dir / "logs" / f"{component}_audit.jsonl"
-        self.unified_audit_path = self.storage_dir / "logs" / "telemetry.jsonl"
+
+    def _get_db(self) -> Optional[Any]:
+        if self.db is not None:
+            return self.db
+        try:
+            from app.firebase_init import get_firestore_client
+            return get_firestore_client()
+        except Exception:
+            return None
 
     def record_event(
         self,
         event: str,
         request_id: Optional[str] = None,
         component: Optional[str] = None,
+        user_id: Optional[str] = None,
         status: str = "success",
         duration_ms: Optional[float] = None,
         prompts: Optional[Dict[str, Any]] = None,
@@ -73,7 +63,7 @@ class TelemetryLogger:
         inputs: Optional[Dict[str, Any]] = None,
         outputs: Optional[Dict[str, Any]] = None,
         metrics: Optional[Dict[str, Any]] = None,
-        tokens: Optional[Dict[str, Any]] = None,
+        tokens: Optional[Union[Dict[str, Any], int]] = None,
         cost_usd: Optional[float] = None,
         cost_breakdown: Optional[Dict[str, Any]] = None,
         cumulative_cost_usd: Optional[float] = None,
@@ -82,20 +72,19 @@ class TelemetryLogger:
         error: Optional[str] = None,
         **extra: Any,
     ) -> Dict[str, Any]:
-        """
-        Constructs and records a structured audit event.
-        Flattens extra fields for backwards-compatibility with existing tests.
-        """
         eff_req_id = request_id or get_current_request_id() or generate_request_id("op")
         eff_component = component or self.component
         iso_timestamp = datetime.now(timezone.utc).isoformat()
+        event_id = str(uuid.uuid4())
 
         record: Dict[str, Any] = {
+            "id": event_id,
             "timestamp": iso_timestamp,
             "event": event,
-            "event_type": event,  # Alias for legacy compatibility
+            "event_type": event,
             "request_id": eff_req_id,
             "component": eff_component,
+            "user_id": user_id or "anonymous",
             "status": status,
         }
 
@@ -128,38 +117,33 @@ class TelemetryLogger:
         if error is not None:
             record["error"] = str(error)
 
-        # Merge extra fields at top-level for backward compatibility
         for key, val in extra.items():
             if key not in record:
                 record[key] = val
 
-        self._write_record(record)
+        # Asynchronously dispatch to Firestore
+        self._dispatch_event_async(record)
         return record
 
-    def _write_record(self, record: Dict[str, Any]) -> None:
-        """Writes JSONL entry to service audit log and unified telemetry log."""
-        line = json.dumps(record, ensure_ascii=False, default=str) + "\n"
+    def _dispatch_event_async(self, record: Dict[str, Any]) -> None:
+        def _write():
+            try:
+                db_client = self._get_db()
+                if db_client is not None:
+                    doc_id = record.get("id") or str(uuid.uuid4())
+                    db_client.collection("telemetry_events").document(doc_id).set(record)
+            except Exception:
+                # Background telemetry should never interrupt active execution or fail tests
+                pass
 
-        # 1. Write to target service audit log
-        try:
-            self.audit_path.parent.mkdir(parents=True, exist_ok=True)
-            with self.audit_path.open("a", encoding="utf-8") as f:
-                f.write(line)
-        except Exception as err:
-            logger.warning(f"Could not write audit log entry to {self.audit_path}: {err}")
-
-        # 2. Write to unified telemetry log if distinct
-        try:
-            if self.audit_path != self.unified_audit_path:
-                self.unified_audit_path.parent.mkdir(parents=True, exist_ok=True)
-                with self.unified_audit_path.open("a", encoding="utf-8") as uf:
-                    uf.write(line)
-        except Exception:
-            pass
+        # Non-blocking daemon thread execution
+        thread = threading.Thread(target=_write, daemon=True)
+        thread.start()
 
 
 def query_audit_events(
-    storage_dir: Union[str, Path] = "./storage",
+    db: Any,
+    user_id: Optional[str] = None,
     component: Optional[str] = None,
     event: Optional[str] = None,
     request_id: Optional[str] = None,
@@ -169,66 +153,34 @@ def query_audit_events(
     offset: int = 0,
 ) -> Dict[str, Any]:
     """
-    Scans and filters audit records across all JSONL log files in storage/logs/.
-    Returns paginated events sorted newest first.
+    Queries telemetry events from Firestore with filtering and sorting.
     """
-    logs_dir = Path(storage_dir) / "logs"
-    if not logs_dir.exists():
-        return {"total": 0, "limit": limit, "offset": offset, "events": []}
+    query = db.collection("telemetry_events")
+    if user_id:
+        query = query.where("user_id", "==", user_id)
+    if component:
+        query = query.where("component", "==", component)
+    if event:
+        query = query.where("event", "==", event)
+    if request_id:
+        query = query.where("request_id", "==", request_id)
+    if status:
+        query = query.where("status", "==", status)
 
-    # Discover all audit jsonl files
-    jsonl_files = list(logs_dir.glob("*.jsonl"))
-    # Prefer unified telemetry if exists and non-empty, else gather all specific audit logs
-    unified_file = logs_dir / "telemetry.jsonl"
-    target_files = [unified_file] if (unified_file.exists() and unified_file.stat().st_size > 0) else [
-        f for f in jsonl_files if f.name != "telemetry.jsonl"
-    ]
+    try:
+        query = query.order_by("timestamp", direction="DESCENDING")
+    except Exception:
+        pass
 
-    all_events: List[Dict[str, Any]] = []
-    seen_signatures = set()
+    docs = list(query.stream())
+    events = [d.to_dict() for d in docs]
 
-    search_lower = search.lower() if search else None
+    if search:
+        search_lower = search.lower()
+        events = [e for e in events if search_lower in str(e).lower()]
 
-    for file_path in target_files:
-        try:
-            with file_path.open("r", encoding="utf-8", errors="ignore") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    if search_lower and search_lower not in line.lower():
-                        continue
-                    try:
-                        record = json.loads(line)
-                        sig = (record.get("timestamp"), record.get("request_id"), record.get("event"))
-                        if sig in seen_signatures:
-                            continue
-                        seen_signatures.add(sig)
-
-                        # Filter by component
-                        if component and record.get("component") != component:
-                            continue
-                        # Filter by event
-                        if event and record.get("event") != event and record.get("event_type") != event:
-                            continue
-                        # Filter by request_id
-                        if request_id and record.get("request_id") != request_id:
-                            continue
-                        # Filter by status
-                        if status and record.get("status") != status:
-                            continue
-
-                        all_events.append(record)
-                    except Exception:
-                        continue
-        except Exception as err:
-            logger.warning(f"Error reading audit file {file_path}: {err}")
-
-    # Sort descending by timestamp
-    all_events.sort(key=lambda r: str(r.get("timestamp", "")), reverse=True)
-
-    total_count = len(all_events)
-    paginated_events = all_events[offset : offset + limit]
+    total_count = len(events)
+    paginated_events = events[offset : offset + limit]
 
     return {
         "total": total_count,
@@ -239,31 +191,26 @@ def query_audit_events(
 
 
 def get_request_lifecycle_trace(
+    db: Any,
     request_id: str,
-    storage_dir: Union[str, Path] = "./storage",
 ) -> List[Dict[str, Any]]:
     """
     Fetches the chronological lifecycle events for a specific request ID.
     """
-    res = query_audit_events(
-        storage_dir=storage_dir,
-        request_id=request_id,
-        limit=1000,
-        offset=0,
-    )
-    # Sort ascending for chronological trace timeline
+    res = query_audit_events(db=db, request_id=request_id, limit=1000, offset=0)
     trace = res.get("events", [])
     trace.sort(key=lambda r: str(r.get("timestamp", "")))
     return trace
 
 
 def get_telemetry_summary_stats(
-    storage_dir: Union[str, Path] = "./storage",
+    db: Any,
+    user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Computes summary telemetry metrics across stored audit events.
+    Computes summary telemetry metrics across stored Firestore events.
     """
-    res = query_audit_events(storage_dir=storage_dir, limit=5000, offset=0)
+    res = query_audit_events(db=db, user_id=user_id, limit=5000, offset=0)
     events = res.get("events", [])
 
     total_events = len(events)
@@ -299,9 +246,9 @@ def get_telemetry_summary_stats(
                 total_tokens += int(t_val)
             except (ValueError, TypeError):
                 pass
-        elif ev.get("total_tokens") is not None:
+        elif toks is not None:
             try:
-                total_tokens += int(ev["total_tokens"])
+                total_tokens += int(toks)
             except (ValueError, TypeError):
                 pass
 

@@ -11,6 +11,9 @@ import {
   Activity,
   Eye,
   Cpu,
+  LogIn,
+  LogOut,
+  User as UserIcon,
 } from 'lucide-react';
 
 import MoodboardUploader from './components/MoodboardUploader';
@@ -23,6 +26,8 @@ import CanvasViewport from './components/CanvasViewport';
 import ExportStudio from './components/ExportStudio';
 import HistoryDrawer from './components/HistoryDrawer';
 import ComparisonModal from './components/ComparisonModal';
+import AuthModal from './components/AuthModal';
+import { useAuth } from './contexts/AuthContext';
 
 import { DEFAULT_TAG_STATE } from './utils/defaultTags';
 import { compileModularPrompt } from './utils/promptCompiler';
@@ -45,6 +50,9 @@ import {
 } from './services/apiClient';
 
 export default function App() {
+  const { currentUser, signOutUser } = useAuth();
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+
   // 5-Step Sequential Workflow: 1: Art Direction, 2: Refinement, 3: Canvas, 4: Wardrobe, 5: Export
   const [currentStep, setCurrentStep] = useState(1);
 
@@ -886,6 +894,40 @@ export default function App() {
             >
               <HistoryIcon size={18} className="text-slate-300" />
             </button>
+
+            {currentUser ? (
+              <div className="flex items-center gap-1.5 pl-2 border-l border-slate-800">
+                <div
+                  className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-slate-800/80 border border-slate-700 text-xs text-slate-200"
+                  title={`Signed in as ${currentUser.email || currentUser.displayName || 'User'}`}
+                >
+                  <div className="w-5 h-5 rounded-full bg-gradient-to-tr from-cyan-600 to-blue-500 flex items-center justify-center text-[10px] font-bold text-white uppercase shadow-sm">
+                    {(currentUser.email || currentUser.displayName || 'U')[0]}
+                  </div>
+                  <span className="max-w-[90px] truncate text-[11px] font-medium hidden sm:inline">
+                    {currentUser.displayName || currentUser.email?.split('@')[0]}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={signOutUser}
+                  className="nav-utility-btn text-slate-400 hover:text-red-400"
+                  title="Sign Out"
+                  aria-label="Sign Out"
+                >
+                  <LogOut size={16} />
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setIsAuthModalOpen(true)}
+                className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-semibold flex items-center gap-1.5 shadow-sm transition"
+              >
+                <LogIn size={13} />
+                <span>Sign In</span>
+              </button>
+            )}
           </div>
         </div>
       </header>
@@ -1173,6 +1215,12 @@ export default function App() {
           versionB={compareVersionB}
         />
       )}
+
+      {/* Firebase Authentication Modal */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+      />
     </div>
   );
 }

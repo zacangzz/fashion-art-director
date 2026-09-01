@@ -3,7 +3,6 @@ import time
 import base64
 import random
 import hashlib
-import asyncio
 from typing import Any, Dict, List, Optional, Union
 from PIL import Image
 from google import genai
@@ -24,7 +23,6 @@ from app.utils.prompt_loader import (
 
 logger = get_logger("image_generator")
 
-
 LITE_IMAGE_MODELS = {
     "gemini-3.1-flash-lite-image",
 }
@@ -41,7 +39,6 @@ def resolve_model_image_size(model_name: str, requested_size: Optional[str] = "4
 
     clean_model = model_name.lower().strip()
     if clean_model in LITE_IMAGE_MODELS or "lite" in clean_model:
-        # Lite model tier only supports 1K (or 512px); clamp to 1K if 2K/4K requested
         if requested_size in ("2K", "4K"):
             return "1K"
         return requested_size
@@ -51,7 +48,7 @@ def resolve_model_image_size(model_name: str, requested_size: Optional[str] = "4
 class ImageGenerator:
     """
     Independent component responsible for executing Google GenAI Interactions API calls
-    to generate, edit, and inpaint ultra-high-resolution images.
+    to generate, edit, and inpaint ultra-high-resolution images synchronously.
     """
 
     def __init__(
@@ -70,7 +67,7 @@ class ImageGenerator:
             "candidates_tokens": 0,
         }
 
-    async def _execute_with_retry(
+    def _execute_with_retry(
         self,
         func: Any,
         *args: Any,
@@ -81,9 +78,7 @@ class ImageGenerator:
         last_exc = None
         for attempt in range(max_retries):
             try:
-                if asyncio.iscoroutinefunction(func):
-                    return await func(*args, **kwargs)
-                return await asyncio.to_thread(func, *args, **kwargs)
+                return func(*args, **kwargs)
             except Exception as e:
                 last_exc = e
                 err_str = str(e).lower()
@@ -106,11 +101,11 @@ class ImageGenerator:
                 logger.warning(
                     f"Transient error on attempt {attempt + 1}/{max_retries}: {e}. Retrying in {backoff:.2f}s..."
                 )
-                await asyncio.sleep(backoff)
+                time.sleep(backoff)
         if last_exc:
             raise last_exc
 
-    async def generate(
+    def generate(
         self,
         prompt: str,
         aspect_ratio: str = "2:3",
@@ -123,7 +118,7 @@ class ImageGenerator:
         audit_request_id: Optional[str] = None,
     ) -> bytes:
         """
-        Generates or edits an image using Google GenAI Interactions API.
+        Generates or edits an image synchronously using Google GenAI Interactions API.
         Automatically negotiates resolution capability (e.g. 1K for lite models, 4K for pro/flash).
         """
         active_model = model or self.default_model
@@ -189,12 +184,11 @@ class ImageGenerator:
             )
 
         try:
-            # Check if client has interactions.create or fallback to models.generate_content for mock flexibility
             if hasattr(self.client, "interactions") and hasattr(self.client.interactions, "create"):
                 call_target = self.client.interactions.create
-                interaction = await self._execute_with_retry(call_target, **kwargs)
+                interaction = self._execute_with_retry(call_target, **kwargs)
             elif hasattr(self.client, "models") and hasattr(self.client.models, "generate_content"):
-                interaction = await self._execute_with_retry(
+                interaction = self._execute_with_retry(
                     self.client.models.generate_content,
                     model=active_model,
                     contents=api_input,
@@ -226,10 +220,27 @@ class ImageGenerator:
                     image_bytes = raw_val.encode("utf-8")
         elif hasattr(interaction, "steps"):
             for step in getattr(interaction, "steps", []):
-                if getattr(step, "type", None) == "model_output":
-                    for block in getattr(step, "content", []):
-                        if getattr(block, "type", None) == "image" and getattr(block, "data", None):
+                step_type = getattr(step, "type", None) or (step.get("type") if isinstance(step, dict) else None)
+                if step_type == "model_output":
+                    content = getattr(step, "content", []) or (step.get("content", []) if isinstance(step, dict) else [])
+                    for block in content:
+                        if isinstance(block, dict):
+                            if block.get("type") == "image" and block.get("data"):
+                                d = block["data"]
+                                image_bytes = base64.b64decode(d) if isinstance(d, str) else d
+                                break
+                            elif "image" in block:
+                                img_val = block["image"]
+                                d = img_val.get("data") if isinstance(img_val, dict) else getattr(img_val, "data", img_val)
+                                image_bytes = base64.b64decode(d) if isinstance(d, str) else d
+                                break
+                        elif getattr(block, "type", None) == "image" and getattr(block, "data", None):
                             d = block.data
+                            image_bytes = base64.b64decode(d) if isinstance(d, str) else d
+                            break
+                        elif getattr(block, "image", None):
+                            img_val = block.image
+                            d = getattr(img_val, "data", img_val)
                             image_bytes = base64.b64decode(d) if isinstance(d, str) else d
                             break
                 if image_bytes:
@@ -253,7 +264,6 @@ class ImageGenerator:
 
         usage_dict = extract_usage_metadata(interaction)
         ref_count = len(reference_images or [])
-        # Official Google GenAI token specification: 560 tokens per input reference image
         estimated_prompt_tokens = 560 * ref_count + max(len(full_prompt) // 4, 80)
         if usage_dict["total_token_count"] == 0:
             usage_dict = {

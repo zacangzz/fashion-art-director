@@ -1,0 +1,30 @@
+# Git & VCS
+.git
+.gitignore
+
+# Python artifacts
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.coverage
+htmlcov/
+tests/
+
+# Node & Frontend artifacts
+src/frontend/node_modules
+src/frontend/dist
+.npm
+
+# Environment variables & secrets
+.env
+.env.*
+service-account*.json
+firebase-debug.log
+
+# Temporary storage & media files
+storage/
+tmp/
+.DS_Store

@@ -3,7 +3,6 @@ import io
 import uuid
 import base64
 import random
-import asyncio
 import hashlib
 import time
 from datetime import datetime, timezone
@@ -12,7 +11,8 @@ from typing import Optional, Dict, Any, List, Union
 from PIL import Image
 from google import genai
 
-from app.db.database import DatabaseManager
+from app.db.database import FirestoreManager, DatabaseManager
+from app.services.storage_service import StorageService
 from app.services.image_generator import ImageGenerator
 from app.services.prompt_compiler import (
     PromptCompiler,
@@ -40,16 +40,17 @@ logger = get_logger("generation_service")
 
 class GenerationService:
     """
-    Core generation orchestration service for baseline candidates, seed-locked fine-tuning,
+    Synchronous generation orchestration service for baseline candidates, seed-locked fine-tuning,
     conversational refinement, targeted inpainting, and wardrobe composition.
-    Composes ImageGenerator, PromptCompiler, DatabaseManager, and TelemetryLogger.
+    Composes ImageGenerator, StorageService, PromptCompiler, FirestoreManager, and TelemetryLogger.
     """
 
     def __init__(
         self,
-        db_manager: DatabaseManager,
+        db_manager: FirestoreManager,
         api_key: str,
-        storage_dir: str = "./storage",
+        storage_dir: Optional[str] = "./storage",
+        storage_service: Optional[StorageService] = None,
         model_name: str = "gemini-3-pro-image",
         inpaint_model_name: str = "gemini-3-pro-image",
         audit_path: Optional[Path] = None,
@@ -61,15 +62,14 @@ class GenerationService:
         self.db = db_manager
         self.db_manager = db_manager
         self.api_key = api_key
-        self.storage_dir = storage_dir
+        self.storage_dir = storage_dir or "./storage"
+        self.storage_service = storage_service
         self.model_name = model_name
         self.inpaint_model_name = inpaint_model_name
         self.wardrobe_service = wardrobe_service
         self.client = client or genai.Client(api_key=self.api_key)
         self.telemetry = telemetry or TelemetryLogger(
-            audit_path=audit_path,
             component="generation",
-            storage_dir=self.storage_dir,
         )
         self.prompt_compiler = PromptCompiler()
         self.image_generator = image_generator or ImageGenerator(
@@ -100,30 +100,42 @@ class GenerationService:
         except Exception as e:
             logger.warning(f"Could not record generation telemetry: {e}")
 
-    def _process_and_save_image(
-        self, image_bytes: bytes, output_path: str, aspect_ratio: str
-    ) -> tuple[int, int]:
+    def _save_generation_image(
+        self, user_id: str, filename: str, image_bytes: bytes, aspect_ratio: str
+    ) -> tuple[str, int, int]:
         """
-        Saves raw 4K bytes directly to disk with PNG format, preserved ICC profiles, and 600 DPI print metadata.
+        Saves generation image to Cloud Storage and/or disk, returns (storage_path, width, height).
         """
         pil_img = Image.open(io.BytesIO(image_bytes))
         width, height = pil_img.size
-        icc_profile = pil_img.info.get("icc_profile")
 
-        if pil_img.format == "PNG" and not icc_profile:
-            with open(output_path, "wb") as f:
-                f.write(image_bytes)
+        if self.storage_service is not None:
+            storage_path = self.storage_service.upload_bytes(
+                user_id=user_id,
+                category="generations",
+                filename=filename,
+                data=image_bytes,
+                content_type="image/png",
+            )
         else:
-            if pil_img.mode not in ("RGB", "RGBA"):
-                pil_img = pil_img.convert("RGB")
-            save_kwargs: Dict[str, Any] = {"format": "PNG", "dpi": (600, 600)}
-            if icc_profile:
-                save_kwargs["icc_profile"] = icc_profile
-            pil_img.save(output_path, **save_kwargs)
+            file_path = os.path.join(self.gen_storage_dir, filename)
+            with open(file_path, "wb") as f:
+                f.write(image_bytes)
+            storage_path = file_path
 
-        return width, height
+        return storage_path, width, height
 
-    async def _call_image_model(
+    def _load_image_bytes(self, image_path: str) -> bytes:
+        if self.storage_service is not None and not os.path.exists(image_path):
+            return self.storage_service.download_bytes(image_path)
+        if os.path.exists(image_path):
+            with open(image_path, "rb") as f:
+                return f.read()
+        if self.storage_service is not None:
+            return self.storage_service.download_bytes(image_path)
+        raise FileNotFoundError(f"Image not found at {image_path}")
+
+    def _call_image_model(
         self,
         prompt: str,
         negative_prompt: str = "",
@@ -136,7 +148,7 @@ class GenerationService:
         temperature: Optional[float] = None,
     ) -> bytes:
         refs = [reference_image_bytes] if reference_image_bytes else None
-        return await self.image_generator.generate(
+        return self.image_generator.generate(
             prompt=prompt,
             aspect_ratio=aspect_ratio,
             model=model_name or self.model_name,
@@ -148,7 +160,7 @@ class GenerationService:
             audit_request_id=audit_request_id,
         )
 
-    async def _call_multi_image_model(
+    def _call_multi_image_model(
         self,
         contents: List[Any],
         seed: Optional[int] = None,
@@ -179,7 +191,7 @@ class GenerationService:
 
         combined_prompt = " ".join(text_prompts).strip()
 
-        return await self.image_generator.generate(
+        return self.image_generator.generate(
             prompt=combined_prompt,
             aspect_ratio=aspect_ratio,
             model=model_name or self.model_name,
@@ -191,9 +203,9 @@ class GenerationService:
             audit_request_id=audit_request_id,
         )
 
-    async def generate_single_baseline(
+    def generate_single_baseline(
         self,
-        moodboard_id: str,
+        moodboard_id: Optional[str],
         state_dict: Dict[str, Any],
         positive_prompt: str,
         negative_prompt: str,
@@ -201,20 +213,21 @@ class GenerationService:
         aspect_ratio: str = "2:3",
         imagen_model: Optional[str] = None,
         temperature: Optional[float] = 1.0,
+        user_id: str = "local_dev_user",
     ) -> Dict[str, Any]:
         """
-        Generates and persists a single baseline image candidate.
+        Generates and persists a single baseline image candidate synchronously.
         """
         active_model = imagen_model or self.model_name
         gen_id = f"gen_base_{uuid.uuid4().hex[:8]}"
         created_at = datetime.now(timezone.utc).isoformat()
         req_id = f"baseline_single_{uuid.uuid4().hex[:10]}"
-        logger.info(f"Generating baseline candidate {gen_id} (seed={seed}, temp={temperature}, model='{active_model}')...")
+        logger.info(f"Generating baseline candidate {gen_id} (seed={seed}, temp={temperature}, model='{active_model}') for user '{user_id}'...")
 
         state_payload = dict(state_dict) if isinstance(state_dict, dict) else {}
         state_payload["imagen_model"] = active_model
 
-        image_bytes = await self._call_image_model(
+        image_bytes = self._call_image_model(
             prompt=positive_prompt,
             aspect_ratio=aspect_ratio,
             model_name=active_model,
@@ -225,8 +238,7 @@ class GenerationService:
         )
 
         filename = f"{gen_id}_master.png"
-        file_path = os.path.join(self.gen_storage_dir, filename)
-        width, height = self._process_and_save_image(image_bytes, file_path, aspect_ratio)
+        master_path, width, height = self._save_generation_image(user_id, filename, image_bytes, aspect_ratio)
 
         metrics = self.image_generator.last_call_metrics
         call_cost = float(metrics.get("cost_usd", 0.0))
@@ -236,12 +248,11 @@ class GenerationService:
         mb_acc_cost = 0.0
         mb_acc_tokens = 0
         if moodboard_id and self.db:
-            mb_data = await self.db.get_moodboard(moodboard_id)
+            mb_data = self.db.get_moodboard(moodboard_id)
             if mb_data:
                 mb_acc_cost = float(mb_data.get("accumulated_cost_usd") or 0.0)
                 mb_acc_tokens = int(mb_data.get("accumulated_tokens") or 0)
 
-        # Distribute upstream moodboard ideation/vision costs across baseline candidate slots
         apportioned_mb_cost = round(mb_acc_cost / 4.0, 6)
         apportioned_mb_tokens = int(mb_acc_tokens / 4)
         acc_cost = round(call_cost + apportioned_mb_cost, 6)
@@ -268,7 +279,7 @@ class GenerationService:
             "compiled_prompt": positive_prompt,
             "negative_prompt": negative_prompt,
             "seed": seed,
-            "master_image_path": file_path,
+            "master_image_path": master_path,
             "aspect_ratio": aspect_ratio,
             "resolution_width": width,
             "resolution_height": height,
@@ -278,12 +289,12 @@ class GenerationService:
             "accumulated_cost_usd": acc_cost,
             "accumulated_tokens": acc_tokens,
         }
-        await self.db.create_generation(record)
+        self.db.create_generation(user_id=user_id, gen_data=record)
 
         return {
             "id": gen_id,
             "seed": seed,
-            "image_url": f"/api/images/{filename}",
+            "image_url": f"/api/images/{master_path}",
             "created_at": created_at,
             "aspect_ratio": aspect_ratio,
             "resolution": {"width": width, "height": height},
@@ -297,17 +308,18 @@ class GenerationService:
             "cost_breakdown": cost_breakdown,
         }
 
-    async def generate_4_baselines(
+    def generate_4_baselines(
         self,
-        moodboard_id: str,
+        moodboard_id: Optional[str],
         state: Union[Dict[str, Any], Any],
         aspect_ratio: str = "2:3",
         prompt_override: Optional[str] = None,
         imagen_model: Optional[str] = None,
         temperature: Optional[float] = 1.0,
+        user_id: str = "local_dev_user",
     ) -> List[Dict[str, Any]]:
         """
-        Executes 4 parallel baseline candidate generations with distinct randomized seeds.
+        Executes 4 baseline candidate generations with distinct randomized seeds.
         """
         state_dict = state.model_dump() if hasattr(state, "model_dump") else (state if isinstance(state, dict) else {})
         positive_prompt = (
@@ -325,8 +337,9 @@ class GenerationService:
             seeds.append(random.randint(100000, 9999999))
             seeds = list(set(seeds))[:4]
 
-        tasks = [
-            self.generate_single_baseline(
+        results = []
+        for s in seeds:
+            res = self.generate_single_baseline(
                 moodboard_id=moodboard_id,
                 state_dict=state_dict,
                 positive_prompt=positive_prompt,
@@ -335,16 +348,21 @@ class GenerationService:
                 aspect_ratio=aspect_ratio,
                 imagen_model=imagen_model,
                 temperature=temperature,
+                user_id=user_id,
             )
-            for s in seeds
-        ]
-        return await asyncio.gather(*tasks)
+            results.append(res)
+        return results
 
-    async def register_uploaded_photo(
+    def generate_baselines(self, *args, **kwargs):
+        """Convenience alias for generate_4_baselines."""
+        return self.generate_4_baselines(*args, **kwargs)
+
+    def register_uploaded_photo(
         self,
         image_bytes: bytes,
         filename: Optional[str] = None,
         custom_aspect_ratio: Optional[str] = None,
+        user_id: str = "local_dev_user",
     ) -> Dict[str, Any]:
         """
         Ingests a user-provided image directly as a baseline generation record.
@@ -357,11 +375,7 @@ class GenerationService:
         eff_aspect = custom_aspect_ratio or detect_closest_aspect_ratio(width, height)
 
         out_filename = f"{gen_id}_master.png"
-        out_path = os.path.join(self.gen_storage_dir, out_filename)
-
-        if pil_img.mode not in ("RGB", "RGBA"):
-            pil_img = pil_img.convert("RGB")
-        pil_img.save(out_path, format="PNG", dpi=(600, 600))
+        master_path, width, height = self._save_generation_image(user_id, out_filename, image_bytes, eff_aspect)
 
         title = os.path.splitext(filename or "uploaded_photo")[0].replace("_", " ").title()
         prompt_desc = f"Directly ingested photo: {title}"
@@ -377,7 +391,7 @@ class GenerationService:
             "compiled_prompt": prompt_desc,
             "negative_prompt": "",
             "seed": seed,
-            "master_image_path": out_path,
+            "master_image_path": master_path,
             "aspect_ratio": eff_aspect,
             "resolution_width": width,
             "resolution_height": height,
@@ -387,11 +401,11 @@ class GenerationService:
             "accumulated_cost_usd": 0.0,
             "accumulated_tokens": 0,
         }
-        await self.db.create_generation(record)
+        self.db.create_generation(user_id=user_id, gen_data=record)
 
         return {
             "generation_id": gen_id,
-            "image_url": f"/api/images/{out_filename}",
+            "image_url": f"/api/images/{master_path}",
             "seed": seed,
             "aspect_ratio": eff_aspect,
             "resolution": {"width": width, "height": height},
@@ -399,7 +413,7 @@ class GenerationService:
             "created_at": created_at,
         }
 
-    async def fine_tune_generation(
+    def fine_tune_generation(
         self,
         parent_id: str,
         state: Optional[Union[Dict[str, Any], Any]] = None,
@@ -414,6 +428,7 @@ class GenerationService:
         aspect_ratio: str = "2:3",
         negative_prompt: Optional[str] = None,
         imagen_model: Optional[str] = None,
+        user_id: str = "local_dev_user",
     ) -> Dict[str, Any]:
         """
         Seed-locked multimodal fine-tuning generation using delta prompt instructions.
@@ -423,14 +438,16 @@ class GenerationService:
         created_at = datetime.now(timezone.utc).isoformat()
         child_id = f"gen_child_{uuid.uuid4().hex[:8]}"
 
-        parent_gen = await self.db.get_generation(parent_id) if parent_id else None
+        parent_gen = self.db.get_generation(parent_id) if parent_id else None
         parent_image_bytes = None
 
         if parent_gen and use_image_reference:
             parent_path = parent_gen.get("master_image_path")
-            if parent_path and os.path.exists(parent_path):
-                with open(parent_path, "rb") as f:
-                    parent_image_bytes = f.read()
+            if parent_path:
+                try:
+                    parent_image_bytes = self._load_image_bytes(parent_path)
+                except Exception as e:
+                    logger.warning(f"Could not load parent image bytes: {e}")
 
         eff_cats = categories or (state.get("categories") if isinstance(state, dict) else {})
         eff_narr = narrative or (state.get("narrative") if isinstance(state, dict) else "")
@@ -446,7 +463,7 @@ class GenerationService:
 
         eff_neg_prompt = negative_prompt or DEFAULT_NEGATIVE_PROMPT
 
-        image_bytes = await self._call_image_model(
+        image_bytes = self._call_image_model(
             prompt=delta_prompt,
             aspect_ratio=aspect_ratio,
             model_name=active_model,
@@ -457,8 +474,7 @@ class GenerationService:
         )
 
         filename = f"{child_id}_master.png"
-        file_path = os.path.join(self.gen_storage_dir, filename)
-        width, height = self._process_and_save_image(image_bytes, file_path, aspect_ratio)
+        master_path, width, height = self._save_generation_image(user_id, filename, image_bytes, aspect_ratio)
 
         metrics = self.image_generator.last_call_metrics
         call_cost = float(metrics.get("cost_usd", 0.0))
@@ -497,7 +513,7 @@ class GenerationService:
             "compiled_prompt": delta_prompt,
             "negative_prompt": eff_neg_prompt,
             "seed": seed,
-            "master_image_path": file_path,
+            "master_image_path": master_path,
             "aspect_ratio": aspect_ratio,
             "resolution_width": width,
             "resolution_height": height,
@@ -507,7 +523,7 @@ class GenerationService:
             "accumulated_cost_usd": acc_cost,
             "accumulated_tokens": acc_tokens,
         }
-        await self.db.create_generation(record)
+        self.db.create_generation(user_id=user_id, gen_data=record)
 
         return {
             "generation_id": child_id,
@@ -515,7 +531,7 @@ class GenerationService:
             "seed": seed,
             "compiled_prompt": delta_prompt,
             "negative_prompt": eff_neg_prompt,
-            "image_url": f"/api/images/{filename}",
+            "image_url": f"/api/images/{master_path}",
             "created_at": created_at,
             "aspect_ratio": aspect_ratio,
             "resolution": {"width": width, "height": height},
@@ -526,7 +542,7 @@ class GenerationService:
             "cost_breakdown": cost_breakdown,
         }
 
-    async def refine_generation(
+    def refine_generation(
         self,
         parent_id: str,
         prompt: str,
@@ -535,6 +551,7 @@ class GenerationService:
         negative_prompt: Optional[str] = None,
         conversation_id: Optional[str] = None,
         imagen_model: Optional[str] = None,
+        user_id: str = "local_dev_user",
     ) -> Dict[str, Any]:
         """
         Conversational iterative refinement turn using parent reference image.
@@ -544,21 +561,17 @@ class GenerationService:
         created_at = datetime.now(timezone.utc).isoformat()
         child_id = f"gen_refine_{uuid.uuid4().hex[:8]}"
 
-        parent_gen = await self.db.get_generation(parent_id)
+        parent_gen = self.db.get_generation(parent_id)
         if not parent_gen:
             raise ValueError(f"Parent generation '{parent_id}' not found")
 
         parent_path = parent_gen.get("master_image_path")
-        if not parent_path or not os.path.exists(parent_path):
-            raise FileNotFoundError(f"Parent image not found at '{parent_path}'")
-
-        with open(parent_path, "rb") as f:
-            parent_bytes = f.read()
+        parent_bytes = self._load_image_bytes(parent_path)
 
         refine_instruction = self.prompt_compiler.format_refinement_prompt(prompt)
         eff_neg_prompt = negative_prompt or parent_gen.get("negative_prompt") or DEFAULT_NEGATIVE_PROMPT
 
-        image_bytes = await self._call_image_model(
+        image_bytes = self._call_image_model(
             prompt=refine_instruction,
             aspect_ratio=aspect_ratio,
             model_name=active_model,
@@ -569,8 +582,7 @@ class GenerationService:
         )
 
         filename = f"{child_id}_master.png"
-        file_path = os.path.join(self.gen_storage_dir, filename)
-        width, height = self._process_and_save_image(image_bytes, file_path, aspect_ratio)
+        master_path, width, height = self._save_generation_image(user_id, filename, image_bytes, aspect_ratio)
 
         metrics = self.image_generator.last_call_metrics
         call_cost = float(metrics.get("cost_usd", 0.0))
@@ -602,7 +614,7 @@ class GenerationService:
             "compiled_prompt": refine_instruction,
             "negative_prompt": eff_neg_prompt,
             "seed": seed,
-            "master_image_path": file_path,
+            "master_image_path": master_path,
             "aspect_ratio": aspect_ratio,
             "resolution_width": width,
             "resolution_height": height,
@@ -612,7 +624,7 @@ class GenerationService:
             "accumulated_cost_usd": acc_cost,
             "accumulated_tokens": acc_tokens,
         }
-        await self.db.create_generation(record)
+        self.db.create_generation(user_id=user_id, gen_data=record)
 
         return {
             "generation_id": child_id,
@@ -622,7 +634,7 @@ class GenerationService:
             "prompt": prompt,
             "compiled_prompt": refine_instruction,
             "negative_prompt": eff_neg_prompt,
-            "image_url": f"/api/images/{filename}",
+            "image_url": f"/api/images/{master_path}",
             "created_at": created_at,
             "aspect_ratio": aspect_ratio,
             "resolution": {"width": width, "height": height},
@@ -633,7 +645,7 @@ class GenerationService:
             "cost_breakdown": cost_breakdown,
         }
 
-    async def inpaint_region(
+    def inpaint_region(
         self,
         parent_id: str,
         image_bytes: bytes,
@@ -642,6 +654,7 @@ class GenerationService:
         negative_prompt: Optional[str] = None,
         seed: Optional[int] = None,
         aspect_ratio: Optional[str] = None,
+        user_id: str = "local_dev_user",
     ) -> Dict[str, Any]:
         """
         Targeted inpainting using black & white mask and spatial prompt context with 4K output.
@@ -650,7 +663,7 @@ class GenerationService:
         created_at = datetime.now(timezone.utc).isoformat()
         child_id = f"gen_inpaint_{uuid.uuid4().hex[:8]}"
 
-        parent_gen = await self.db.get_generation(parent_id) if parent_id else None
+        parent_gen = self.db.get_generation(parent_id) if parent_id else None
         eff_seed = seed or (parent_gen.get("seed") if parent_gen else random.randint(100000, 999999))
         eff_aspect = aspect_ratio or (parent_gen.get("aspect_ratio") if parent_gen else "2:3")
         eff_neg_prompt = negative_prompt or (parent_gen.get("negative_prompt") if parent_gen else DEFAULT_NEGATIVE_PROMPT)
@@ -672,7 +685,7 @@ class GenerationService:
             source_image={"width": mask_stats.get("width", 0), "height": mask_stats.get("height", 0)},
         )
 
-        image_bytes_out = await self._call_multi_image_model(
+        image_bytes_out = self._call_multi_image_model(
             contents=[image_bytes, mask_bytes, spatial_prompt],
             aspect_ratio=eff_aspect,
             model_name=self.inpaint_model_name,
@@ -683,13 +696,9 @@ class GenerationService:
 
         filename = f"{child_id}_master.png"
         mask_filename = f"{child_id}_mask.png"
-        file_path = os.path.join(self.gen_storage_dir, filename)
-        mask_path = os.path.join(self.gen_storage_dir, mask_filename)
 
-        with open(mask_path, "wb") as mf:
-            mf.write(mask_bytes)
-
-        width, height = self._process_and_save_image(image_bytes_out, file_path, eff_aspect)
+        master_path, width, height = self._save_generation_image(user_id, filename, image_bytes_out, eff_aspect)
+        mask_path, _, _ = self._save_generation_image(user_id, mask_filename, mask_bytes, eff_aspect)
 
         metrics = self.image_generator.last_call_metrics
         call_cost = float(metrics.get("cost_usd", 0.0))
@@ -712,7 +721,7 @@ class GenerationService:
 
         inpaint_meta = {
             "mask_path": mask_path,
-            "mask_url": f"/api/images/{mask_filename}",
+            "mask_url": f"/api/images/{mask_path}",
             "mask_stats": mask_stats,
             "prompt": prompt,
             "user_inpaint_prompt": prompt,
@@ -729,7 +738,7 @@ class GenerationService:
             "compiled_prompt": spatial_prompt,
             "negative_prompt": eff_neg_prompt,
             "seed": eff_seed,
-            "master_image_path": file_path,
+            "master_image_path": master_path,
             "aspect_ratio": eff_aspect,
             "resolution_width": width,
             "resolution_height": height,
@@ -739,7 +748,7 @@ class GenerationService:
             "accumulated_cost_usd": acc_cost,
             "accumulated_tokens": acc_tokens,
         }
-        await self.db.create_generation(record)
+        self.db.create_generation(user_id=user_id, gen_data=record)
 
         self._audit(
             "inpaint_response",
@@ -757,8 +766,8 @@ class GenerationService:
             "prompt": prompt,
             "compiled_prompt": spatial_prompt,
             "negative_prompt": eff_neg_prompt,
-            "image_url": f"/api/images/{filename}",
-            "mask_url": f"/api/images/{mask_filename}",
+            "image_url": f"/api/images/{master_path}",
+            "mask_url": f"/api/images/{mask_path}",
             "created_at": created_at,
             "aspect_ratio": eff_aspect,
             "resolution": {"width": width, "height": height},
@@ -770,7 +779,7 @@ class GenerationService:
             "cost_breakdown": cost_breakdown,
         }
 
-    async def compose_wardrobe(
+    def compose_wardrobe(
         self,
         parent_id: str,
         assignments: List[Union[Dict[str, Any], Any]],
@@ -782,6 +791,7 @@ class GenerationService:
         custom_instruction: Optional[str] = None,
         imagen_model: Optional[str] = None,
         vision_model: Optional[str] = None,
+        user_id: str = "local_dev_user",
     ) -> Dict[str, Any]:
         """
         Multimodal wardrobe composition preserving subject identity and applying assigned garments.
@@ -791,16 +801,12 @@ class GenerationService:
         created_at = datetime.now(timezone.utc).isoformat()
         child_id = f"gen_wardrobe_{uuid.uuid4().hex[:8]}"
 
-        parent_gen = await self.db.get_generation(parent_id)
+        parent_gen = self.db.get_generation(parent_id)
         if not parent_gen:
             raise ValueError(f"Parent generation '{parent_id}' not found")
 
         parent_path = parent_gen.get("master_image_path")
-        if not parent_path or not os.path.exists(parent_path):
-            raise FileNotFoundError(f"Parent image file not found at '{parent_path}'")
-
-        with open(parent_path, "rb") as f:
-            parent_image_bytes = f.read()
+        parent_image_bytes = self._load_image_bytes(parent_path)
 
         eff_aspect = aspect_ratio or parent_gen.get("aspect_ratio", "2:3")
         eff_seed = seed if seed is not None else parent_gen.get("seed", 4289102)
@@ -819,10 +825,11 @@ class GenerationService:
         grounded_data = {}
         if self.wardrobe_service is not None:
             try:
-                grounded_data = await self.wardrobe_service.ground_wardrobe_pins(
-                    image_bytes=parent_image_bytes,
+                grounded_data = self.wardrobe_service.ground_wardrobe_pins(
+                    generation_id=parent_id,
                     assignments=normalized_assignments,
                     vision_model=vision_model,
+                    user_id=user_id,
                 )
             except Exception as e:
                 logger.warning(f"Could not run wardrobe subject grounding: {e}")
@@ -841,13 +848,15 @@ class GenerationService:
         for asgn in normalized_assignments:
             item_id = asgn.get("wardrobe_item_id")
             pin_num = asgn.get("pin_number", 1)
-            item = await self.db.get_wardrobe_item(item_id) if item_id else None
+            item = self.db.get_wardrobe_item(item_id) if item_id else None
 
             if item:
                 crop_path = item.get("upscaled_image_path") or item.get("cropped_image_path")
-                if crop_path and os.path.exists(crop_path):
-                    with open(crop_path, "rb") as cf:
-                        garment_references.append(cf.read())
+                if crop_path:
+                    try:
+                        garment_references.append(self._load_image_bytes(crop_path))
+                    except Exception as e:
+                        logger.warning(f"Could not load garment crop {crop_path}: {e}")
 
                 g_info = grounded_by_pin.get(pin_num, {})
                 target_sub = g_info.get("target_subject", f"Subject at pin #{pin_num}")
@@ -878,13 +887,13 @@ class GenerationService:
 
                 assignment_prompts.append(asgn_text)
 
-        # Trace lineage to detect progressive turn depth and anchor root white balance
+        # Trace lineage depth
         lineage_depth = 0
         curr_p = parent_gen
         visited_lineage = set()
         while curr_p and curr_p.get("parent_id") and curr_p.get("id") not in visited_lineage:
             visited_lineage.add(curr_p.get("id"))
-            next_p = await self.db.get_generation(curr_p["parent_id"])
+            next_p = self.db.get_generation(curr_p["parent_id"])
             if not next_p:
                 break
             curr_p = next_p
@@ -915,7 +924,7 @@ class GenerationService:
             comp_neg_prompt = base_neg_prompt
 
         all_refs = [parent_image_bytes] + garment_references
-        image_bytes_out = await self._call_multi_image_model(
+        image_bytes_out = self._call_multi_image_model(
             contents=all_refs + [composition_prompt],
             aspect_ratio=eff_aspect,
             model_name=active_model,
@@ -925,14 +934,12 @@ class GenerationService:
         )
 
         filename = f"{child_id}_master.png"
-        file_path = os.path.join(self.gen_storage_dir, filename)
-        width, height = self._process_and_save_image(image_bytes_out, file_path, eff_aspect)
+        master_path, width, height = self._save_generation_image(user_id, filename, image_bytes_out, eff_aspect)
 
         metrics = self.image_generator.last_call_metrics
         image_call_cost = float(metrics.get("cost_usd", 0.0))
         image_call_tokens = int(metrics.get("total_token_count", 0))
 
-        # Roll in grounding vision sub-call costs
         grounding_cost = float(grounded_data.get("cost_usd") or 0.0)
         grounding_toks_raw = grounded_data.get("tokens")
         grounding_tokens = int(
@@ -985,7 +992,7 @@ class GenerationService:
             "compiled_prompt": composition_prompt,
             "negative_prompt": comp_neg_prompt,
             "seed": eff_seed,
-            "master_image_path": file_path,
+            "master_image_path": master_path,
             "aspect_ratio": eff_aspect,
             "resolution_width": width,
             "resolution_height": height,
@@ -995,7 +1002,7 @@ class GenerationService:
             "accumulated_cost_usd": acc_cost,
             "accumulated_tokens": acc_tokens,
         }
-        await self.db.create_generation(record)
+        self.db.create_generation(user_id=user_id, gen_data=record)
 
         return {
             "generation_id": child_id,
@@ -1004,7 +1011,7 @@ class GenerationService:
             "seed": eff_seed,
             "compiled_prompt": composition_prompt,
             "negative_prompt": comp_neg_prompt,
-            "image_url": f"/api/images/{filename}",
+            "image_url": f"/api/images/{master_path}",
             "created_at": created_at,
             "aspect_ratio": eff_aspect,
             "resolution": {"width": width, "height": height},
@@ -1022,7 +1029,7 @@ class GenerationService:
             "cost_breakdown": cost_breakdown,
         }
 
-    async def generate_image(
+    def generate_image(
         self,
         prompt: str,
         negative_prompt: Optional[str] = None,
@@ -1031,6 +1038,7 @@ class GenerationService:
         parent_id: Optional[str] = None,
         moodboard_id: Optional[str] = None,
         chips_snapshot: Optional[Any] = None,
+        user_id: str = "local_dev_user",
     ) -> Dict[str, Any]:
         """
         Legacy single image generation endpoint.
@@ -1042,7 +1050,7 @@ class GenerationService:
         created_at = datetime.now(timezone.utc).isoformat()
         req_id = f"legacy_gen_{uuid.uuid4().hex[:8]}"
 
-        image_bytes = await self._call_image_model(
+        image_bytes = self._call_image_model(
             prompt=prompt,
             aspect_ratio=eff_aspect,
             model_name=self.model_name,
@@ -1052,8 +1060,7 @@ class GenerationService:
         )
 
         filename = f"{gen_id}_master.png"
-        file_path = os.path.join(self.gen_storage_dir, filename)
-        width, height = self._process_and_save_image(image_bytes, file_path, eff_aspect)
+        master_path, width, height = self._save_generation_image(user_id, filename, image_bytes, eff_aspect)
 
         metrics = self.image_generator.last_call_metrics
         call_cost = float(metrics.get("cost_usd", 0.0))
@@ -1069,7 +1076,7 @@ class GenerationService:
             "compiled_prompt": prompt,
             "negative_prompt": eff_neg_prompt,
             "seed": eff_seed,
-            "master_image_path": file_path,
+            "master_image_path": master_path,
             "aspect_ratio": eff_aspect,
             "resolution_width": width,
             "resolution_height": height,
@@ -1079,7 +1086,7 @@ class GenerationService:
             "accumulated_cost_usd": call_cost,
             "accumulated_tokens": call_tokens,
         }
-        await self.db.create_generation(record)
+        self.db.create_generation(user_id=user_id, gen_data=record)
 
         return {
             "generation_id": gen_id,
@@ -1087,7 +1094,7 @@ class GenerationService:
             "compiled_prompt": prompt,
             "negative_prompt": eff_neg_prompt,
             "seed": eff_seed,
-            "master_image_url": f"/api/images/{filename}",
+            "master_image_url": f"/api/images/{master_path}",
             "resolution": {"width": width, "height": height},
             "cost_usd": call_cost,
             "tokens": call_tokens,

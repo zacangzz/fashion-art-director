@@ -1,20 +1,19 @@
 from typing import Optional
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, status
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, status, Depends
 
 from app.config import get_settings
+from app.auth.firebase_auth import get_current_user
 from app.schemas.domain import InpaintResponse
 from app.utils.error_handler import parse_and_raise_http_error
 from app.dependencies import get_generation_service
+from app.services.generation_service import GenerationService
 
 router = APIRouter(prefix="/api", tags=["inpaint"])
-settings = get_settings()
-generation_service = get_generation_service()
-
 ALLOWED_MIME_TYPES = {"image/png", "image/jpeg", "image/webp"}
 
 
 @router.post("/inpaint", response_model=InpaintResponse)
-async def inpaint_image(
+def inpaint_image(
     image: UploadFile = File(...),
     mask: UploadFile = File(...),
     prompt: str = Form(...),
@@ -22,10 +21,13 @@ async def inpaint_image(
     negative_prompt: Optional[str] = Form(None),
     seed: Optional[int] = Form(None),
     aspect_ratio: Optional[str] = Form(None),
+    user: dict = Depends(get_current_user),
+    generation_service: GenerationService = Depends(get_generation_service),
 ):
     """
-    Canvas Studio: Targeted inpainting using a source image, black & white mask, and natural language prompt.
+    Canvas Studio: Targeted inpainting using a source image, black & white mask, and natural language prompt synchronously.
     """
+    settings = get_settings()
     if not prompt or not prompt.strip():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -45,10 +47,10 @@ async def inpaint_image(
         )
 
     try:
-        image_bytes = await image.read()
-        mask_bytes = await mask.read()
+        image_bytes = image.file.read()
+        mask_bytes = mask.file.read()
 
-        result = await generation_service.inpaint_region(
+        result = generation_service.inpaint_region(
             parent_id=generation_id or "",
             image_bytes=image_bytes,
             mask_bytes=mask_bytes,
@@ -56,6 +58,7 @@ async def inpaint_image(
             negative_prompt=negative_prompt,
             seed=seed,
             aspect_ratio=aspect_ratio,
+            user_id=user["uid"],
         )
         return InpaintResponse(**result)
     except Exception as exc:

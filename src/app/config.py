@@ -9,7 +9,10 @@ class Settings(BaseSettings):
     PORT: int = 7860
     HOST: str = "127.0.0.1"
     DEBUG: bool = True
-    DATABASE_URL: str = "sqlite:///./storage/studio.db"
+    GCP_PROJECT_ID: str = "image-gen-studio-local"
+    GCS_BUCKET: str = "image-gen-studio-local-bucket"
+    DAILY_SPEND_CAP_USD: float = 20.0
+    ENVIRONMENT: str = "local"
     STORAGE_DIR: str = "./storage"
     VISION_MODEL: str = "gemini-3.5-flash-lite"
     IMAGEN_MODEL: str = "gemini-3-pro-image"
@@ -30,7 +33,7 @@ class Settings(BaseSettings):
             return defaults.get(info.field_name, "")
         return v
 
-    @field_validator("GEMINI_API_KEY", "DATABASE_URL", mode="before")
+    @field_validator("GEMINI_API_KEY", "GCP_PROJECT_ID", "GCS_BUCKET", "ENVIRONMENT", mode="before")
     @classmethod
     def sanitize_env_string(cls, v: Any) -> Any:
         if isinstance(v, str):
@@ -43,12 +46,6 @@ class Settings(BaseSettings):
         extra="ignore"
     )
 
-    def ensure_directories(self) -> None:
-        os.makedirs(os.path.join(self.STORAGE_DIR, "moodboards"), exist_ok=True)
-        os.makedirs(os.path.join(self.STORAGE_DIR, "generations"), exist_ok=True)
-
 @lru_cache()
 def get_settings() -> Settings:
-    settings = Settings()
-    settings.ensure_directories()
-    return settings
+    return Settings()

@@ -1,10 +1,11 @@
 import os
 import uuid
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form, status
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, status, Depends
+from fastapi.responses import FileResponse, RedirectResponse
 from typing import Optional
 
 from app.config import get_settings
+from app.auth.firebase_auth import get_current_user
 from app.schemas.domain import (
     GarmentCard,
     WardrobeUploadResponse,
@@ -16,25 +17,32 @@ from app.schemas.domain import (
     WardrobeComposeResponse,
 )
 from app.utils.error_handler import parse_and_raise_http_error
-from app.dependencies import get_db_manager, get_wardrobe_service, get_generation_service
+from app.dependencies import (
+    get_db_manager,
+    get_wardrobe_service,
+    get_generation_service,
+    get_storage_service,
+)
+from app.db.database import FirestoreManager
+from app.services.wardrobe_service import WardrobeService
+from app.services.generation_service import GenerationService
+from app.services.storage_service import StorageService
 
 router = APIRouter(prefix="/api/wardrobe", tags=["wardrobe"])
-settings = get_settings()
-
-db_manager = get_db_manager()
-wardrobe_service = get_wardrobe_service()
-generation_service = get_generation_service()
 
 
 @router.post("/upload", response_model=WardrobeUploadResponse)
-async def upload_wardrobe_sheet(
+def upload_wardrobe_sheet(
     file: UploadFile = File(...),
     vision_model: Optional[str] = Form(None),
+    user: dict = Depends(get_current_user),
+    wardrobe_service: WardrobeService = Depends(get_wardrobe_service),
 ):
     """
     Uploads a multi-garment sheet or lookbook image.
-    Uses Gemini vision to detect bounding boxes and auto-segments into individual garment cards.
+    Uses Gemini vision to detect bounding boxes and auto-segments into individual garment cards synchronously.
     """
+    settings = get_settings()
     eff_vision_model = vision_model or settings.VISION_MODEL
     try:
         if not file.content_type.startswith("image/"):
@@ -42,16 +50,17 @@ async def upload_wardrobe_sheet(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="File must be an image (PNG, JPEG, WebP).",
             )
-        contents = await file.read()
+        contents = file.file.read()
         if not contents:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Uploaded file is empty.",
             )
-        items = await wardrobe_service.segment_and_save_sheet(
+        items = wardrobe_service.segment_and_save_sheet(
             image_bytes=contents,
             original_filename=file.filename or "wardrobe_sheet.png",
             vision_model=eff_vision_model,
+            user_id=user["uid"],
         )
         return WardrobeUploadResponse(items=[GarmentCard(**item) for item in items])
     except Exception as exc:
@@ -59,20 +68,27 @@ async def upload_wardrobe_sheet(
 
 
 @router.get("/items", response_model=WardrobeListResponse)
-async def list_wardrobe_items():
+def list_wardrobe_items(
+    user: dict = Depends(get_current_user),
+    db_manager: FirestoreManager = Depends(get_db_manager),
+):
     """
-    Lists all saved wardrobe items across sessions.
+    Lists all saved active wardrobe items for the authenticated user.
     """
-    items = await wardrobe_service.list_items()
+    items = db_manager.list_wardrobe_items(user_id=user["uid"])
     return WardrobeListResponse(items=[GarmentCard(**item) for item in items])
 
 
 @router.delete("/items/{item_id}")
-async def delete_wardrobe_item(item_id: str):
+def delete_wardrobe_item(
+    item_id: str,
+    user: dict = Depends(get_current_user),
+    db_manager: FirestoreManager = Depends(get_db_manager),
+):
     """
     Soft-deletes an individual wardrobe item.
     """
-    deleted = await wardrobe_service.delete_item(item_id)
+    deleted = db_manager.delete_wardrobe_item(item_id)
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -82,48 +98,72 @@ async def delete_wardrobe_item(item_id: str):
 
 
 @router.delete("/items")
-async def delete_all_wardrobe_items():
+def delete_all_wardrobe_items(
+    user: dict = Depends(get_current_user),
+    db_manager: FirestoreManager = Depends(get_db_manager),
+):
     """
-    Soft-deletes all wardrobe items in the library.
+    Soft-deletes all wardrobe items in the user library.
     """
-    count = await wardrobe_service.delete_all_items()
+    count = db_manager.delete_all_wardrobe_items(user_id=user["uid"])
     return {"status": "deleted", "count": count}
 
 
 @router.get("/items/{item_id}/image")
-async def get_wardrobe_item_image(item_id: str):
+def get_wardrobe_item_image(
+    item_id: str,
+    user: dict = Depends(get_current_user),
+    db_manager: FirestoreManager = Depends(get_db_manager),
+    storage_service: StorageService = Depends(get_storage_service),
+):
     """
-    Serves the cropped garment thumbnail image.
+    Serves the cropped garment thumbnail image via signed URL redirect or local file.
     """
-    item = await db_manager.get_wardrobe_item(item_id)
-    if not item or not item.get("cropped_image_path") or not os.path.exists(item["cropped_image_path"]):
+    item = db_manager.get_wardrobe_item(item_id)
+    if not item or not item.get("cropped_image_path"):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Image for wardrobe item '{item_id}' not found.",
         )
-    return FileResponse(item["cropped_image_path"], media_type="image/png")
+    crop_path = item["cropped_image_path"]
+    if os.path.exists(crop_path):
+        return FileResponse(crop_path, media_type="image/png")
+    
+    url = storage_service.get_signed_download_url(crop_path)
+    return RedirectResponse(url=url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
 
 @router.get("/items/{item_id}/upscaled-image")
-async def get_wardrobe_item_upscaled_image(item_id: str):
+def get_wardrobe_item_upscaled_image(
+    item_id: str,
+    user: dict = Depends(get_current_user),
+    db_manager: FirestoreManager = Depends(get_db_manager),
+    storage_service: StorageService = Depends(get_storage_service),
+):
     """
     Serves the high-definition AI-upscaled garment image.
     Falls back to cropped image if upscale is pending/in-progress.
     """
-    item = await db_manager.get_wardrobe_item(item_id)
+    item = db_manager.get_wardrobe_item(item_id)
     if not item:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Wardrobe item '{item_id}' not found.",
         )
     upscaled_path = item.get("upscaled_image_path")
-    if upscaled_path and os.path.exists(upscaled_path):
-        return FileResponse(upscaled_path, media_type="image/png")
-    
+    if upscaled_path:
+        if os.path.exists(upscaled_path):
+            return FileResponse(upscaled_path, media_type="image/png")
+        url = storage_service.get_signed_download_url(upscaled_path)
+        return RedirectResponse(url=url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+
     crop_path = item.get("cropped_image_path")
-    if crop_path and os.path.exists(crop_path):
-        return FileResponse(crop_path, media_type="image/png")
-    
+    if crop_path:
+        if os.path.exists(crop_path):
+            return FileResponse(crop_path, media_type="image/png")
+        url = storage_service.get_signed_download_url(crop_path)
+        return RedirectResponse(url=url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+
     raise HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
         detail=f"No image available for wardrobe item '{item_id}'.",
@@ -131,24 +171,35 @@ async def get_wardrobe_item_upscaled_image(item_id: str):
 
 
 @router.get("/sources/{filename}")
-async def get_wardrobe_source_image(filename: str):
+def get_wardrobe_source_image(
+    filename: str,
+    user: dict = Depends(get_current_user),
+    storage_service: StorageService = Depends(get_storage_service),
+):
     """
     Serves the original source sheet image.
     """
+    settings = get_settings()
     filepath = os.path.join(settings.STORAGE_DIR, "wardrobe", "sources", filename)
-    if not os.path.exists(filepath):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Source image not found.",
-        )
-    return FileResponse(filepath)
+    if os.path.exists(filepath):
+        return FileResponse(filepath)
+    
+    url = storage_service.get_signed_download_url(f"{user['uid']}/wardrobe/sources/{filename}")
+    return RedirectResponse(url=url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
 
 @router.post("/detect-regions", response_model=DetectRegionsResponse)
-async def detect_clothing_regions(request: DetectRegionsRequest):
+def detect_clothing_regions(
+    request: DetectRegionsRequest,
+    user: dict = Depends(get_current_user),
+    db_manager: FirestoreManager = Depends(get_db_manager),
+    wardrobe_service: WardrobeService = Depends(get_wardrobe_service),
+    storage_service: StorageService = Depends(get_storage_service),
+):
     """
     Analyzes the active generation image to detect target clothing regions for auto-mask overlay.
     """
+    settings = get_settings()
     eff_vision_model = request.vision_model or settings.VISION_MODEL
     try:
         if not request.generation_id:
@@ -156,16 +207,20 @@ async def detect_clothing_regions(request: DetectRegionsRequest):
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="generation_id is required.",
             )
-        gen = await db_manager.get_generation(request.generation_id)
-        if not gen or not gen.get("master_image_path") or not os.path.exists(gen["master_image_path"]):
+        gen = db_manager.get_generation(request.generation_id)
+        if not gen or not gen.get("master_image_path"):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Generation '{request.generation_id}' not found.",
             )
-        with open(gen["master_image_path"], "rb") as f:
-            img_bytes = f.read()
+        img_path = gen["master_image_path"]
+        if os.path.exists(img_path):
+            with open(img_path, "rb") as f:
+                img_bytes = f.read()
+        else:
+            img_bytes = storage_service.download_bytes(img_path)
 
-        regions = await wardrobe_service.detect_clothing_regions(
+        regions = wardrobe_service.detect_clothing_regions(
             img_bytes,
             vision_model=eff_vision_model,
         )
@@ -175,24 +230,31 @@ async def detect_clothing_regions(request: DetectRegionsRequest):
 
 
 @router.post("/compose", response_model=WardrobeComposeResponse)
-async def compose_wardrobe(request: WardrobeComposeRequest):
+def compose_wardrobe(
+    request: WardrobeComposeRequest,
+    user: dict = Depends(get_current_user),
+    db_manager: FirestoreManager = Depends(get_db_manager),
+    generation_service: GenerationService = Depends(get_generation_service),
+):
     """
-    Performs multi-image garment composition.
+    Performs multi-image garment composition synchronously.
     Combines parent generation + selected wardrobe references into a single cohesive output.
     Appends result as a new conversation iteration.
     """
+    settings = get_settings()
     eff_imagen_model = request.imagen_model or settings.IMAGEN_MODEL
     eff_vision_model = request.vision_model or settings.VISION_MODEL
     try:
         conv_id = request.conversation_id
         if not conv_id:
             conv_id = f"conv_{uuid.uuid4().hex[:8]}"
-            await db_manager.create_conversation(
+            db_manager.create_conversation(
+                user_id=user["uid"],
                 conv_id=conv_id,
                 baseline_generation_id=request.parent_id,
             )
 
-        result = await generation_service.compose_wardrobe(
+        result = generation_service.compose_wardrobe(
             parent_id=request.parent_id,
             assignments=request.assignments,
             seed=request.seed,
@@ -202,6 +264,7 @@ async def compose_wardrobe(request: WardrobeComposeRequest):
             custom_instruction=request.custom_instruction,
             imagen_model=eff_imagen_model,
             vision_model=eff_vision_model,
+            user_id=user["uid"],
         )
         return WardrobeComposeResponse(**result)
     except Exception as exc:

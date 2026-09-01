@@ -140,6 +140,8 @@ class FineTuneGenerationResponse(BaseModel):
 
 class ExportBundleRequest(BaseModel):
     generation_id: str
+    format: Optional[str] = "PNG"
+    jpeg_quality: Optional[int] = 95
 
 
 class PrepareExportRequest(BaseModel):
@@ -148,15 +150,21 @@ class PrepareExportRequest(BaseModel):
 
 
 class PrepareExportResponse(BaseModel):
-    generation_id: str
+    export_generation_id: Optional[str] = None
+    generation_id: Optional[str] = None
     parent_id: Optional[str] = None
+    source_generation_id: Optional[str] = None
     seed: Optional[int] = None
-    compiled_prompt: str
-    negative_prompt: str = ""
+    compiled_prompt: Optional[str] = ""
+    negative_prompt: Optional[str] = ""
     master_image_url: str
     aspect_ratio: Optional[str] = None
     resolution: Optional[Dict[str, int]] = None
-    created_at: str
+    width: Optional[int] = None
+    height: Optional[int] = None
+    created_at: Optional[str] = None
+    cost_usd: Optional[float] = 0.0
+    tokens: Optional[int] = 0
 
 
 class GenerationRecordResponse(BaseModel):

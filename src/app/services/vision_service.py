@@ -1,9 +1,7 @@
 import uuid
 import json
 import base64
-import asyncio
 import unittest.mock
-from unittest.mock import MagicMock, AsyncMock
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from google import genai
@@ -82,7 +80,7 @@ DEFAULT_FALLBACK_TAGS: Dict[str, List[Dict[str, Any]]] = {
 class VisionService:
     """
     Vision analysis service composing Gemini Multimodal models for 9-category visual tag extraction,
-    conflict detection, and master prompt re-synchronization.
+    conflict detection, and master prompt re-synchronization synchronously.
     """
 
     def __init__(
@@ -98,9 +96,7 @@ class VisionService:
         self.client = client or genai.Client(api_key=self.api_key)
         self.audit_path = Path(audit_path or "storage/logs/vision_audit.jsonl")
         self.telemetry = telemetry or TelemetryLogger(
-            audit_path=self.audit_path,
             component="vision",
-            storage_dir=self.audit_path.parent.parent if self.audit_path else "./storage",
         )
 
     def _audit(self, event: str, request_id: str, **details: Any) -> None:
@@ -117,12 +113,11 @@ class VisionService:
     def _prepare_image_parts(self, image_bytes_list: List[bytes]) -> List[types.Part]:
         return [to_image_part(b) for b in image_bytes_list]
 
-    async def _generate_content_async(
+    def _generate_content_sync(
         self, contents: List[Any], config: Optional[types.GenerateContentConfig] = None, model: Optional[str] = None
     ) -> Any:
         active_model = model or self.model_name
 
-        # Detect whether to use modern Interactions API or legacy/mock models.generate_content
         use_interactions = False
         if hasattr(self.client, "interactions") and hasattr(self.client.interactions, "create"):
             models_gen = getattr(getattr(self.client, "models", None), "generate_content", None)
@@ -180,12 +175,8 @@ class VisionService:
                     kwargs["generation_config"] = {"temperature": float(temp)}
 
             call_func = self.client.interactions.create
-            if asyncio.iscoroutinefunction(call_func):
-                interaction = await call_func(**kwargs)
-            else:
-                interaction = await asyncio.to_thread(call_func, **kwargs)
+            interaction = call_func(**kwargs)
 
-            # Ensure .text property is accessible for downstream JSON parsers
             if not isinstance(getattr(interaction, "text", None), str):
                 out_text = getattr(interaction, "output_text", None)
                 if not isinstance(out_text, str) and hasattr(interaction, "steps") and interaction.steps:
@@ -206,19 +197,20 @@ class VisionService:
                     pass
             return interaction
 
-        # Fallback to models.generate_content for mock testing and backward compatibility
         if hasattr(self.client, "models") and hasattr(self.client.models, "generate_content"):
             kwargs_legacy: Dict[str, Any] = {"model": active_model, "contents": contents}
             if config is not None:
                 kwargs_legacy["config"] = config
             gen_func = self.client.models.generate_content
-            if asyncio.iscoroutinefunction(gen_func):
-                return await gen_func(**kwargs_legacy)
-            return await asyncio.to_thread(gen_func, **kwargs_legacy)
+            return gen_func(**kwargs_legacy)
 
         raise RuntimeError("Client missing both interactions.create and models.generate_content")
 
-    async def extract_tag_studio_state(
+    def _generate_content_async(self, *args, **kwargs):
+        """Backwards-compatibility sync alias."""
+        return self._generate_content_sync(*args, **kwargs)
+
+    def extract_tag_studio_state(
         self,
         image_bytes_list: List[bytes],
         prompt: Optional[str] = None,
@@ -262,7 +254,7 @@ class VisionService:
         )
 
         try:
-            response = await self._generate_content_async(contents, gen_config, model=active_model)
+            response = self._generate_content_sync(contents, gen_config, model=active_model)
         except Exception as model_err:
             self._audit("vision_error", request_id, stage="model_call", model=active_model, error=repr(model_err))
             raise
@@ -281,7 +273,6 @@ class VisionService:
         )
         extracted_categories_raw = extracted_data.get("categories") or {}
 
-        # Normalize and construct TagChip objects for all 9 categories
         categories_result: Dict[str, List[Dict[str, Any]]] = {}
         locked_set = set(locked_categories or [])
 
@@ -374,7 +365,7 @@ class VisionService:
             "cost_usd": cost_info["cost_usd"],
         }
 
-    async def extract_scene_schema(
+    def extract_scene_schema(
         self,
         image_bytes_list: List[bytes],
         prompt: Optional[str] = None,
@@ -382,7 +373,7 @@ class VisionService:
         existing_schema: Optional[Dict[str, Any]] = None,
         image_paths: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
-        return await self.extract_tag_studio_state(
+        return self.extract_tag_studio_state(
             image_bytes_list=image_bytes_list,
             prompt=prompt,
             locked_categories=locked_sections,
@@ -391,13 +382,13 @@ class VisionService:
             image_paths=image_paths,
         )
 
-    async def analyze_moodboard(
+    def analyze_moodboard(
         self,
         image_bytes_list: List[bytes],
         prompt: Optional[str] = None,
         image_paths: Optional[List[str]] = None,
     ) -> List[TagChip]:
-        state = await self.extract_tag_studio_state(
+        state = self.extract_tag_studio_state(
             image_bytes_list, prompt=prompt, image_paths=image_paths
         )
         all_chips: List[TagChip] = []
@@ -406,7 +397,7 @@ class VisionService:
                 all_chips.append(TagChip(**tag_dict))
         return all_chips
 
-    async def resync_prompt_from_levers(
+    def resync_prompt_from_levers(
         self,
         narrative: Optional[str] = None,
         categories: Optional[Dict[str, Any]] = None,
@@ -463,7 +454,7 @@ class VisionService:
             categories_count={k: len(v) for k, v in clean_cats.items()},
         )
 
-        response = await self._generate_content_async(contents=contents, config=config, model=active_model)
+        response = self._generate_content_sync(contents=contents, config=config, model=active_model)
         raw_text = getattr(response, "text", "") or "{}"
         parsed = parse_json_safely(raw_text, default={"master_prompt": raw_text.strip(), "narrative": narrative or ""})
 
@@ -509,7 +500,7 @@ class VisionService:
             "cost_usd": cost_info["cost_usd"],
         }
 
-    async def resync_levers_from_prompt(
+    def resync_levers_from_prompt(
         self,
         master_prompt: str,
         narrative: Optional[str] = None,
@@ -545,7 +536,7 @@ class VisionService:
             narrative=narrative,
         )
 
-        response = await self._generate_content_async(contents=contents, config=config, model=active_model)
+        response = self._generate_content_sync(contents=contents, config=config, model=active_model)
         raw_text = getattr(response, "text", "") or "{}"
         parsed = parse_json_safely(raw_text, default={"categories": {}, "narrative": narrative or ""})
 
@@ -655,7 +646,7 @@ class VisionService:
             "cost_usd": cost_info["cost_usd"],
         }
 
-    async def resync_master_prompt(
+    def resync_master_prompt(
         self,
         narrative: Optional[str] = None,
         categories: Optional[Dict[str, Any]] = None,
@@ -711,14 +702,13 @@ class VisionService:
             categories_count={k: len(v) for k, v in clean_cats.items()},
         )
 
-        response = await self._generate_content_async(contents=contents, config=config, model=active_model)
+        response = self._generate_content_sync(contents=contents, config=config, model=active_model)
         raw_text = getattr(response, "text", "") or "{}"
         parsed = parse_json_safely(raw_text, default={"master_prompt": raw_text.strip(), "narrative": narrative or ""})
 
         master_prompt = parsed.get("master_prompt", "").strip() or (previous_master_prompt or "")
         updated_narrative = parsed.get("narrative", "").strip() or (narrative or "")
 
-        # Extract and normalize 9-category visual levers from parsed LLM response
         extracted_categories_raw = parsed.get("categories") or {}
         categories_result: Dict[str, List[Dict[str, Any]]] = {}
 
@@ -828,7 +818,7 @@ class VisionService:
             "cost_usd": cost_info["cost_usd"],
         }
 
-    async def check_prompt_conflicts(
+    def check_prompt_conflicts(
         self,
         master_prompt: Optional[str] = "",
         narrative: Optional[str] = "",
@@ -886,7 +876,7 @@ class VisionService:
         usage_dict = {"prompt_token_count": 0, "candidates_token_count": 0, "total_token_count": 0}
         cost_info = {"cost_usd": 0.0}
         try:
-            response = await self._generate_content_async(contents=contents, config=config, model=active_model)
+            response = self._generate_content_sync(contents=contents, config=config, model=active_model)
             usage_dict = extract_usage_metadata(response)
             cost_info = calculate_cost(
                 model=active_model,
