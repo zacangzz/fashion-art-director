@@ -37,5 +37,5 @@ RESYNC_LEVERS_FROM_PROMPT_TEMPLATE = load_prompt("resync_levers_from_prompt_temp
 CHECK_CONFLICTS_SYSTEM_PROMPT = load_prompt("check_conflicts_system.txt")
 GARMENT_UPSCALE_SYSTEM_PROMPT = load_prompt("garment_upscale_system.txt")
 GARMENT_FEATURE_EXTRACTION_PROMPT = load_prompt("garment_feature_extraction.txt")
-
-
+BACKGROUND_HARMONIZATION_TEMPLATE = load_prompt("background_harmonization_template.txt")
+SPATIAL_SCENE_ANALYSIS_TEMPLATE = load_prompt("spatial_scene_analysis.txt")

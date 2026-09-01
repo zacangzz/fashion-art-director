@@ -1,0 +1,27 @@
+MASTER PHOTOGRAPHIC SCENE SYNTHESIS & SPATIAL ENVIRONMENT DIRECTIVE:
+
+PRIMARY CINEMATOGRAPHIC OBJECTIVE:
+Synthesize a single, unified, masterwork fashion photograph capturing the exact subjects from Image 1 authentically situated inside the physical architecture and lighting environment of Image 2.
+
+SUBJECT IDENTITY & STYLING LOCK (IMAGE 1 REFERENCE):
+- Faithfully preserve the exact character identities, facial features, bone structure, expressions, hair texture, skin undertones, and wardrobe from Image 1.
+- Render the subjects as living human beings naturally present in the physical room, not as an isolated cutout or overlay.
+
+3D SPATIAL PERSPECTIVE & CAMERA VECTOR:
+{perspective_instruction}
+
+SPATIAL POSITIONING & SCENE INTEGRATION:
+{spatial_placement_instruction}
+
+OPTICAL DEPTH OF FIELD & LENS GEOMETRY:
+{depth_of_field_instruction}
+
+PHOTOMETRIC LIGHTING & CONTACT COHESION:
+{lighting_instruction}
+
+DIRECTOR CINEMATOGRAPHY DIRECTIVE:
+{user_prompt}
+
+MASTER QUALITY & REALISM STANDARDS:
+- Single-exposure photograph with authentic optical lens characteristics, coherent 3D vanishing points, volumetric atmosphere, and realistic floor contact shadows.
+- Absolutely NO 2D sticker cutouts, pasted edges, flat segmentation masks, or synthetic collaging.

@@ -56,6 +56,7 @@ class GenerationService:
         inpaint_model_name: str = "gemini-3-pro-image",
         audit_path: Optional[Path] = None,
         wardrobe_service: Optional[Any] = None,
+        vision_service: Optional[Any] = None,
         client: Optional[genai.Client] = None,
         image_generator: Optional[ImageGenerator] = None,
         telemetry: Optional[TelemetryLogger] = None,
@@ -68,6 +69,7 @@ class GenerationService:
         self.model_name = model_name
         self.inpaint_model_name = inpaint_model_name
         self.wardrobe_service = wardrobe_service
+        self.vision_service = vision_service
         self.client = client or genai.Client(api_key=self.api_key)
         self.telemetry = telemetry or TelemetryLogger(
             component="generation",
@@ -556,11 +558,17 @@ class GenerationService:
         negative_prompt: Optional[str] = None,
         conversation_id: Optional[str] = None,
         imagen_model: Optional[str] = None,
+        background_reference_id: Optional[str] = None,
+        perspective_mode: Optional[str] = "auto_align",
+        depth_of_field: Optional[str] = "natural",
+        lighting_mode: Optional[str] = "harmonize_ambient",
+        spatial_staging: Optional[Dict[str, Any]] = None,
         user_id: str = "local_dev_user",
     ) -> Dict[str, Any]:
         """
         Conversational iterative refinement turn using parent reference image.
-        Anchors white balance to the root baseline image across multi-turn chains.
+        Supports multimodal background replacement with two-pass 3D spatial vision analysis,
+        perspective re-projection, and photometric lighting harmonization.
         """
         active_model = imagen_model or self.model_name
         req_id = f"refine_{uuid.uuid4().hex[:8]}"
@@ -584,9 +592,96 @@ class GenerationService:
             except Exception as e:
                 logger.warning(f"Could not load root image bytes for refinement chromatic grounding: {e}")
 
-        base_refine_instruction = self.prompt_compiler.format_refinement_prompt(prompt)
+        # Check for Background Reference Attachment
+        bg_bytes = None
+        bg_ref_record = None
+        if background_reference_id:
+            try:
+                bg_ref_record = self.db.get_background_reference(background_reference_id)
+                if bg_ref_record and bg_ref_record.get("image_path"):
+                    bg_bytes = self._load_image_bytes(bg_ref_record["image_path"])
+            except Exception as e:
+                logger.warning(f"Could not load background reference image bytes: {e}")
 
-        if lineage_depth >= 1 and root_image_bytes:
+        vision_cost = 0.0
+        vision_tokens = 0
+        camera_directive = None
+        spatial_placement_instruction = None
+        lighting_directive = None
+        synthesis_prompt = None
+
+        if bg_bytes:
+            # 1. Two-Pass Vision Spatial Scene Analysis Pass
+            if self.vision_service:
+                try:
+                    staging_dict = dict(spatial_staging or {})
+                    staging_dict.update({
+                        "perspective_mode": perspective_mode or "auto_align",
+                        "depth_of_field": depth_of_field or "natural",
+                        "lighting_mode": lighting_mode or "harmonize_ambient",
+                    })
+                    vis_res = self.vision_service.analyze_spatial_scene_reprojection(
+                        subject_image_bytes=parent_bytes,
+                        background_image_bytes=bg_bytes,
+                        user_prompt=prompt,
+                        staging_params=staging_dict,
+                        audit_request_id=req_id,
+                    )
+                    vision_cost = float(vis_res.get("cost_usd", 0.0))
+                    vision_tokens = int(vis_res.get("tokens", {}).get("total_token_count", 0))
+                    camera_directive = vis_res.get("camera_and_perspective_directive")
+                    spatial_placement_instruction = vis_res.get("subject_spatial_placement_directive")
+                    lighting_directive = vis_res.get("photometric_lighting_and_shadow_directive")
+                    synthesis_prompt = vis_res.get("unified_scene_synthesis_prompt")
+                except Exception as vis_err:
+                    logger.warning(f"Vision spatial scene analysis failed, falling back to heuristic compiler: {vis_err}")
+
+            eff_perspective = perspective_mode or "auto_align"
+            eff_dof = depth_of_field or "natural"
+            eff_lighting = lighting_mode or "harmonize_ambient"
+
+            base_refine_instruction = self.prompt_compiler.format_background_refinement_prompt(
+                prompt=prompt,
+                perspective_mode=eff_perspective,
+                depth_of_field=eff_dof,
+                lighting_mode=eff_lighting,
+                spatial_placement_instruction=spatial_placement_instruction,
+                camera_directive=camera_directive,
+                lighting_directive=lighting_directive,
+            )
+
+            context_prefix = (
+                "\n\nMULTI-IMAGE PHOTOGRAPHIC RE-SYNTHESIS ASSETS:\n"
+                "- Image 1 is the CURRENT PRIMARY SUBJECT REFERENCE (Exact character identities, facial features, skin undertones, and wardrobe to be preserved).\n"
+                "- Image 2 is the REFERENCE ROOM & LIGHTING ENVIRONMENT (Physical architecture, windows, and light sources to place the subjects into).\n"
+                "- Render a single cohesive master photograph from the specified camera angle with authentic perspective and contact shadows."
+            )
+            full_refine_prompt = base_refine_instruction + context_prefix
+            all_refs = [parent_bytes, bg_bytes]
+
+            self._audit(
+                "background_harmonization_request",
+                req_id,
+                parent_id=parent_id,
+                background_reference_id=background_reference_id,
+                perspective_mode=eff_perspective,
+                depth_of_field=eff_dof,
+                lighting_mode=eff_lighting,
+                spatial_staging=spatial_staging,
+                vision_cost_usd=vision_cost,
+                vision_tokens=vision_tokens,
+            )
+
+            image_bytes = self._call_multi_image_model(
+                contents=all_refs + [full_refine_prompt],
+                aspect_ratio=aspect_ratio,
+                model_name=active_model,
+                seed=seed,
+                negative_prompt=eff_neg_prompt,
+                audit_request_id=req_id,
+            )
+        elif lineage_depth >= 1 and root_image_bytes:
+            base_refine_instruction = self.prompt_compiler.format_refinement_prompt(prompt)
             turn_num = lineage_depth + 1
             chromatic_anchor = (
                 f"\n\nPROGRESSIVE REFINEMENT TURN #{turn_num} CHROMATIC ANCHOR:\n"
@@ -606,6 +701,7 @@ class GenerationService:
                 audit_request_id=req_id,
             )
         else:
+            base_refine_instruction = self.prompt_compiler.format_refinement_prompt(prompt)
             full_refine_prompt = base_refine_instruction
             image_bytes = self._call_image_model(
                 prompt=full_refine_prompt,
@@ -621,8 +717,11 @@ class GenerationService:
         master_path, width, height = self._save_generation_image(user_id, filename, image_bytes, aspect_ratio)
 
         metrics = self.image_generator.last_call_metrics
-        call_cost = float(metrics.get("cost_usd", 0.0))
-        call_tokens = int(metrics.get("total_token_count", 0))
+        image_call_cost = float(metrics.get("cost_usd", 0.0))
+        image_call_tokens = int(metrics.get("total_token_count", 0))
+
+        call_cost = round(image_call_cost + vision_cost, 6)
+        call_tokens = image_call_tokens + vision_tokens
 
         parent_acc_cost = float(parent_gen.get("accumulated_cost_usd", 0.0))
         parent_acc_tokens = int(parent_gen.get("accumulated_tokens", 0))
@@ -630,14 +729,29 @@ class GenerationService:
         acc_tokens = parent_acc_tokens + call_tokens
 
         cost_breakdown = {
-            "direct_image_cost_usd": call_cost,
-            "direct_image_tokens": call_tokens,
+            "direct_image_cost_usd": image_call_cost,
+            "direct_image_tokens": image_call_tokens,
+            "vision_spatial_cost_usd": vision_cost,
+            "vision_spatial_tokens": vision_tokens,
             "parent_accumulated_cost_usd": parent_acc_cost,
             "parent_accumulated_tokens": parent_acc_tokens,
             "accumulated_cost_usd": acc_cost,
             "accumulated_tokens": acc_tokens,
             "call_metrics": metrics.get("cost_breakdown", {}),
         }
+
+        bg_meta = None
+        if background_reference_id:
+            bg_meta = {
+                "background_reference_id": background_reference_id,
+                "perspective_mode": perspective_mode or "auto_align",
+                "depth_of_field": depth_of_field or "natural",
+                "lighting_mode": lighting_mode or "harmonize_ambient",
+                "spatial_staging": spatial_staging,
+                "vision_spatial_prompt": synthesis_prompt,
+                "vision_cost_usd": vision_cost,
+                "vision_tokens": vision_tokens,
+            }
 
         record = {
             "id": child_id,
@@ -646,7 +760,12 @@ class GenerationService:
             "conversation_id": conversation_id,
             "is_baseline": False,
             "created_at": created_at,
-            "schema_json": {"refinement_prompt": prompt, "parent_id": parent_id, "cost_breakdown": cost_breakdown},
+            "schema_json": {
+                "refinement_prompt": prompt,
+                "parent_id": parent_id,
+                "cost_breakdown": cost_breakdown,
+                "background_harmonization_meta": bg_meta,
+            },
             "compiled_prompt": full_refine_prompt,
             "negative_prompt": eff_neg_prompt,
             "seed": seed,
@@ -655,12 +774,27 @@ class GenerationService:
             "resolution_width": width,
             "resolution_height": height,
             "model_name": active_model,
+            "background_reference_id": background_reference_id,
+            "background_harmonization_meta": bg_meta,
             "cost_usd": call_cost,
             "tokens": call_tokens,
             "accumulated_cost_usd": acc_cost,
             "accumulated_tokens": acc_tokens,
         }
         self.db.create_generation(user_id=user_id, gen_data=record)
+
+        if background_reference_id:
+            self._audit(
+                "background_harmonization_complete",
+                req_id,
+                generation_id=child_id,
+                parent_id=parent_id,
+                background_reference_id=background_reference_id,
+                cost_usd=call_cost,
+                tokens=call_tokens,
+                vision_cost_usd=vision_cost,
+                image_cost_usd=image_call_cost,
+            )
 
         return {
             "generation_id": child_id,
@@ -674,6 +808,8 @@ class GenerationService:
             "created_at": created_at,
             "aspect_ratio": aspect_ratio,
             "resolution": {"width": width, "height": height},
+            "background_reference_id": background_reference_id,
+            "background_harmonization_meta": bg_meta,
             "cost_usd": call_cost,
             "tokens": call_tokens,
             "accumulated_cost_usd": acc_cost,

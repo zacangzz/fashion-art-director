@@ -10,6 +10,7 @@ ALLOWED_COLLECTIONS = [
     "generations",
     "moodboards",
     "conversations",
+    "background_references",
     "wardrobe_items",
     "composition_assignments",
     "telemetry_events",
@@ -112,6 +113,14 @@ class FirestoreManager:
         data["accumulated_cost_usd"] = float(data.get("accumulated_cost_usd") or 0.0)
         data["accumulated_tokens"] = int(data.get("accumulated_tokens") or 0)
         data["is_baseline"] = bool(data.get("is_baseline", False))
+        if data.get("background_reference_id"):
+            data["background_reference_id"] = str(data["background_reference_id"])
+            if not data.get("background_reference_url"):
+                bg_ref = self.get_background_reference(data["background_reference_id"])
+                if bg_ref:
+                    data["background_reference_url"] = bg_ref.get("image_url")
+        if data.get("background_harmonization_meta"):
+            data["background_harmonization_meta"] = data["background_harmonization_meta"]
         return data
 
     def create_generation(self, user_id: str, gen_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -141,6 +150,11 @@ class FirestoreManager:
         if not model_name and isinstance(schema_val, dict):
             model_name = schema_val.get("imagen_model") or schema_val.get("model_name")
 
+        bg_ref_id = gen_data.get("background_reference_id")
+        bg_meta = gen_data.get("background_harmonization_meta")
+        if bg_meta is not None:
+            bg_meta = self._to_firestore_safe(bg_meta)
+
         doc_data = {
             "id": gen_id,
             "user_id": user_id,
@@ -158,6 +172,8 @@ class FirestoreManager:
             "resolution_height": int(gen_data.get("resolution_height", 3840)),
             "conversation_id": gen_data.get("conversation_id"),
             "model_name": model_name,
+            "background_reference_id": bg_ref_id,
+            "background_harmonization_meta": bg_meta,
             "cost_usd": cost_usd,
             "tokens": tokens,
             "accumulated_cost_usd": round(accum_cost, 6),
@@ -263,6 +279,88 @@ class FirestoreManager:
             .stream()
         )
         return [self._normalize_generation_doc(d.to_dict()) for d in docs]
+
+    # -------------------------------------------------------------------------
+    # 3.5 BACKGROUND REFERENCES
+    # -------------------------------------------------------------------------
+    def create_background_reference(self, user_id: str, bg_data: Dict[str, Any]) -> Dict[str, Any]:
+        bg_id = bg_data["id"]
+        doc_data = {
+            "id": bg_id,
+            "user_id": user_id,
+            "original_filename": bg_data.get("original_filename", ""),
+            "image_path": bg_data["image_path"],
+            "thumbnail_path": bg_data.get("thumbnail_path"),
+            "aspect_ratio": bg_data.get("aspect_ratio", "16:9"),
+            "tags": bg_data.get("tags", []),
+            "created_at": bg_data.get("created_at") or self._now_iso(),
+            "deleted_at": None,
+        }
+        logger.info(f"Creating background reference {bg_id} for user {user_id}")
+        self.db.collection("background_references").document(bg_id).set(doc_data)
+
+        data = dict(doc_data)
+        data["image_url"] = f"/api/images/{doc_data['image_path'].lstrip('/')}"
+        if doc_data.get("thumbnail_path"):
+            data["thumbnail_url"] = f"/api/images/{doc_data['thumbnail_path'].lstrip('/')}"
+        else:
+            data["thumbnail_url"] = data["image_url"]
+        return data
+
+    def get_background_reference(self, bg_id: str) -> Optional[Dict[str, Any]]:
+        doc = self.db.collection("background_references").document(bg_id).get()
+        if doc.exists:
+            data = doc.to_dict()
+            if data.get("deleted_at") is not None:
+                return None
+            data["image_url"] = f"/api/images/{data['image_path'].lstrip('/')}"
+            if data.get("thumbnail_path"):
+                data["thumbnail_url"] = f"/api/images/{data['thumbnail_path'].lstrip('/')}"
+            else:
+                data["thumbnail_url"] = data["image_url"]
+            return data
+        return None
+
+    def list_background_references(self, user_id: str, limit: int = 50) -> List[Dict[str, Any]]:
+        try:
+            query = (
+                self.db.collection("background_references")
+                .where("user_id", "==", user_id)
+                .order_by("created_at", direction="DESCENDING")
+                .limit(limit)
+            )
+            docs = list(query.stream())
+        except Exception:
+            # Fallback if compound index is pending
+            query = (
+                self.db.collection("background_references")
+                .where("user_id", "==", user_id)
+                .limit(limit)
+            )
+            docs = list(query.stream())
+
+        results = []
+        for doc in docs:
+            d = doc.to_dict()
+            if d.get("deleted_at") is not None:
+                continue
+            d["image_url"] = f"/api/images/{d['image_path'].lstrip('/')}"
+            if d.get("thumbnail_path"):
+                d["thumbnail_url"] = f"/api/images/{d['thumbnail_path'].lstrip('/')}"
+            else:
+                d["thumbnail_url"] = d["image_url"]
+            results.append(d)
+        return results
+
+    def delete_background_reference(self, user_id: str, bg_id: str) -> bool:
+        doc_ref = self.db.collection("background_references").document(bg_id)
+        doc = doc_ref.get()
+        if doc.exists:
+            d = doc.to_dict()
+            if d.get("user_id") == user_id:
+                doc_ref.update({"deleted_at": self._now_iso()})
+                return True
+        return False
 
     # -------------------------------------------------------------------------
     # 4. WARDROBE ITEMS

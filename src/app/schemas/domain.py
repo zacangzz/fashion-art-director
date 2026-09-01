@@ -220,6 +220,48 @@ class LineageResponse(BaseModel):
 
 
 # ==============================================================================
+# Background Reference & Harmonization Models
+# ==============================================================================
+
+class BackgroundReference(BaseModel):
+    id: str
+    user_id: str
+    original_filename: Optional[str] = None
+    image_path: str
+    image_url: str
+    thumbnail_path: Optional[str] = None
+    thumbnail_url: Optional[str] = None
+    aspect_ratio: Optional[str] = None
+    tags: List[str] = Field(default_factory=list)
+    created_at: str
+    deleted_at: Optional[str] = None
+
+
+class BackgroundUploadResponse(BaseModel):
+    id: str
+    image_url: str
+    thumbnail_url: Optional[str] = None
+    original_filename: Optional[str] = None
+    aspect_ratio: Optional[str] = None
+    created_at: str
+
+
+class BackgroundListResponse(BaseModel):
+    items: List[BackgroundReference] = Field(default_factory=list)
+    total: int = 0
+
+
+class SpatialStagingParams(BaseModel):
+    subject_x: Optional[float] = 0.5
+    subject_y: Optional[float] = 0.65
+    camera_x: Optional[float] = 0.5
+    camera_y: Optional[float] = 0.9
+    camera_angle: Optional[str] = "facing_window"
+    focal_length_mm: Optional[int] = 35
+    zoom_level: Optional[str] = "environmental"
+
+
+# ==============================================================================
 # Conversation-Based Refinement Models
 # ==============================================================================
 
@@ -232,6 +274,11 @@ class RefinementRequest(BaseModel):
     negative_prompt: Optional[str] = None
     conversation_id: Optional[str] = None
     imagen_model: Optional[str] = None
+    background_reference_id: Optional[str] = None
+    perspective_mode: Optional[str] = "auto_align"
+    depth_of_field: Optional[str] = "natural"
+    lighting_mode: Optional[str] = "harmonize_ambient"
+    spatial_staging: Optional[Dict[str, Any]] = None
 
 
 class RefinementResponse(BaseModel):
@@ -245,6 +292,8 @@ class RefinementResponse(BaseModel):
     aspect_ratio: Optional[str] = None
     resolution: Optional[Dict[str, int]] = None
     conversation_id: Optional[str] = None
+    background_reference_id: Optional[str] = None
+    background_harmonization_meta: Optional[Dict[str, Any]] = None
     cost_usd: Optional[float] = 0.0
     tokens: Optional[int] = 0
     accumulated_cost_usd: Optional[float] = 0.0
@@ -260,6 +309,9 @@ class ConversationMessage(BaseModel):
     created_at: str
     aspect_ratio: Optional[str] = None
     resolution: Optional[Dict[str, int]] = None
+    background_reference_id: Optional[str] = None
+    background_reference_url: Optional[str] = None
+    background_harmonization_meta: Optional[Dict[str, Any]] = None
 
 
 class ConversationResponse(BaseModel):

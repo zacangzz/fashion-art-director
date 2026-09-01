@@ -17,7 +17,7 @@ export function useRefinementStudio({ imagenModel, aspectRatio, activeBaseline, 
   const [isExporting, setIsExporting] = useState(false);
 
   // Send Refinement Prompt
-  const handleSendRefinement = useCallback(async (promptText) => {
+  const handleSendRefinement = useCallback(async (promptText, bgOptions = {}) => {
     if (!promptText || !promptText.trim()) return;
 
     setIsGenerating(true);
@@ -35,6 +35,10 @@ export function useRefinementStudio({ imagenModel, aspectRatio, activeBaseline, 
         aspect_ratio: aspectRatio,
         conversation_id: conversationId,
         imagen_model: imagenModel,
+        background_reference_id: bgOptions.background_reference_id || undefined,
+        perspective_mode: bgOptions.perspective_mode || undefined,
+        depth_of_field: bgOptions.depth_of_field || undefined,
+        lighting_mode: bgOptions.lighting_mode || undefined,
       };
 
       const result = await refineGeneration(payload);
@@ -51,6 +55,8 @@ export function useRefinementStudio({ imagenModel, aspectRatio, activeBaseline, 
         compiled_prompt: result.compiled_prompt,
         aspect_ratio: effRatio,
         resolution: result.resolution || getBaseResolution(effRatio),
+        background_reference_id: result.background_reference_id,
+        background_harmonization_meta: result.background_harmonization_meta,
       };
       setGenerationResult(nextGen);
       setActiveSeed(result.seed);
@@ -67,6 +73,13 @@ export function useRefinementStudio({ imagenModel, aspectRatio, activeBaseline, 
         image_url: result.image_url,
         seed: result.seed,
         created_at: result.created_at || new Date().toISOString(),
+        background_reference_id: result.background_reference_id || bgOptions.background_reference_id,
+        background_reference_url: bgOptions.background_reference_url,
+        background_harmonization_meta: result.background_harmonization_meta || (bgOptions.background_reference_id ? {
+          perspective_mode: bgOptions.perspective_mode,
+          depth_of_field: bgOptions.depth_of_field,
+          lighting_mode: bgOptions.lighting_mode,
+        } : undefined),
       };
       setConversationMessages((prev) => [...prev, newMsg]);
 

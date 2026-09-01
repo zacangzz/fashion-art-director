@@ -82,6 +82,7 @@ def get_wardrobe_service() -> WardrobeService:
 def get_generation_service() -> GenerationService:
     settings = get_settings()
     ws = get_wardrobe_service()
+    vs = get_vision_service()
     return GenerationService(
         db_manager=get_db_manager(),
         storage_service=get_storage_service(),
@@ -89,6 +90,7 @@ def get_generation_service() -> GenerationService:
         model_name=settings.IMAGEN_MODEL,
         inpaint_model_name=settings.INPAINT_MODEL,
         wardrobe_service=ws,
+        vision_service=vs,
         client=get_gemini_client(),
         image_generator=get_image_generator(),
     )

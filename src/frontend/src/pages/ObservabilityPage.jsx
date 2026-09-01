@@ -50,6 +50,7 @@ const COMPONENT_TAG_CLASSES = {
   vision: 'obs-badge-vision',
   wardrobe: 'obs-badge-wardrobe',
   inpaint: 'obs-badge-inpaint',
+  background: 'obs-badge-background',
   api: 'obs-badge-api',
 };
 
@@ -58,6 +59,7 @@ const STAGE_COLORS = {
   prompt: '#a855f7',
   generation: '#6366f1',
   inpaint: '#ec4899',
+  background: '#10b981',
   api: '#64748b',
 };
 
@@ -486,7 +488,7 @@ export default function ObservabilityPage() {
 
                 {/* Component Filter Pills */}
                 <div className="obs-filter-pill-group">
-                  {['all', 'generation', 'vision', 'wardrobe', 'inpaint'].map((comp) => (
+                  {['all', 'generation', 'vision', 'wardrobe', 'inpaint', 'background'].map((comp) => (
                     <button
                       key={comp}
                       type="button"
@@ -793,7 +795,7 @@ export default function ObservabilityPage() {
                 </div>
 
                 <div className="obs-filter-pill-group">
-                  {['all', 'generation', 'vision', 'wardrobe', 'inpaint', 'api'].map((comp) => (
+                  {['all', 'generation', 'vision', 'wardrobe', 'inpaint', 'background', 'api'].map((comp) => (
                     <button
                       key={comp}
                       type="button"

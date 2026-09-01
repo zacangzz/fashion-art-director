@@ -22,6 +22,7 @@ from app.utils.prompt_loader import (
     RESYNC_LEVERS_FROM_PROMPT_SYSTEM,
     RESYNC_LEVERS_FROM_PROMPT_TEMPLATE,
     CHECK_CONFLICTS_SYSTEM_PROMPT,
+    SPATIAL_SCENE_ANALYSIS_TEMPLATE,
 )
 from app.utils.image_utils import (
     to_image_part,
@@ -913,3 +914,109 @@ class VisionService:
         )
 
         return conflicts_result
+
+    def analyze_spatial_scene_reprojection(
+        self,
+        subject_image_bytes: bytes,
+        background_image_bytes: bytes,
+        user_prompt: str,
+        staging_params: Optional[Dict[str, Any]] = None,
+        model_name: Optional[str] = None,
+        audit_request_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Two-pass Vision spatial analysis pass that examines the Subject image (Image 1),
+        Background Reference image (Image 2), user prompt, and 2D/3D camera/subject coordinates,
+        synthesizing structured 3D photographic directives.
+        """
+        request_id = audit_request_id or get_current_request_id() or f"req_spatial_vis_{uuid.uuid4().hex[:8]}"
+        active_model = model_name or self.model_name or "gemini-3.7-flash"
+        params = staging_params or {}
+
+        subject_x = params.get("subject_x", 0.5)
+        subject_y = params.get("subject_y", 0.65)
+        camera_angle = params.get("camera_angle", "facing_window")
+        focal_length = params.get("focal_length_mm", 35)
+        zoom_level = params.get("zoom_level", "environmental")
+        perspective_mode = params.get("perspective_mode", "auto_align")
+        depth_of_field = params.get("depth_of_field", "natural")
+        lighting_mode = params.get("lighting_mode", "harmonize_ambient")
+
+        system_instruction = SPATIAL_SCENE_ANALYSIS_TEMPLATE.format(
+            SUBJECT_X=subject_x,
+            SUBJECT_Y=subject_y,
+            CAMERA_ANGLE=camera_angle,
+            FOCAL_LENGTH_MM=focal_length,
+            ZOOM_LEVEL=zoom_level,
+            PERSPECTIVE_MODE=perspective_mode,
+            DEPTH_OF_FIELD=depth_of_field,
+            LIGHTING_MODE=lighting_mode,
+            USER_PROMPT=user_prompt or "Harmonize subject with background reference environment",
+        )
+
+        user_content = (
+            "Analyze Image 1 (Subject Reference) and Image 2 (Background Environment Reference) "
+            "and output the 3D cinematic photographic directives in the specified JSON schema."
+        )
+
+        contents = [
+            subject_image_bytes,
+            background_image_bytes,
+            user_content,
+        ]
+
+        config = types.GenerateContentConfig(
+            system_instruction=system_instruction,
+            response_mime_type="application/json",
+            temperature=0.3,
+        )
+
+        self._audit(
+            "spatial_vision_analysis_request",
+            request_id,
+            model=active_model,
+            staging_params=params,
+            user_prompt=user_prompt,
+        )
+
+        usage_dict = {"prompt_token_count": 0, "candidates_token_count": 0, "total_token_count": 0}
+        cost_info = {"cost_usd": 0.0}
+
+        try:
+            response = self._generate_content_sync(contents=contents, config=config, model=active_model)
+            usage_dict = extract_usage_metadata(response)
+            cost_info = calculate_cost(
+                model=active_model,
+                prompt_tokens=usage_dict["prompt_token_count"],
+                candidates_tokens=usage_dict["candidates_token_count"],
+            )
+            raw_text = getattr(response, "text", "") or "{}"
+            parsed = parse_json_safely(raw_text, default={})
+        except Exception as exc:
+            logger.warning(f"Error executing analyze_spatial_scene_reprojection: {exc}")
+            parsed = {}
+
+        camera_dir = parsed.get("camera_and_perspective_directive") or f"Align camera to {camera_angle} with {focal_length}mm lens."
+        spatial_dir = parsed.get("subject_spatial_placement_directive") or f"Place subjects at position ({subject_x}, {subject_y}) naturally in scene."
+        lighting_dir = parsed.get("photometric_lighting_and_shadow_directive") or "Cast natural ambient lighting and realistic contact shadows."
+        synthesis_prompt = parsed.get("unified_scene_synthesis_prompt") or user_prompt
+
+        result = {
+            "camera_and_perspective_directive": camera_dir,
+            "subject_spatial_placement_directive": spatial_dir,
+            "photometric_lighting_and_shadow_directive": lighting_dir,
+            "unified_scene_synthesis_prompt": synthesis_prompt,
+            "tokens": usage_dict,
+            "cost_usd": cost_info["cost_usd"],
+        }
+
+        self._audit(
+            "spatial_vision_analysis_complete",
+            request_id,
+            model=active_model,
+            tokens=usage_dict,
+            cost_usd=cost_info["cost_usd"],
+        )
+
+        return result
+

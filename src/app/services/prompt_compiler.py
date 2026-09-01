@@ -305,6 +305,75 @@ class PromptCompiler:
             return REFINEMENT_SYSTEM_PROMPT.replace("{USER_PROMPT}", clean_p)
         return f"{REFINEMENT_SYSTEM_PROMPT}\n\nEDIT INSTRUCTION:\n<edit>\n{clean_p}\n</edit>"
 
+    @classmethod
+    def format_background_refinement_prompt(
+        cls,
+        prompt: str,
+        perspective_mode: str = "auto_align",
+        depth_of_field: str = "natural",
+        lighting_mode: str = "harmonize_ambient",
+        spatial_placement_instruction: Optional[str] = None,
+        camera_directive: Optional[str] = None,
+        lighting_directive: Optional[str] = None,
+    ) -> str:
+        perspective_instructions = {
+            "auto_align": (
+                "- Level horizon lines, match vanishing points, and align camera perspective so the subjects and environment share an authentic 3D spatial field."
+            ),
+            "preserve_bg": (
+                "- Retain the background reference environment's original camera angle, horizon line, and architectural perspective geometry exactly as shown in Image 2."
+            ),
+            "low_angle": (
+                "- Frame from a dramatic low-angle, upward-facing perspective to match an elevated, powerful hero subject stance."
+            ),
+            "high_angle": (
+                "- Frame from an elevated high-angle perspective looking slightly downward into the scene with a higher horizon line."
+            ),
+            "eye_level": (
+                "- Level the horizon line and frame from an authentic, cinematic eye-level vantage point."
+            ),
+        }
+
+        dof_instructions = {
+            "natural": (
+                "- Render a natural photographic depth of field: sharp foreground subjects with realistic optical focus falloff into the background environment."
+            ),
+            "cinematic_bokeh": (
+                "- Render with a cinematic wide aperture profile (f/1.4 - f/1.8): keep the foreground subjects crisp and tack-sharp while rendering the background in creamy, high-end optical bokeh."
+            ),
+            "crisp_architectural": (
+                "- Render with deep depth of field (f/8 - f/11): maintain crisp, high-detail architectural clarity across both foreground subjects and background structures."
+            ),
+        }
+
+        lighting_instructions = {
+            "harmonize_ambient": (
+                "- Cast realistic environmental ambient light spill and subtle rim highlights from the background environment onto the contours of the subjects.\n"
+                "- Render natural contact shadows and directional occlusion at the subjects' contact points to ground them believably."
+            ),
+            "match_white_balance": (
+                "- Strictly preserve calibrated neutral white balance and authentic natural skin undertones on the subjects, while harmonizing background chromaticity to sit cohesively within the scene."
+            ),
+            "dramatic_contrast": (
+                "- Increase directional lighting contrast, shaping the subjects with prominent rim lighting and deep environmental shadows corresponding to the background scene."
+            ),
+        }
+
+        persp_text = camera_directive or perspective_instructions.get(perspective_mode, perspective_instructions["auto_align"])
+        dof_text = dof_instructions.get(depth_of_field, dof_instructions["natural"])
+        light_text = lighting_directive or lighting_instructions.get(lighting_mode, lighting_instructions["harmonize_ambient"])
+        spatial_text = spatial_placement_instruction or "- Position the subjects naturally inside the scene room geometry, seamlessly grounded with authentic contact shadows."
+
+        from app.utils.prompt_loader import BACKGROUND_HARMONIZATION_TEMPLATE
+        return BACKGROUND_HARMONIZATION_TEMPLATE.format(
+            perspective_instruction=persp_text,
+            spatial_placement_instruction=spatial_text,
+            depth_of_field_instruction=dof_text,
+            lighting_instruction=light_text,
+            user_prompt=prompt.strip() or "Seamlessly synthesize the subjects inside the reference background environment.",
+        )
+
+
 
 # Global functional aliases for backward compatibility
 extract_category_labels = PromptCompiler.extract_labels

@@ -319,6 +319,45 @@ export async function refineGeneration(payload) {
 }
 
 /**
+ * Uploads a reference background image for multimodal background harmonization.
+ * @param {File} file
+ * @returns {Promise<{id: string, image_url: string, thumbnail_url: string, original_filename: string, aspect_ratio: string, created_at: string}>}
+ */
+export async function uploadBackgroundReference(file) {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const response = await authFetch('/api/backgrounds/upload', {
+    method: 'POST',
+    body: formData,
+  });
+
+  return handleApiResponse(response, 'Failed to upload background reference');
+}
+
+/**
+ * Fetches user's stored reusable background references.
+ * @param {number} [limit=50]
+ * @returns {Promise<{items: Array, total: number}>}
+ */
+export async function fetchBackgroundReferences(limit = 50) {
+  const response = await authFetch(`/api/backgrounds?limit=${limit}`);
+  return handleApiResponse(response, 'Failed to fetch background references');
+}
+
+/**
+ * Deletes a stored background reference.
+ * @param {string} bgId
+ * @returns {Promise<{status: string, id: string}>}
+ */
+export async function deleteBackgroundReference(bgId) {
+  const response = await authFetch(`/api/backgrounds/${bgId}`, {
+    method: 'DELETE',
+  });
+  return handleApiResponse(response, 'Failed to delete background reference');
+}
+
+/**
  * Fetches conversation history thread by ID.
  * @param {string} conversationId
  * @returns {Promise<{conversation_id: string, baseline_generation_id: string, messages: Array}>}

@@ -59,6 +59,8 @@ Table generations {
   resolution_height   number    [not null, default: 1440]
   conversation_id     string    [note: 'FK to conversations.id']
   model_name          string    [note: 'Gemini model used for generation']
+  background_reference_id string [note: 'FK to background_references.id']
+  background_harmonization_meta map [note: 'Native Firestore map — perspective_mode, depth_of_field, lighting_mode, spatial_staging, vision_spatial_prompt, vision_cost_usd']
   cost_usd            number    [default: 0.0, note: 'Cost of this individual generation']
   tokens              number    [default: 0, note: 'Tokens for this individual generation']
   accumulated_cost_usd number   [default: 0.0, note: 'Pre-computed: sum of all ancestor costs + this cost']
@@ -71,6 +73,7 @@ Table generations {
     parent_id [name: 'idx_generations_parent']
     conversation_id [name: 'idx_generations_conversation']
     moodboard_id [name: 'idx_generations_moodboard']
+    background_reference_id [name: 'idx_generations_background']
   }
 }
 
@@ -84,6 +87,24 @@ Table conversations {
   indexes {
     user_id [name: 'idx_conversations_user']
     baseline_generation_id [name: 'idx_conversations_baseline']
+  }
+}
+
+Table background_references {
+  id                  string    [pk, note: 'Format: bg_{uuid12}']
+  user_id             string    [not null, note: 'Firebase Auth UID']
+  original_filename   string    [note: 'Original uploaded filename']
+  image_path          string    [not null, note: 'GCS/Local storage path: {user_id}/backgrounds/{filename}']
+  thumbnail_path      string    [note: 'GCS/Local storage path to generated thumbnail']
+  aspect_ratio        string    [note: 'Detected aspect ratio e.g. 16:9, 2:3']
+  tags                array     [note: 'Tags e.g. ["interior", "exterior", "urban", "nature"]']
+  created_at          timestamp [not null, default: `now()`]
+  deleted_at          timestamp [note: 'Soft delete — null means active']
+
+  indexes {
+    user_id [name: 'idx_backgrounds_user']
+    (user_id, deleted_at) [name: 'idx_backgrounds_user_active']
+    (user_id, created_at) [name: 'idx_backgrounds_user_created']
   }
 }
 
@@ -135,7 +156,7 @@ Table telemetry_events {
   timestamp           timestamp [not null, note: 'UTC ISO-8601']
   event               string    [not null, note: 'e.g. api_response, vision_response, generation_complete']
   request_id          string    [not null, note: 'Correlation ID for request lifecycle tracing']
-  component           string    [not null, note: 'api | generation | vision | wardrobe | inpaint | export']
+  component           string    [not null, note: 'api | generation | vision | wardrobe | inpaint | export | background']
   status              string    [not null, note: 'success | error | started']
   duration_ms         number    [note: 'Operation duration in milliseconds']
   model               string    [note: 'Gemini model name if applicable']
@@ -179,6 +200,7 @@ Table usage_daily {
 Ref: generations.parent_id > generations.id                           // Self-referencing lineage chain
 Ref: generations.moodboard_id > moodboards.id                        // Generation belongs to moodboard
 Ref: generations.conversation_id > conversations.id                   // Generation belongs to conversation
+Ref: generations.background_reference_id > background_references.id   // Generation background reference
 Ref: conversations.baseline_generation_id - generations.id            // Conversation anchored to baseline
 Ref: composition_assignments.generation_id > generations.id           // Assignment targets a generation
 Ref: composition_assignments.wardrobe_item_id > wardrobe_items.id     // Assignment references a garment

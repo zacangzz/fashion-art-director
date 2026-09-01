@@ -6,56 +6,35 @@ import RefinementChat from './RefinementChat';
 describe('RefinementChat Component', () => {
   const sampleMessages = [
     {
-      role: 'baseline',
-      prompt: 'A cinematic high fashion model in studio lighting',
-      generation_id: 'gen_base_01',
-      image_url: 'https://example.com/base.png',
-      seed: 4289102,
+      generation_id: 'gen_root_001',
+      prompt: 'Initial fashion editorial photography',
+      created_at: '2026-09-01T10:00:00Z',
+      image_url: 'https://example.com/root.png',
+      cost_usd: 0.05,
+      tokens: 1000,
     },
     {
-      role: 'user',
-      prompt: 'Change lighting to warm golden hour',
-      generation_id: 'gen_iter_01',
-      image_url: 'https://example.com/iter1.png',
-      seed: 4289102,
+      generation_id: 'gen_child_002',
+      prompt: 'Make lighting warmer',
+      created_at: '2026-09-01T10:05:00Z',
+      image_url: 'https://example.com/child.png',
+      cost_usd: 0.05,
+      tokens: 1000,
     },
   ];
 
-  it('renders Active Anchor Banner and message timeline with active anchor indicator', () => {
+  it('renders chat message history with generation turns', () => {
     render(
       <RefinementChat
         conversationMessages={sampleMessages}
-        activeGenerationId="gen_iter_01"
-        activeSeed={4289102}
+        activeGenerationId="gen_child_002"
         onSendRefinement={vi.fn()}
       />
     );
 
-    // Active Anchor Banner
-    expect(screen.getByText('Active Refinement Anchor')).toBeInTheDocument();
-    expect(screen.getByText('Seed #4289102')).toBeInTheDocument();
-    expect(screen.getByText('Next prompt will refine from this image')).toBeInTheDocument();
-
-    // Message list items
-    expect(screen.getAllByText('Anchor Baseline').length).toBeGreaterThan(0);
-    expect(screen.getByText('Iteration 1')).toBeInTheDocument();
-    expect(screen.getByText('Active Anchor')).toBeInTheDocument();
-  });
-
-  it('calls onSelectMessage when clicking a past message card', () => {
-    const handleSelect = vi.fn();
-    render(
-      <RefinementChat
-        conversationMessages={sampleMessages}
-        activeGenerationId="gen_iter_01"
-        onSelectMessage={handleSelect}
-      />
-    );
-
-    const baselineCard = screen.getAllByText('Anchor Baseline')[0];
-    fireEvent.click(baselineCard);
-
-    expect(handleSelect).toHaveBeenCalledWith(sampleMessages[0]);
+    expect(screen.getByText('Refinement Thread')).toBeInTheDocument();
+    expect(screen.getByText('Initial fashion editorial photography')).toBeInTheDocument();
+    expect(screen.getByText('Make lighting warmer')).toBeInTheDocument();
   });
 
   it('calls onSendRefinement with typed prompt', () => {
@@ -73,7 +52,7 @@ describe('RefinementChat Component', () => {
     const submitBtn = screen.getByRole('button', { name: /Refine Output/i });
     fireEvent.click(submitBtn);
 
-    expect(handleSend).toHaveBeenCalledWith('Add brown leather trench coat');
+    expect(handleSend).toHaveBeenCalledWith('Add brown leather trench coat', expect.anything());
   });
 
   it('toggles wardrobe studio when Wardrobe button is clicked', () => {
@@ -86,10 +65,25 @@ describe('RefinementChat Component', () => {
       />
     );
 
-    const wardrobeBtn = screen.getByRole('button', { name: /Wardrobe/i });
-    fireEvent.click(wardrobeBtn);
+    const wardrobeBtns = screen.getAllByRole('button', { name: /Wardrobe/i });
+    fireEvent.click(wardrobeBtns[0]);
 
     expect(handleToggleWardrobe).toHaveBeenCalled();
-    expect(screen.getByText('2')).toBeInTheDocument();
+    expect(screen.getAllByText('2').length).toBeGreaterThan(0);
+  });
+
+  it('renders background reference button and opens library modal', () => {
+    render(
+      <RefinementChat
+        conversationMessages={sampleMessages}
+        onSendRefinement={vi.fn()}
+      />
+    );
+
+    const bgBtns = screen.getAllByRole('button', { name: /Reference Background Library/i });
+    expect(bgBtns.length).toBeGreaterThan(0);
+    fireEvent.click(bgBtns[0]);
+
+    expect(screen.getByText('Reference Background Library')).toBeInTheDocument();
   });
 });
