@@ -1021,7 +1021,7 @@ firebase deploy --only firestore:indexes,firestore:rules
 > 5. Navigate to **Project Settings** (gear icon) -> Under **Your apps**, click the **Web icon (`</>`)**.
 > 6. Register app name `studio-web` and copy the `firebaseConfig` object values into your local `src/frontend/.env.production`:
 >    ```bash
->    VITE_FIREBASE_API_KEY="AIzaSy..."
+>    VITE_FIREBASE_API_KEY="your-firebase-api-key"
 >    VITE_FIREBASE_AUTH_DOMAIN="your-project.firebaseapp.com"
 >    VITE_FIREBASE_PROJECT_ID="your-project"
 >    VITE_FIREBASE_STORAGE_BUCKET="your-project-media"

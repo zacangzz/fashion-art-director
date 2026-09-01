@@ -19,8 +19,13 @@ def client():
     fake_bucket.blob.return_value = fake_blob
     storage_service = StorageService(bucket=fake_bucket, environment="local")
 
+    mock_vision = MagicMock()
+    mock_gen = MagicMock()
+
     app.dependency_overrides[get_db_manager] = lambda: db_mgr
     app.dependency_overrides[get_storage_service] = lambda: storage_service
+    app.dependency_overrides[get_vision_service] = lambda: mock_vision
+    app.dependency_overrides[get_generation_service] = lambda: mock_gen
     yield TestClient(app)
     app.dependency_overrides.clear()
 

@@ -35,7 +35,9 @@ def get_gemini_client() -> genai.Client:
     settings = get_settings()
     timeout_ms = settings.GENAI_TIMEOUT_SECONDS * 1000
     http_opts = types.HttpOptions(timeout=timeout_ms)
-    return genai.Client(api_key=settings.GEMINI_API_KEY, http_options=http_opts)
+    api_key = settings.GEMINI_API_KEY or "dummy_api_key_for_unconfigured_env"
+    return genai.Client(api_key=api_key, http_options=http_opts)
+
 
 
 @lru_cache()

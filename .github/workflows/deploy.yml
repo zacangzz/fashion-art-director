@@ -16,6 +16,7 @@ env:
   SERVICE_NAME: fashion-art-director
   WIF_PROVIDER: projects/1012864945903/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider
   WIF_SERVICE_ACCOUNT: github-deployer@ai-art-director-prod.iam.gserviceaccount.com
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   # ============================================================================
@@ -24,6 +25,12 @@ jobs:
   test:
     name: Run Unit & Integration Tests
     runs-on: ubuntu-latest
+    env:
+      ENVIRONMENT: local
+      GCP_PROJECT_ID: test-studio-project
+      GCS_BUCKET: test-studio-bucket
+      GEMINI_API_KEY: fake-ci-test-key
+
 
     steps:
       - name: Checkout Code

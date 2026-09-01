@@ -2,7 +2,7 @@ import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
 
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyAk1sIPM4CRbW--GJz1U8pYck2lSaPHoYg",
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "dummy_firebase_api_key",
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "ai-art-director-prod.firebaseapp.com",
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "ai-art-director-prod",
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "ai-art-director-prod.firebasestorage.app",
