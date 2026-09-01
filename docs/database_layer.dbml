@@ -1,0 +1,163 @@
+// =============================================================================
+// Image Gen Pipeline Studio — Firestore Database Layer (DBML)
+// =============================================================================
+// Target: Firebase Firestore (flat collections with user_id field)
+// Source:  docs/publishing-plan1.md — Phase 2: DatabaseManager Rewrite
+// =============================================================================
+
+Table moodboards {
+  id             string    [pk, note: 'Format: mb_{uuid12}']
+  user_id        string    [not null, note: 'Firebase Auth UID']
+  created_at     timestamp [not null, default: `now()`]
+  image_paths    array     [not null, note: 'Array of GCS paths to uploaded reference images']
+  cost_usd       number    [default: 0.0, note: 'Cumulative vision extraction cost']
+  tokens         number    [default: 0, note: 'Cumulative token usage']
+  accumulated_cost_usd  number [default: 0.0]
+  accumulated_tokens    number [default: 0]
+
+  indexes {
+    user_id [name: 'idx_moodboards_user']
+    (user_id, created_at) [name: 'idx_moodboards_user_created']
+  }
+}
+
+Table generations {
+  id                  string    [pk, note: 'Format: gen_{uuid12}']
+  user_id             string    [not null, note: 'Firebase Auth UID']
+  parent_id           string    [note: 'FK to generations.id — null for baselines']
+  moodboard_id        string    [note: 'FK to moodboards.id']
+  is_baseline         boolean   [default: false]
+  created_at          timestamp [not null, default: `now()`]
+  schema_json         map       [not null, note: 'Native Firestore map — 9-taxonomy categories, narrative, inpaint_meta']
+  compiled_prompt     string    [not null, note: '4-phase master prompt text']
+  negative_prompt     string
+  seed                number    [not null]
+  master_image_path   string    [not null, note: 'GCS path: {user_id}/generations/{filename}']
+  aspect_ratio        string    [not null, default: '2:3']
+  resolution_width    number    [not null, default: 1440]
+  resolution_height   number    [not null, default: 1440]
+  conversation_id     string    [note: 'FK to conversations.id']
+  model_name          string    [note: 'Gemini model used for generation']
+  cost_usd            number    [default: 0.0, note: 'Cost of this individual generation']
+  tokens              number    [default: 0, note: 'Tokens for this individual generation']
+  accumulated_cost_usd number   [default: 0.0, note: 'Pre-computed: sum of all ancestor costs + this cost']
+  accumulated_tokens   number   [default: 0, note: 'Pre-computed: sum of all ancestor tokens + this tokens']
+
+  indexes {
+    user_id [name: 'idx_generations_user']
+    (user_id, created_at) [name: 'idx_generations_user_created']
+    (user_id, is_baseline) [name: 'idx_generations_user_baseline']
+    parent_id [name: 'idx_generations_parent']
+    conversation_id [name: 'idx_generations_conversation']
+    moodboard_id [name: 'idx_generations_moodboard']
+  }
+}
+
+Table conversations {
+  id                      string    [pk, note: 'Format: conv_{uuid12}']
+  user_id                 string    [not null, note: 'Firebase Auth UID']
+  baseline_generation_id  string    [not null, note: 'FK to generations.id — the root baseline']
+  moodboard_id            string    [note: 'FK to moodboards.id']
+  created_at              timestamp [not null, default: `now()`]
+
+  indexes {
+    user_id [name: 'idx_conversations_user']
+    baseline_generation_id [name: 'idx_conversations_baseline']
+  }
+}
+
+Table wardrobe_items {
+  id                    string    [pk, note: 'Format: wi_{uuid12}']
+  user_id               string    [not null, note: 'Firebase Auth UID']
+  source_image_path     string    [not null, note: 'GCS path to uploaded source sheet']
+  label                 string    [not null, note: 'AI-detected garment label']
+  category              string    [default: 'tops', note: 'outerwear | tops | bottoms | footwear | accessories | full_outfit']
+  cropped_image_path    string    [not null, note: 'GCS path: {user_id}/wardrobe/items/{filename}']
+  upscaled_image_path   string    [note: 'GCS path to AI-upscaled version']
+  upscale_status        string    [default: 'pending', note: 'pending | completed | failed']
+  upscale_error         string
+  bbox                  array     [note: 'Native Firestore array [ymin, xmin, ymax, xmax] on 0-1000 scale']
+  extracted_details     map       [note: 'Native Firestore map — fabric, colors, logos, text']
+  cost_usd              number    [default: 0.0]
+  tokens                number    [default: 0]
+  created_at            timestamp [not null, default: `now()`]
+  deleted_at            timestamp [note: 'Soft delete — null means active']
+
+  indexes {
+    user_id [name: 'idx_wardrobe_user']
+    (user_id, deleted_at) [name: 'idx_wardrobe_user_active']
+    (user_id, created_at) [name: 'idx_wardrobe_user_created']
+  }
+}
+
+Table composition_assignments {
+  id                  string    [pk, note: 'Format: ca_{uuid12}']
+  user_id             string    [not null, note: 'Firebase Auth UID']
+  generation_id       string    [not null, note: 'FK to generations.id']
+  wardrobe_item_id    string    [not null, note: 'FK to wardrobe_items.id']
+  pin_number          number    [not null, note: 'Numbered pin ①②③ on the canvas']
+  drop_position       map       [note: 'Native Firestore map {x: float, y: float} normalized 0.0–1.0']
+  target_description  string    [note: 'Anatomical anchor description for grounding']
+  region_bbox         array     [note: 'Native Firestore array — detected clothing region bounds']
+  created_at          timestamp [not null, default: `now()`]
+
+  indexes {
+    generation_id [name: 'idx_assignments_generation']
+    (generation_id, pin_number) [name: 'idx_assignments_gen_pin']
+    wardrobe_item_id [name: 'idx_assignments_wardrobe']
+  }
+}
+
+Table telemetry_events {
+  id                  string    [pk, note: 'Firestore auto-generated ID']
+  user_id             string    [note: 'Firebase Auth UID — null for system events']
+  timestamp           timestamp [not null, note: 'UTC ISO-8601']
+  event               string    [not null, note: 'e.g. api_response, vision_response, generation_complete']
+  request_id          string    [not null, note: 'Correlation ID for request lifecycle tracing']
+  component           string    [not null, note: 'api | generation | vision | wardrobe | inpaint | export']
+  status              string    [not null, note: 'success | error | started']
+  duration_ms         number    [note: 'Operation duration in milliseconds']
+  model               string    [note: 'Gemini model name if applicable']
+  cost_usd            number    [note: 'Cost of this specific operation']
+  cost_breakdown      map       [note: 'Detailed cost split: prompt, candidates, images']
+  cumulative_cost_usd number    [note: 'Running total cost for the request chain']
+  cumulative_tokens   number    [note: 'Running total tokens for the request chain']
+  generation_id       string    [note: 'Associated generation ID if applicable']
+  error               string    [note: 'Error message if status=error']
+  prompts             map       [note: 'System/user prompts sent to the model']
+  config              map       [note: 'Model configuration (temperature, aspect_ratio, etc.)']
+  inputs              map       [note: 'Request inputs summary']
+  outputs             map       [note: 'Response outputs summary']
+  metrics             map       [note: 'Performance metrics']
+  tokens              map       [note: 'Token breakdown: prompt_token_count, candidates_token_count, total']
+
+  indexes {
+    (user_id, timestamp) [name: 'idx_telemetry_user_time']
+    (component, timestamp) [name: 'idx_telemetry_component_time']
+    request_id [name: 'idx_telemetry_request']
+    (status, timestamp) [name: 'idx_telemetry_status_time']
+  }
+}
+
+Table usage_daily {
+  id              string    [pk, note: 'Format: {user_id}_{YYYY-MM-DD}']
+  user_id         string    [not null, note: 'Firebase Auth UID']
+  date            string    [not null, note: 'ISO date YYYY-MM-DD']
+  total_cost_usd  number    [default: 0.0, note: 'Accumulated daily spend (Firestore Increment)']
+  request_count   number    [default: 0, note: 'Number of billable API calls today']
+
+  indexes {
+    (user_id, date) [name: 'idx_usage_user_date']
+  }
+}
+
+// =============================================================================
+// Relationships
+// =============================================================================
+
+Ref: generations.parent_id > generations.id                           // Self-referencing lineage chain
+Ref: generations.moodboard_id > moodboards.id                        // Generation belongs to moodboard
+Ref: generations.conversation_id > conversations.id                   // Generation belongs to conversation
+Ref: conversations.baseline_generation_id - generations.id            // Conversation anchored to baseline
+Ref: composition_assignments.generation_id > generations.id           // Assignment targets a generation
+Ref: composition_assignments.wardrobe_item_id > wardrobe_items.id     // Assignment references a garment
