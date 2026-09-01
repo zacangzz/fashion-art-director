@@ -202,7 +202,8 @@ class PromptCompiler:
             "Maintain raw photo fidelity, 1:1 original source sharpness, visible skin pores, natural skin texture, "
             "realistic teeth texture, natural tooth alignment, authentic gum line, subtle dental translucency, "
             "minor skin blemishes, natural light, and natural micro-contrast. "
-            "Apply the requested modifications below seamlessly, allowing all naturally interconnected visual elements—including lighting falloff, cast shadows, color bounce, material reactions, and environmental reflections—to adjust organically for realistic visual cohesion without waxy smoothing, artificial plastic finish, or compression degradation."
+            "Apply the requested modifications below seamlessly, allowing all naturally interconnected visual elements—including lighting falloff, cast shadows, material reactions, and environmental reflections—to adjust organically for realistic visual cohesion without waxy smoothing, artificial plastic finish, or compression degradation. "
+            "Color Constancy & Calibrated White Balance Lock: Strictly preserve the exact Kelvin color temperature, neutral white balance, background chromaticity, neutral gray tones, and authentic skin undertones of the reference base image without introducing warm color casts, magenta/reddish tinting, or progressive warming filters."
         ]
 
         adjustments = []
@@ -299,7 +300,10 @@ class PromptCompiler:
 
     @classmethod
     def format_refinement_prompt(cls, prompt: str) -> str:
-        return f"{REFINEMENT_SYSTEM_PROMPT}\n\nREFINEMENT INSTRUCTION:\n{prompt.strip()}"
+        clean_p = prompt.strip()
+        if "{USER_PROMPT}" in REFINEMENT_SYSTEM_PROMPT:
+            return REFINEMENT_SYSTEM_PROMPT.replace("{USER_PROMPT}", clean_p)
+        return f"{REFINEMENT_SYSTEM_PROMPT}\n\nEDIT INSTRUCTION:\n<edit>\n{clean_p}\n</edit>"
 
 
 # Global functional aliases for backward compatibility

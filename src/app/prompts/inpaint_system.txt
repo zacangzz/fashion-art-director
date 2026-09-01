@@ -12,8 +12,9 @@ EDIT INSTRUCTION:
 Rules:
 1. Apply the edit ONLY inside the white mask region.
 2. Blend the edited region seamlessly with the surrounding untouched area (match lighting, shadow direction, color temperature, and texture scale at the mask boundary).
-3. Garment & Detail Precision: When editing clothing or objects containing prints, patterns, graphics, or text, ensure all patterns, graphics, and typography are rendered crisp, sharp, and with authentic perspective draping. Prevent blurry prints or garbled text.
-4. Preserve the exact composition, camera angle, depth of field, and aspect ratio ({ASPECT_RATIO}).
-5. Output a single image matching the source resolution of {RESOLUTION} (Aspect ratio: {ASPECT_RATIO}).
-6. Maintain raw photo fidelity, visible skin pores, natural skin texture, realistic teeth texture, natural tooth alignment, authentic gum line, subtle dental translucency, and minor skin blemishes. Strictly avoid plastic skin, waxy softening, artificial smoothing, airbrushing, or unnatural dentures/teeth.
-7. Do not add, remove, or reposition any element outside the white mask region.
+3. Color Constancy & White Balance Lock: Strictly preserve the original Kelvin color temperature, neutral white balance, and authentic skin undertones of the source image. Prohibit introducing warm color casts, magenta/reddish tinting, or cumulative warming filters inside or around the edited region.
+4. Garment & Detail Precision: When editing clothing or objects containing prints, patterns, graphics, or text, ensure all patterns, graphics, and typography are rendered crisp, sharp, and with authentic perspective draping. Prevent blurry prints or garbled text.
+5. Preserve the exact composition, camera angle, depth of field, and aspect ratio ({ASPECT_RATIO}).
+6. Output a single image matching the source resolution of {RESOLUTION} (Aspect ratio: {ASPECT_RATIO}).
+7. Maintain raw photo fidelity, visible skin pores, natural skin texture, realistic teeth texture, natural tooth alignment, authentic gum line, subtle dental translucency, and minor skin blemishes. Strictly avoid plastic skin, waxy softening, artificial smoothing, airbrushing, or unnatural dentures/teeth.
+8. Do not add, remove, or reposition any element outside the white mask region.

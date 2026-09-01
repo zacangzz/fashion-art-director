@@ -49,7 +49,7 @@ class GenerationService:
     def __init__(
         self,
         db_manager: FirestoreManager,
-        api_key: str,
+        api_key: str = "",
         storage_dir: Optional[str] = "./storage",
         storage_service: Optional[StorageService] = None,
         model_name: str = "gemini-3-pro-image",
@@ -118,6 +118,24 @@ class GenerationService:
 
     def _load_image_bytes(self, image_path: str) -> bytes:
         return self.storage_service.download_bytes(image_path)
+
+    def _trace_lineage(self, parent_gen: Dict[str, Any]) -> tuple[int, Optional[Dict[str, Any]]]:
+        """
+        Traces the ancestry chain of a generation up to the root baseline.
+        Returns (lineage_depth, root_generation).
+        """
+        lineage_depth = 0
+        curr_p = parent_gen
+        visited_lineage = set()
+        while curr_p and curr_p.get("parent_id") and curr_p.get("id") not in visited_lineage:
+            visited_lineage.add(curr_p.get("id"))
+            next_p = self.db.get_generation(curr_p["parent_id"])
+            if not next_p:
+                break
+            curr_p = next_p
+            lineage_depth += 1
+        root_gen = curr_p if lineage_depth >= 1 else None
+        return lineage_depth, root_gen
 
     def _call_image_model(
         self,
@@ -542,6 +560,7 @@ class GenerationService:
     ) -> Dict[str, Any]:
         """
         Conversational iterative refinement turn using parent reference image.
+        Anchors white balance to the root baseline image across multi-turn chains.
         """
         active_model = imagen_model or self.model_name
         req_id = f"refine_{uuid.uuid4().hex[:8]}"
@@ -555,18 +574,48 @@ class GenerationService:
         parent_path = parent_gen.get("master_image_path")
         parent_bytes = self._load_image_bytes(parent_path)
 
-        refine_instruction = self.prompt_compiler.format_refinement_prompt(prompt)
         eff_neg_prompt = negative_prompt or parent_gen.get("negative_prompt") or DEFAULT_NEGATIVE_PROMPT
 
-        image_bytes = self._call_image_model(
-            prompt=refine_instruction,
-            aspect_ratio=aspect_ratio,
-            model_name=active_model,
-            reference_image_bytes=parent_bytes,
-            seed=seed,
-            negative_prompt=eff_neg_prompt,
-            audit_request_id=req_id,
-        )
+        lineage_depth, root_gen = self._trace_lineage(parent_gen)
+        root_image_bytes = None
+        if root_gen and root_gen.get("master_image_path"):
+            try:
+                root_image_bytes = self._load_image_bytes(root_gen["master_image_path"])
+            except Exception as e:
+                logger.warning(f"Could not load root image bytes for refinement chromatic grounding: {e}")
+
+        base_refine_instruction = self.prompt_compiler.format_refinement_prompt(prompt)
+
+        if lineage_depth >= 1 and root_image_bytes:
+            turn_num = lineage_depth + 1
+            chromatic_anchor = (
+                f"\n\nPROGRESSIVE REFINEMENT TURN #{turn_num} CHROMATIC ANCHOR:\n"
+                "- Image 1 is the PRISTINE ROOT BASELINE (Chromatic, lighting, and neutral white balance reference).\n"
+                "- Image 2 is the CURRENT IMAGE (to be refined).\n"
+                "- Strictly lock the overall scene Kelvin color temperature, neutral white balance, and authentic skin undertones to Image 1.\n"
+                "- Apply the refinement edits onto Image 2 without compounding warm ambient color bounce or introducing magenta/reddish color casts."
+            )
+            full_refine_prompt = base_refine_instruction + chromatic_anchor
+            all_refs = [root_image_bytes, parent_bytes]
+            image_bytes = self._call_multi_image_model(
+                contents=all_refs + [full_refine_prompt],
+                aspect_ratio=aspect_ratio,
+                model_name=active_model,
+                seed=seed,
+                negative_prompt=eff_neg_prompt,
+                audit_request_id=req_id,
+            )
+        else:
+            full_refine_prompt = base_refine_instruction
+            image_bytes = self._call_image_model(
+                prompt=full_refine_prompt,
+                aspect_ratio=aspect_ratio,
+                model_name=active_model,
+                reference_image_bytes=parent_bytes,
+                seed=seed,
+                negative_prompt=eff_neg_prompt,
+                audit_request_id=req_id,
+            )
 
         filename = f"{child_id}_master.png"
         master_path, width, height = self._save_generation_image(user_id, filename, image_bytes, aspect_ratio)
@@ -598,7 +647,7 @@ class GenerationService:
             "is_baseline": False,
             "created_at": created_at,
             "schema_json": {"refinement_prompt": prompt, "parent_id": parent_id, "cost_breakdown": cost_breakdown},
-            "compiled_prompt": refine_instruction,
+            "compiled_prompt": full_refine_prompt,
             "negative_prompt": eff_neg_prompt,
             "seed": seed,
             "master_image_path": master_path,
@@ -619,7 +668,7 @@ class GenerationService:
             "conversation_id": conversation_id,
             "seed": seed,
             "prompt": prompt,
-            "compiled_prompt": refine_instruction,
+            "compiled_prompt": full_refine_prompt,
             "negative_prompt": eff_neg_prompt,
             "image_url": f"/api/images/{master_path}",
             "created_at": created_at,
@@ -874,29 +923,40 @@ class GenerationService:
 
                 assignment_prompts.append(asgn_text)
 
-        # Trace lineage depth
-        lineage_depth = 0
-        curr_p = parent_gen
-        visited_lineage = set()
-        while curr_p and curr_p.get("parent_id") and curr_p.get("id") not in visited_lineage:
-            visited_lineage.add(curr_p.get("id"))
-            next_p = self.db.get_generation(curr_p["parent_id"])
-            if not next_p:
-                break
-            curr_p = next_p
-            lineage_depth += 1
+        # Trace lineage depth and root baseline for chromatic continuity
+        lineage_depth, root_gen = self._trace_lineage(parent_gen)
+        root_image_bytes = None
+        if root_gen and root_gen.get("master_image_path"):
+            try:
+                root_image_bytes = self._load_image_bytes(root_gen["master_image_path"])
+            except Exception as e:
+                logger.warning(f"Could not load root image bytes for chromatic grounding: {e}")
 
         composition_parts = [
             WARDROBE_COMPOSITION_SYSTEM_PROMPT,
             f"MULTI-SUBJECT INVARIANCE GUARDRAIL:\n{guardrail_text}",
         ]
-        if lineage_depth >= 1:
+        if lineage_depth >= 1 and root_image_bytes:
             turn_num = lineage_depth + 1
             composition_parts.append(
                 f"PROGRESSIVE STYLING TURN #{turn_num} CHROMATIC ANCHOR:\n"
-                "- Maintain absolute color temperature and neutral white balance fidelity matching the original root scene.\n"
-                "- Do NOT accumulate or amplify warm ambient color bounce from prior turns. Keep all background elements, neutral whites, sky tones, and un-targeted skin undertones strictly aligned with the pristine base scene."
+                "- Image 1 is the PRISTINE ROOT SCENE (Chromatic, lighting, and neutral white balance baseline reference).\n"
+                "- Image 2 is the CURRENT SCENE (Immediate parent image with prior styling state to be modified).\n"
+                "- Remaining images are the NEW REFERENCE GARMENTS to be applied.\n"
+                "- Strictly lock the overall scene Kelvin color temperature, background chromaticity, neutral white balance, neutral grays, and authentic skin undertones to IMAGE 1 (Pristine Root Scene).\n"
+                "- Seamlessly swap the designated garments onto Image 2 WITHOUT accumulating or compounding warm ambient color bounce or introducing magenta/reddish color drift across non-targeted areas."
             )
+            all_refs = [root_image_bytes, parent_image_bytes] + garment_references
+        else:
+            if lineage_depth >= 1:
+                turn_num = lineage_depth + 1
+                composition_parts.append(
+                    f"PROGRESSIVE STYLING TURN #{turn_num} CHROMATIC ANCHOR:\n"
+                    "- Maintain absolute color temperature and neutral white balance fidelity matching the original root scene.\n"
+                    "- Do NOT accumulate or amplify warm ambient color bounce from prior turns. Keep all background elements, neutral whites, sky tones, and un-targeted skin undertones strictly aligned with the pristine base scene."
+                )
+            all_refs = [parent_image_bytes] + garment_references
+
         composition_parts.append("ASSIGNED GARMENT MODIFICATIONS:\n" + "\n\n".join(assignment_prompts))
 
         if custom_instruction and custom_instruction.strip():
@@ -910,7 +970,6 @@ class GenerationService:
         else:
             comp_neg_prompt = base_neg_prompt
 
-        all_refs = [parent_image_bytes] + garment_references
         image_bytes_out = self._call_multi_image_model(
             contents=all_refs + [composition_prompt],
             aspect_ratio=eff_aspect,

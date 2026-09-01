@@ -13,6 +13,7 @@ from app.services.generation_service import (
     get_modified_categories,
 )
 from app.services.image_generator import ImageGenerator
+from app.services.storage_service import StorageService
 from app.db.database import FirestoreManager
 from fake_firestore import FakeFirestoreClient
 
@@ -283,3 +284,177 @@ def test_inpaint_region_audit_and_mask_tracking(tmp_path):
 
     rec = db_mgr.get_generation(res["generation_id"])
     assert rec is not None
+
+
+def test_refinement_generation_lineage_and_color_anchor(tmp_path):
+    fake_db = FakeFirestoreClient()
+    db_mgr = FirestoreManager(fake_db)
+
+    storage_dir = str(tmp_path / "storage")
+    fake_bucket = MagicMock()
+    fake_blob = MagicMock()
+    dummy_png = create_dummy_png_bytes(width=200, height=200)
+    fake_blob.download_as_bytes.return_value = dummy_png
+    fake_bucket.blob.return_value = fake_blob
+    storage_service = StorageService(bucket=fake_bucket, environment="local", storage_dir=storage_dir)
+
+    # 1. Create root baseline generation in DB
+    root_path = storage_service.upload_bytes(
+        user_id="local_dev_user",
+        category="generations",
+        filename="gen_root_refine_master.png",
+        data=dummy_png,
+    )
+    db_mgr.create_generation(
+        user_id="local_dev_user",
+        gen_data={
+            "id": "gen_root_refine",
+            "parent_id": None,
+            "moodboard_id": None,
+            "is_baseline": True,
+            "created_at": "2026-09-01T10:00:00Z",
+            "schema_json": {},
+            "compiled_prompt": "Root scene before refinement",
+            "negative_prompt": "blurry",
+            "seed": 112233,
+            "master_image_path": root_path,
+            "aspect_ratio": "2:3",
+            "resolution_width": 2560,
+            "resolution_height": 3840,
+            "model_name": "gemini-3-pro-image",
+            "cost_usd": 0.04,
+            "tokens": 1000,
+            "accumulated_cost_usd": 0.04,
+            "accumulated_tokens": 1000,
+        },
+    )
+
+    # 2. Create Turn 1 refinement in DB
+    turn1_path = storage_service.upload_bytes(
+        user_id="local_dev_user",
+        category="generations",
+        filename="gen_turn1_refine_master.png",
+        data=dummy_png,
+    )
+    db_mgr.create_generation(
+        user_id="local_dev_user",
+        gen_data={
+            "id": "gen_turn1_refine",
+            "parent_id": "gen_root_refine",
+            "moodboard_id": None,
+            "is_baseline": False,
+            "created_at": "2026-09-01T10:05:00Z",
+            "schema_json": {"refinement_prompt": "Make background softer"},
+            "compiled_prompt": "Turn 1 refinement",
+            "negative_prompt": "blurry",
+            "seed": 112233,
+            "master_image_path": turn1_path,
+            "aspect_ratio": "2:3",
+            "resolution_width": 2560,
+            "resolution_height": 3840,
+            "model_name": "gemini-3-pro-image",
+            "cost_usd": 0.04,
+            "tokens": 1000,
+            "accumulated_cost_usd": 0.08,
+            "accumulated_tokens": 2000,
+        },
+    )
+
+    # 3. Setup mock client
+    mock_client = create_mock_interactions_client(dummy_png)
+    image_generator = ImageGenerator(client=mock_client)
+    service = GenerationService(
+        db_manager=db_mgr,
+        storage_service=storage_service,
+        client=mock_client,
+        image_generator=image_generator,
+    )
+
+    # Turn 1 refinement from root baseline
+    res_t1 = service.refine_generation(
+        parent_id="gen_root_refine",
+        prompt="Add sunglasses to subject",
+        seed=112233,
+        user_id="local_dev_user",
+    )
+    assert res_t1["generation_id"] is not None
+    assert "{USER_PROMPT}" not in res_t1["compiled_prompt"]
+    assert "Add sunglasses to subject" in res_t1["compiled_prompt"]
+    assert "Color Constancy Lock" in res_t1["compiled_prompt"]
+    assert "PROGRESSIVE REFINEMENT TURN #2" not in res_t1["compiled_prompt"]
+
+    # Turn 2 progressive refinement from Turn 1 (Lineage Depth = 1)
+    res_t2 = service.refine_generation(
+        parent_id="gen_turn1_refine",
+        prompt="Adjust lighting to subtle rim light",
+        seed=112233,
+        user_id="local_dev_user",
+    )
+    assert res_t2["generation_id"] is not None
+    assert "{USER_PROMPT}" not in res_t2["compiled_prompt"]
+    assert "Adjust lighting to subtle rim light" in res_t2["compiled_prompt"]
+    assert "PROGRESSIVE REFINEMENT TURN #2 CHROMATIC ANCHOR" in res_t2["compiled_prompt"]
+    assert "Image 1 is the PRISTINE ROOT BASELINE" in res_t2["compiled_prompt"]
+    assert "Image 2 is the CURRENT IMAGE" in res_t2["compiled_prompt"]
+
+    # Verify mock_client received dual reference images [root, parent] for Turn 2
+    _, last_call_kwargs = mock_client.interactions.create.call_args
+    api_input = last_call_kwargs.get("input", [])
+    assert isinstance(api_input, list)
+    image_inputs = [item for item in api_input if isinstance(item, dict) and item.get("type") == "image"]
+    assert len(image_inputs) == 2
+
+
+def test_compile_delta_prompt_color_constancy_lock():
+    baseline_categories = {
+        "wardrobe_hair": [{"label": "white cotton t-shirt", "weight": 1.0, "enabled": True}],
+    }
+    current_categories = {
+        "wardrobe_hair": [{"label": "charcoal wool coat", "weight": 1.0, "enabled": True}],
+    }
+    delta_prompt = compile_delta_prompt(
+        narrative="Updated outerwear.",
+        categories=current_categories,
+        baseline_narrative="Original baseline.",
+        baseline_categories=baseline_categories,
+    )
+    assert "Color Constancy & Calibrated White Balance Lock" in delta_prompt
+    assert "Kelvin color temperature" in delta_prompt
+    assert "color bounce" not in delta_prompt
+
+
+def test_inpaint_prompt_color_constancy_lock():
+    from app.services.prompt_compiler import PromptCompiler
+
+    mask_stats = {
+        "coverage_percentage": 10.5,
+        "bounding_box": {"min_x": 50, "min_y": 50, "max_x": 150, "max_y": 150},
+        "normalized_bounding_box": {"min_x": 0.25, "min_y": 0.25, "max_x": 0.75, "max_y": 0.75},
+        "centroid": {"x": 100, "y": 100, "norm_x": 0.5, "norm_y": 0.5},
+    }
+    inpaint_prompt = PromptCompiler.format_inpaint_prompt(
+        prompt="Swap leather bag for canvas tote",
+        mask_stats=mask_stats,
+        aspect_ratio="2:3",
+    )
+    assert "Color Constancy & White Balance Lock" in inpaint_prompt
+    assert "Kelvin color temperature" in inpaint_prompt
+
+
+def test_image_optimization_lossless_png_and_icc_retention():
+    from app.utils.image_utils import optimize_reference_image
+
+    # Create image with specific distinct RGB values
+    img = Image.new("RGB", (100, 100), color=(142, 88, 210))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    original_bytes = buf.getvalue()
+
+    opt_bytes, mime = optimize_reference_image(original_bytes, max_dimension=2048, target_format="PNG")
+    assert mime == "image/png"
+
+    # Re-open and verify pixel channel integrity
+    re_opened = Image.open(io.BytesIO(opt_bytes))
+    pixel = re_opened.getpixel((50, 50))
+    assert pixel == (142, 88, 210)
+

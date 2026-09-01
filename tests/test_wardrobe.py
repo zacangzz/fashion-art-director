@@ -274,3 +274,159 @@ def test_wardrobe_api_endpoints(test_db, dummy_image_bytes, tmp_path):
         assert len(list_res_after.json()["items"]) == 0
     finally:
         app.dependency_overrides.clear()
+
+
+def test_wardrobe_composition_dual_reference_and_lineage_anchor(test_db, dummy_image_bytes, tmp_path):
+    storage_dir = str(tmp_path / "storage")
+    fake_bucket = MagicMock()
+    fake_blob = MagicMock()
+    fake_blob.download_as_bytes.return_value = dummy_image_bytes
+    fake_bucket.blob.return_value = fake_blob
+    storage_service = StorageService(bucket=fake_bucket, environment="local", storage_dir=storage_dir)
+
+    # 1. Create root baseline generation in DB (Turn 0)
+    root_gen_path = storage_service.upload_bytes(
+        user_id="local_dev_user",
+        category="generations",
+        filename="gen_root_001_master.png",
+        data=dummy_image_bytes,
+    )
+    test_db.create_generation(
+        user_id="local_dev_user",
+        gen_data={
+            "id": "gen_root_001",
+            "parent_id": None,
+            "moodboard_id": None,
+            "is_baseline": True,
+            "created_at": "2026-09-01T10:00:00Z",
+            "schema_json": {},
+            "compiled_prompt": "Root baseline scene",
+            "negative_prompt": "blurry",
+            "seed": 12345,
+            "master_image_path": root_gen_path,
+            "aspect_ratio": "2:3",
+            "resolution_width": 2560,
+            "resolution_height": 3840,
+            "model_name": "gemini-3-pro-image",
+            "cost_usd": 0.04,
+            "tokens": 1000,
+            "accumulated_cost_usd": 0.04,
+            "accumulated_tokens": 1000,
+        },
+    )
+
+    # 2. Create Turn 1 wardrobe generation in DB (Parent = gen_root_001)
+    turn1_gen_path = storage_service.upload_bytes(
+        user_id="local_dev_user",
+        category="generations",
+        filename="gen_turn1_001_master.png",
+        data=dummy_image_bytes,
+    )
+    test_db.create_generation(
+        user_id="local_dev_user",
+        gen_data={
+            "id": "gen_turn1_001",
+            "parent_id": "gen_root_001",
+            "moodboard_id": None,
+            "is_baseline": False,
+            "created_at": "2026-09-01T10:05:00Z",
+            "schema_json": {"wardrobe_composition": True},
+            "compiled_prompt": "Turn 1 shirt composition",
+            "negative_prompt": "blurry",
+            "seed": 12345,
+            "master_image_path": turn1_gen_path,
+            "aspect_ratio": "2:3",
+            "resolution_width": 2560,
+            "resolution_height": 3840,
+            "model_name": "gemini-3-pro-image",
+            "cost_usd": 0.04,
+            "tokens": 1000,
+            "accumulated_cost_usd": 0.08,
+            "accumulated_tokens": 2000,
+        },
+    )
+
+    # 3. Create wardrobe item crop in storage
+    crop_path = storage_service.upload_bytes(
+        user_id="local_dev_user",
+        category="wardrobe",
+        filename="crop_trousers.png",
+        data=dummy_image_bytes,
+    )
+    test_db.create_wardrobe_item(
+        user_id="local_dev_user",
+        item_data={
+            "id": "wd_trouser_001",
+            "label": "Linen Trousers",
+            "category": "bottoms",
+            "cropped_image_path": crop_path,
+            "created_at": "2026-09-01T10:00:00Z",
+        },
+    )
+
+    # 4. Mock GenAI interaction client
+    mock_client = MagicMock()
+    mock_interaction = MagicMock()
+    mock_interaction.output_image = MagicMock(data=dummy_image_bytes)
+    mock_interaction.usage_metadata = MagicMock(prompt_token_count=150, candidates_token_count=200, total_token_count=350)
+    mock_client.interactions.create.return_value = mock_interaction
+
+    image_generator = ImageGenerator(client=mock_client)
+    wardrobe_service = WardrobeService(
+        db_manager=test_db,
+        storage_service=storage_service,
+        api_key="fake-key",
+        storage_dir=storage_dir,
+        client=mock_client,
+        image_generator=image_generator,
+    )
+    wardrobe_service.ground_wardrobe_pins = MagicMock(return_value={
+        "grounded_pins": [{"pin_number": 1, "target_subject": "Subject 1", "body_location": "lower body", "spatial_anchor": "lower center"}],
+        "unmodified_subjects_guardrail": "Strictly preserve all other subjects.",
+    })
+
+    gen_service = GenerationService(
+        db_manager=test_db,
+        storage_service=storage_service,
+        image_generator=image_generator,
+        wardrobe_service=wardrobe_service,
+    )
+
+    asgn = {
+        "wardrobe_item_id": "wd_trouser_001",
+        "pin_number": 1,
+        "drop_position": {"x": 0.5, "y": 0.7},
+        "target_description": "trouser area",
+    }
+
+    # Case A: Turn 1 (Parent = gen_root_001, Lineage Depth = 0 from root)
+    res_turn1 = gen_service.compose_wardrobe(
+        parent_id="gen_root_001",
+        assignments=[asgn],
+        user_id="local_dev_user",
+    )
+    assert res_turn1["generation_id"] is not None
+    assert "Color Constancy & Calibrated White Balance Lock" in res_turn1["compiled_prompt"]
+    assert "PROGRESSIVE STYLING TURN #2" not in res_turn1["compiled_prompt"]
+
+    # Case B: Turn 2 (Parent = gen_turn1_001, Lineage Depth = 1 from root)
+    res_turn2 = gen_service.compose_wardrobe(
+        parent_id="gen_turn1_001",
+        assignments=[asgn],
+        user_id="local_dev_user",
+    )
+    assert res_turn2["generation_id"] is not None
+    compiled_turn2 = res_turn2["compiled_prompt"]
+    assert "PROGRESSIVE STYLING TURN #2 CHROMATIC ANCHOR" in compiled_turn2
+    assert "Image 1 is the PRISTINE ROOT SCENE" in compiled_turn2
+    assert "Image 2 is the CURRENT SCENE" in compiled_turn2
+    assert "Color Constancy & Calibrated White Balance Lock" in compiled_turn2
+
+    # Verify that mock_client.interactions.create was called with dual reference images for Turn 2
+    _, last_call_kwargs = mock_client.interactions.create.call_args
+    api_input = last_call_kwargs.get("input", [])
+    assert isinstance(api_input, list)
+    image_inputs = [item for item in api_input if isinstance(item, dict) and item.get("type") == "image"]
+    # 1 root image + 1 parent image + 1 garment crop = 3 image references
+    assert len(image_inputs) == 3
+
