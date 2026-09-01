@@ -30,23 +30,45 @@ def test_image_proxy_serves_local_file(tmp_path):
     app.dependency_overrides.clear()
 
 
-def test_image_proxy_redirect_to_signed_url_in_production(monkeypatch):
+def test_image_proxy_serves_cloud_storage_in_production(monkeypatch):
     settings = get_settings()
     monkeypatch.setattr(settings, "ENVIRONMENT", "production")
 
     fake_bucket = MagicMock()
     fake_blob = MagicMock()
-    signed_url = "https://storage.googleapis.com/test-bucket/prod_user/generations/cloud_img.png?signature=xyz"
-    fake_blob.generate_signed_url.return_value = signed_url
+    fake_blob.exists.return_value = True
+    fake_blob.download_as_bytes.return_value = b"\x89PNG\r\n\x1a\nfake_cloud_png"
     fake_bucket.blob.return_value = fake_blob
     storage_service = StorageService(bucket=fake_bucket, environment="production", storage_dir="/tmp/nonexistent")
 
     app.dependency_overrides[get_storage_service] = lambda: storage_service
     client = TestClient(app)
 
-    # In production, when file is not on local disk, it redirects with 307 to signed GCS URL
-    res = client.get("/api/images/prod_user/generations/cloud_img.png", follow_redirects=False)
-    assert res.status_code == 307
-    assert res.headers["Location"] == signed_url
+    # In production, serves bytes directly from Cloud Storage
+    res = client.get("/api/images/prod_user/generations/cloud_img.png")
+    assert res.status_code == 200
+    assert res.content == b"\x89PNG\r\n\x1a\nfake_cloud_png"
+    assert res.headers["content-type"] == "image/png"
+    assert "public, max-age=" in res.headers.get("cache-control", "")
+
+    app.dependency_overrides.clear()
+
+
+def test_image_proxy_returns_404_when_cloud_blob_not_found(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+
+    fake_bucket = MagicMock()
+    fake_blob = MagicMock()
+    fake_blob.exists.return_value = False
+    fake_bucket.blob.return_value = fake_blob
+    storage_service = StorageService(bucket=fake_bucket, environment="production", storage_dir="/tmp/nonexistent")
+
+    app.dependency_overrides[get_storage_service] = lambda: storage_service
+    client = TestClient(app)
+
+    res = client.get("/api/images/prod_user/generations/missing.png")
+    assert res.status_code == 404
+    assert "Image not found on cloud storage" in res.json()["detail"]
 
     app.dependency_overrides.clear()

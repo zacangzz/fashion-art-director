@@ -112,14 +112,12 @@ class StorageService:
             return blob.download_as_bytes()
 
     def get_signed_download_url(self, storage_path: str, expiration_minutes: int = 60) -> str:
-        if self.is_local or self.bucket is None:
-            return f"/api/images/{storage_path.lstrip('/')}"
-        blob = self.bucket.blob(storage_path)
-        return blob.generate_signed_url(
-            version="v4",
-            expiration=timedelta(minutes=expiration_minutes),
-            method="GET",
-        )
+        """
+        Returns the unified delivery URL path for an image.
+        In both local and hosted environments, images are served via `/api/images/{storage_path}`.
+        """
+        clean_path = storage_path.lstrip("/")
+        return f"/api/images/{clean_path}"
 
     def delete_file(self, storage_path: str) -> bool:
         if self.is_local:

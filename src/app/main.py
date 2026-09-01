@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse, Response
 
 from app.config import get_settings
 from app.firebase_init import initialize_firebase
@@ -144,14 +144,25 @@ def serve_image(
             detail=f"Image not found locally at '{file_path}'.",
         )
 
-    # Hosted GCP Production: redirect to signed GCS URL
+    # Hosted GCP Production: directly download and serve image bytes from Cloud Storage
     try:
-        signed_url = storage_service.get_signed_download_url(file_path)
-        return RedirectResponse(url=signed_url, status_code=307)
-    except Exception as exc:
+        data = storage_service.download_bytes(file_path)
+        content_type, _ = mimetypes.guess_type(file_path)
+        return Response(
+            content=data,
+            media_type=content_type or "image/png",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+    except FileNotFoundError:
         raise HTTPException(
             status_code=404,
-            detail=f"Image not found on cloud storage at '{file_path}': {exc}",
+            detail=f"Image not found on cloud storage at '{file_path}'.",
+        )
+    except Exception as exc:
+        logger.error(f"Error serving cloud image '{file_path}': {exc}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error serving cloud image at '{file_path}': {exc}",
         )
 
 

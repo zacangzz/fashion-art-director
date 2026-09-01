@@ -89,13 +89,25 @@
 
 ---
 
+### 7. Cloud Storage Image Delivery on Cloud Run (Signed URLs vs. Direct Streaming)
+* **The Pitfall**: Calling `blob.generate_signed_url(version="v4")` from Cloud Run with default Compute Engine service account credentials fails with:
+  ```
+  you need a private key to sign credentials. the credentials you are currently using <class 'google.auth.compute_engine.credentials.Credentials'> just contains a token.
+  ```
+* **Root Cause**: Compute Engine metadata credentials injected on Cloud Run are token-only and do not possess an RSA private key for local V4 signature generation.
+* **The Solution**: Have the FastAPI image delivery endpoint (`/api/images/{file_path:path}`) directly download and serve bytes from the Cloud Storage bucket (`blob.download_as_bytes()`) with HTTP caching headers (`Cache-Control: public, max-age=86400`).
+* **Benefits**:
+  * Works natively with the service account's `roles/storage.objectAdmin` role without requiring private key management or IAM signBlob RPCs.
+  * Eliminates 307 redirect roundtrips and avoids broken image states from expired signed URLs.
+  * Enables clean, consistent browser/CDN caching against `/api/images/...`.
+
+---
+
 ## Frontend & Styling Architecture
 
-### 7. Global CSS Consolidation & Component Class Preservation
+### 8. Global CSS Consolidation & Component Class Preservation
 * **The Pitfall**: In large frontend refactorings, replacing a monolithic stylesheet (e.g., `index.css`) with a concise set of generic design-token classes without simultaneously rewriting the JSX class names in every component strips all component-specific CSS selectors (`.ratio-btn`, `.category-card`, `.tag-chip`, `.prompt-review-card`, `.lever-item`, etc.).
 * **Visual Symptom**: The app renders as raw unstyled HTML with broken grids, lost card backdrops, and unformatted controls.
 * **Best Practice**:
   * **Additive Extension First**: Introduce new atomic UI primitive classes (`.btn-primitive`, `.modal-*`, `.badge-*`, `.card-*`) alongside existing component styles.
   * **Component-by-Component Migration**: Migrate JSX components to use shared UI primitives in synchronized passes, only pruning legacy classes once zero JSX files reference them.
-
-
