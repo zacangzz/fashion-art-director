@@ -27,7 +27,7 @@ def get_db_manager() -> FirestoreManager:
 def get_storage_service() -> StorageService:
     settings = get_settings()
     bucket = get_storage_bucket(settings.GCS_BUCKET)
-    return StorageService(bucket=bucket, environment=settings.ENVIRONMENT)
+    return StorageService(bucket=bucket, environment=settings.ENVIRONMENT, storage_dir=settings.STORAGE_DIR)
 
 
 @lru_cache()

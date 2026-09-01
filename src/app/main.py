@@ -1,5 +1,6 @@
 import os
 import time
+import mimetypes
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -129,29 +130,27 @@ def serve_image(
 ):
     """
     Edge image delivery route:
-    1. Returns local disk file if present (local dev / cache).
-    2. Otherwise redirects via HTTP 307 to a signed GCS download URL.
+    - Local Dev (ENVIRONMENT=local): Streams the image file from local disk.
+    - Hosted Production (Cloud Run / GCP): Redirects (307) to the signed GCS download URL.
     """
-    # Check local filesystem first
-    if os.path.exists(file_path):
-        return FileResponse(file_path)
-    
-    local_storage_candidate = os.path.join(settings.STORAGE_DIR, file_path)
-    if os.path.exists(local_storage_candidate):
-        return FileResponse(local_storage_candidate)
+    if storage_service.is_local:
+        local_path = storage_service.get_local_file_path(file_path)
+        if os.path.exists(local_path):
+            content_type, _ = mimetypes.guess_type(local_path)
+            return FileResponse(local_path, media_type=content_type or "image/png")
+        raise HTTPException(
+            status_code=404,
+            detail=f"Image not found locally at '{file_path}'.",
+        )
 
-    local_gen_candidate = os.path.join(settings.STORAGE_DIR, "generations", file_path)
-    if os.path.exists(local_gen_candidate):
-        return FileResponse(local_gen_candidate)
-
-    # Resolve Cloud Storage signed URL
+    # Hosted GCP Production: redirect to signed GCS URL
     try:
         signed_url = storage_service.get_signed_download_url(file_path)
         return RedirectResponse(url=signed_url, status_code=307)
     except Exception as exc:
         raise HTTPException(
             status_code=404,
-            detail=f"Image not found at path '{file_path}': {exc}",
+            detail=f"Image not found on cloud storage at '{file_path}': {exc}",
         )
 
 

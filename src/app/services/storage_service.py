@@ -1,3 +1,4 @@
+import os
 import io
 import mimetypes
 from datetime import timedelta
@@ -10,12 +11,33 @@ logger = get_logger("storage_service")
 
 class StorageService:
     """
-    Unified synchronous Cloud Storage service for uploading, downloading,
-    and generating signed edge delivery URLs for all studio media assets.
+    Unified Storage abstraction for local filesystem and Google Cloud Storage.
+    Encapsulates environment-specific drivers (Local Disk vs GCS) behind a single,
+    consistent `{user_id}/{category}/{filename}` path structure.
     """
-    def __init__(self, bucket: Any, environment: str = "local"):
+    def __init__(
+        self,
+        bucket: Any = None,
+        environment: str = "local",
+        storage_dir: str = "./storage",
+    ):
         self.bucket = bucket
         self.environment = environment
+        self.storage_dir = storage_dir
+        self.is_local = (self.environment == "local")
+        if self.is_local:
+            os.makedirs(self.storage_dir, exist_ok=True)
+
+    def _get_storage_path(self, user_id: str, category: str, filename: str) -> str:
+        clean_cat = category.strip("/")
+        clean_fn = filename.lstrip("/")
+        return f"{user_id}/{clean_cat}/{clean_fn}"
+
+    def get_local_file_path(self, relative_path: str) -> str:
+        """Returns the absolute or storage_dir-relative local filesystem path."""
+        if os.path.isabs(relative_path):
+            return relative_path
+        return os.path.join(self.storage_dir, relative_path.lstrip("/"))
 
     def upload_bytes(
         self,
@@ -25,18 +47,28 @@ class StorageService:
         data: bytes,
         content_type: Optional[str] = None,
     ) -> str:
-        clean_cat = category.strip("/")
-        clean_fn = filename.lstrip("/")
-        gcs_path = f"{user_id}/{clean_cat}/{clean_fn}"
+        storage_path = self._get_storage_path(user_id, category, filename)
 
         if not content_type:
             content_type, _ = mimetypes.guess_type(filename)
             content_type = content_type or "image/png"
 
-        blob = self.bucket.blob(gcs_path)
-        blob.upload_from_string(data, content_type=content_type)
-        logger.info(f"Uploaded {len(data)} bytes to gs://{getattr(self.bucket, 'name', 'bucket')}/{gcs_path} ({content_type})")
-        return gcs_path
+        if self.is_local:
+            # Local Dev: Write directly to ./storage/{user_id}/{category}/{filename}
+            local_full_path = self.get_local_file_path(storage_path)
+            os.makedirs(os.path.dirname(local_full_path), exist_ok=True)
+            with open(local_full_path, "wb") as f:
+                f.write(data)
+            logger.info(f"Saved {len(data)} bytes to local disk: {local_full_path}")
+        else:
+            # Hosted GCP: Upload to Cloud Storage bucket blob
+            if self.bucket is None:
+                raise RuntimeError("Cloud Storage bucket is not configured for hosted environment.")
+            blob = self.bucket.blob(storage_path)
+            blob.upload_from_string(data, content_type=content_type)
+            logger.info(f"Uploaded {len(data)} bytes to gs://{getattr(self.bucket, 'name', 'bucket')}/{storage_path}")
+
+        return storage_path
 
     def upload_pil_image(
         self,
@@ -57,24 +89,50 @@ class StorageService:
             content_type=f"image/{format.lower()}",
         )
 
-    def download_bytes(self, gcs_path: str) -> bytes:
-        blob = self.bucket.blob(gcs_path)
-        if not blob.exists():
-            raise FileNotFoundError(f"Blob gs://{getattr(self.bucket, 'name', 'bucket')}/{gcs_path} does not exist.")
-        return blob.download_as_bytes()
+    def download_bytes(self, storage_path: str) -> bytes:
+        if os.path.isabs(storage_path) and os.path.exists(storage_path):
+            with open(storage_path, "rb") as f:
+                return f.read()
 
-    def get_signed_download_url(self, gcs_path: str, expiration_minutes: int = 60) -> str:
-        blob = self.bucket.blob(gcs_path)
+        if self.is_local:
+            local_full_path = self.get_local_file_path(storage_path)
+            if not os.path.exists(local_full_path):
+                if os.path.exists(storage_path):
+                    with open(storage_path, "rb") as f:
+                        return f.read()
+                raise FileNotFoundError(f"File not found in local storage: {local_full_path}")
+            with open(local_full_path, "rb") as f:
+                return f.read()
+        else:
+            if self.bucket is None:
+                raise RuntimeError("Cloud Storage bucket is not configured for hosted environment.")
+            blob = self.bucket.blob(storage_path)
+            if not blob.exists():
+                raise FileNotFoundError(f"Blob gs://{getattr(self.bucket, 'name', 'bucket')}/{storage_path} does not exist.")
+            return blob.download_as_bytes()
+
+    def get_signed_download_url(self, storage_path: str, expiration_minutes: int = 60) -> str:
+        if self.is_local or self.bucket is None:
+            return f"/api/images/{storage_path.lstrip('/')}"
+        blob = self.bucket.blob(storage_path)
         return blob.generate_signed_url(
             version="v4",
             expiration=timedelta(minutes=expiration_minutes),
             method="GET",
         )
 
-    def delete_file(self, gcs_path: str) -> bool:
-        blob = self.bucket.blob(gcs_path)
-        if blob.exists():
-            blob.delete()
-            logger.info(f"Deleted gs://{getattr(self.bucket, 'name', 'bucket')}/{gcs_path}")
-            return True
-        return False
+    def delete_file(self, storage_path: str) -> bool:
+        if self.is_local:
+            local_full_path = self.get_local_file_path(storage_path)
+            if os.path.exists(local_full_path):
+                os.remove(local_full_path)
+                return True
+            return False
+        else:
+            if self.bucket is None:
+                return False
+            blob = self.bucket.blob(storage_path)
+            if blob.exists():
+                blob.delete()
+                return True
+            return False

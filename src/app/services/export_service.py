@@ -57,11 +57,11 @@ class ExportService:
     ):
         self._db = db_manager
         self.db = db_manager
-        self.storage_service = storage_service
+        self.storage_dir = storage_dir or "./storage"
+        self.storage_service = storage_service or StorageService(storage_dir=self.storage_dir, environment="local")
         self.image_generator = image_generator
         if self.image_generator is None and generation_service is not None:
             self.image_generator = getattr(generation_service, "image_generator", None) or generation_service
-        self.storage_dir = storage_dir or "./storage"
         self.telemetry = TelemetryLogger(
             component="export_service",
         )
@@ -87,14 +87,7 @@ class ExportService:
             logger.warning(f"Could not write export audit event: {err}")
 
     def _load_image_bytes(self, image_path: str) -> bytes:
-        if self.storage_service is not None and not os.path.exists(image_path):
-            return self.storage_service.download_bytes(image_path)
-        if os.path.exists(image_path):
-            with open(image_path, "rb") as f:
-                return f.read()
-        if self.storage_service is not None:
-            return self.storage_service.download_bytes(image_path)
-        raise FileNotFoundError(f"Image not found at {image_path}")
+        return self.storage_service.download_bytes(image_path)
 
     def prepare_export_master(
         self,
@@ -104,7 +97,7 @@ class ExportService:
     ) -> Dict[str, Any]:
         """
         Sends the chosen generation image to Gemini with an image restoration and upscale prompt,
-        saves the high-quality 4K master file in Cloud Storage, and links the new generation record.
+        saves the high-quality 4K master file via StorageService, and links the new generation record.
         """
         audit_request_id = f"req_export_{uuid.uuid4().hex[:8]}"
         self._audit("export_prepare_started", audit_request_id, source_generation_id=generation_id)
@@ -139,20 +132,13 @@ class ExportService:
         pil_img = Image.open(io.BytesIO(upscaled_bytes))
         width, height = pil_img.size
 
-        if self.storage_service is not None:
-            export_storage_path = self.storage_service.upload_bytes(
-                user_id=user_id,
-                category="generations",
-                filename=filename,
-                data=upscaled_bytes,
-                content_type="image/png",
-            )
-        else:
-            export_path = os.path.join(self.storage_dir, "generations", filename)
-            os.makedirs(os.path.dirname(export_path), exist_ok=True)
-            with open(export_path, "wb") as f:
-                f.write(upscaled_bytes)
-            export_storage_path = export_path
+        export_storage_path = self.storage_service.upload_bytes(
+            user_id=user_id,
+            category="generations",
+            filename=filename,
+            data=upscaled_bytes,
+            content_type="image/png",
+        )
 
         metrics = self.image_generator.last_call_metrics or {}
         call_cost = float(metrics.get("cost_usd", 0.04))

@@ -173,3 +173,45 @@ def test_tables_summary_and_pagination(db_manager):
     p2 = db_manager.get_table_records("generations", limit=10, start_after_id=p1["next_cursor"])
     assert len(p2["rows"]) == 5
     assert p2["next_cursor"] is None
+
+
+def test_firestore_pydantic_serialization(db_manager):
+    from app.schemas.domain import TagChip, PromptConflict
+
+    chip = TagChip(
+        id="tag_camera_optics_9eafce",
+        category="camera_optics",
+        label="28mm wide-angle lens",
+        enabled=True,
+        locked=False,
+        isCustom=False,
+    )
+    conflict = PromptConflict(
+        id="conf_1",
+        severity="warning",
+        conflicting_elements=["28mm wide-angle lens", "50mm telephoto"],
+        categories=["camera_optics"],
+        explanation="Lens focal length mismatch",
+        recommendation="Pick one focal length",
+    )
+
+    gen = db_manager.create_generation(
+        "user_pydantic",
+        {
+            "id": "gen_pydantic_1",
+            "seed": 999,
+            "master_image_path": "path.png",
+            "schema_json": {
+                "categories": {
+                    "camera_optics": [chip],
+                },
+                "conflicts": [conflict],
+            },
+        },
+    )
+    assert gen["id"] == "gen_pydantic_1"
+    fetched = db_manager.get_generation("gen_pydantic_1")
+    assert fetched is not None
+    assert fetched["schema_json"]["categories"]["camera_optics"][0]["label"] == "28mm wide-angle lens"
+    assert fetched["schema_json"]["conflicts"][0]["explanation"] == "Lens focal length mismatch"
+

@@ -28,6 +28,22 @@ class FirestoreManager:
     def _now_iso(self) -> str:
         return datetime.now(timezone.utc).isoformat()
 
+    @staticmethod
+    def _to_firestore_safe(obj: Any) -> Any:
+        """Recursively convert Pydantic models and other non-native types to Firestore-safe primitives."""
+        if hasattr(obj, "model_dump"):
+            return FirestoreManager._to_firestore_safe(obj.model_dump())
+        if hasattr(obj, "dict") and not isinstance(obj, dict):
+            return FirestoreManager._to_firestore_safe(obj.dict())
+        if isinstance(obj, dict):
+            return {k: FirestoreManager._to_firestore_safe(v) for k, v in obj.items()}
+        if isinstance(obj, (list, tuple)):
+            return [FirestoreManager._to_firestore_safe(item) for item in obj]
+        if isinstance(obj, (str, int, float, bool, type(None))):
+            return obj
+        # Fallback: try converting to string
+        return str(obj)
+
     # -------------------------------------------------------------------------
     # 1. MOODBOARDS
     # -------------------------------------------------------------------------
@@ -117,10 +133,7 @@ class FirestoreManager:
                     accum_tokens += int(parent.get("accumulated_tokens") or parent.get("tokens", 0))
 
         schema_val = gen_data.get("schema_json") or gen_data.get("tags_snapshot") or {}
-        if hasattr(schema_val, "model_dump"):
-            schema_val = schema_val.model_dump()
-        elif hasattr(schema_val, "dict"):
-            schema_val = schema_val.dict()
+        schema_val = self._to_firestore_safe(schema_val)
 
         compiled_prompt = gen_data.get("compiled_prompt") or gen_data.get("prompt", "")
         model_name = gen_data.get("model_name")
@@ -299,8 +312,8 @@ class FirestoreManager:
             "upscaled_image_path": item_data.get("upscaled_image_path"),
             "upscale_status": item_data.get("upscale_status", "pending"),
             "upscale_error": item_data.get("upscale_error"),
-            "bbox_json": bbox,
-            "extracted_details_json": details,
+            "bbox_json": self._to_firestore_safe(bbox),
+            "extracted_details_json": self._to_firestore_safe(details),
             "cost_usd": float(item_data.get("cost_usd") or 0.0),
             "tokens": int(item_data.get("tokens") or 0),
             "created_at": item_data.get("created_at") or self._now_iso(),
@@ -321,7 +334,7 @@ class FirestoreManager:
         if not doc.exists or doc.to_dict().get("deleted_at") is not None:
             return False
 
-        update_data: Dict[str, Any] = {"extracted_details_json": extracted_details}
+        update_data: Dict[str, Any] = {"extracted_details_json": self._to_firestore_safe(extracted_details)}
         if cost_usd is not None and cost_usd > 0:
             update_data["cost_usd"] = Increment(cost_usd)
         if tokens is not None and tokens > 0:
@@ -437,9 +450,9 @@ class FirestoreManager:
             "generation_id": assignment_data["generation_id"],
             "wardrobe_item_id": assignment_data["wardrobe_item_id"],
             "pin_number": int(assignment_data["pin_number"]),
-            "drop_position_json": assignment_data.get("drop_position") or assignment_data.get("drop_position_json"),
+            "drop_position_json": self._to_firestore_safe(assignment_data.get("drop_position") or assignment_data.get("drop_position_json")),
             "target_description": assignment_data.get("target_description"),
-            "region_bbox_json": assignment_data.get("region_bbox") or assignment_data.get("region_bbox_json"),
+            "region_bbox_json": self._to_firestore_safe(assignment_data.get("region_bbox") or assignment_data.get("region_bbox_json")),
             "created_at": assignment_data.get("created_at") or self._now_iso(),
         }
         self.db.collection("composition_assignments").document(assign_id).set(doc_data)

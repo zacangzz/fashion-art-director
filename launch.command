@@ -19,9 +19,14 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$DIR"
 
 echo -e "\n${BOLD}${MAGENTA}================================================================${RESET}"
-echo -e "${BOLD}${CYAN}   🚀 IMAGE GEN PIPELINE STUDIO — DESKTOP LAUNCHER${RESET}"
-echo -e "${DIM}   Structured Tag Studio, Canvas Inpaint & Multimodal Generation${RESET}"
+echo -e "${BOLD}${CYAN}   🚀 FASHION AI STUDIO — LOCAL DEV LAUNCHER${RESET}"
+echo -e "${DIM}   Fully Local Dev Mode | Local Storage (./storage) | Zero-Config${RESET}"
 echo -e "${BOLD}${MAGENTA}================================================================${RESET}\n"
+
+# Enforce local development environment variables
+export ENVIRONMENT="local"
+export STORAGE_DIR="./storage"
+export DEBUG="True"
 
 # Helper for step status
 print_step() {
@@ -204,8 +209,10 @@ GEMINI_API_KEY=your_google_ai_studio_api_key_here
 PORT=7860
 HOST=127.0.0.1
 DEBUG=True
-DATABASE_URL=sqlite:///./storage/studio.db
+ENVIRONMENT=local
 STORAGE_DIR=./storage
+GCP_PROJECT_ID=ai-art-director-prod
+GCS_BUCKET=ai-art-director-prod-store
 VISION_MODEL=gemini-3.5-flash-lite
 IMAGEN_MODEL=gemini-3-pro-image
 INPAINT_MODEL=gemini-3-pro-image
@@ -221,7 +228,9 @@ set +a
 
 PORT="${PORT:-7860}"
 HOST="${HOST:-127.0.0.1}"
-DATABASE_URL="${DATABASE_URL:-sqlite:///./storage/studio.db}"
+GCP_PROJECT_ID="${GCP_PROJECT_ID:-ai-art-director-prod}"
+GCS_BUCKET="${GCS_BUCKET:-ai-art-director-prod-store}"
+ENVIRONMENT="${ENVIRONMENT:-local}"
 VISION_MODEL="${VISION_MODEL:-gemini-3.5-flash-lite}"
 IMAGEN_MODEL="${IMAGEN_MODEL:-gemini-3-pro-image}"
 INPAINT_MODEL="${INPAINT_MODEL:-gemini-3-pro-image}"
@@ -265,7 +274,19 @@ if [ -n "$GEMINI_KEY_CLEAN" ] && [ "$GEMINI_KEY_CLEAN" != "your_google_ai_studio
     print_success "GEMINI_API_KEY configured (${KEY_PREVIEW})"
 fi
 
-print_info "Database:       ${BOLD}${DATABASE_URL}${RESET}"
+# Firestore connection mode (Local Emulator vs Cloud Firestore)
+if [ -n "${FIRESTORE_EMULATOR_HOST:-}" ]; then
+    print_info "Firestore:      ${BOLD}Local Emulator (${FIRESTORE_EMULATOR_HOST})${RESET}"
+elif lsof -i tcp:8181 &>/dev/null; then
+    export FIRESTORE_EMULATOR_HOST="127.0.0.1:8181"
+    print_info "Firestore:      ${BOLD}Local Emulator (127.0.0.1:8181)${RESET}"
+else
+    print_info "Firestore:      ${BOLD}Cloud Firestore (${GCP_PROJECT_ID})${RESET}"
+fi
+
+print_info "GCP Project:    ${BOLD}${GCP_PROJECT_ID}${RESET}"
+print_info "GCS Bucket:     ${BOLD}${GCS_BUCKET}${RESET}"
+print_info "Environment:    ${BOLD}${ENVIRONMENT}${RESET}"
 print_info "Vision Model:   ${BOLD}${VISION_MODEL}${RESET}"
 print_info "Imagen Model:   ${BOLD}${IMAGEN_MODEL}${RESET}"
 print_info "Inpaint Model:  ${BOLD}${INPAINT_MODEL}${RESET}"
@@ -314,7 +335,7 @@ print_step "6" "Starting Studio Server & Opening Browser"
 print_info "Starting Uvicorn ASGI server on http://${HOST}:${PORT}..."
 
 # Start uvicorn in background
-uvicorn --app-dir src app.main:app --host "$HOST" --port "$PORT" &
+python -m uvicorn --app-dir src app.main:app --host "$HOST" --port "$PORT" &
 SERVER_PID=$!
 
 # Poll /health endpoint with spinner

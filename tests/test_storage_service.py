@@ -94,8 +94,9 @@ def test_storage_missing_blob_raises_404(storage_service):
         storage_service.download_bytes("nonexistent/path/image.png")
 
 
-def test_storage_signed_url_generation(storage_service):
-    url = storage_service.get_signed_download_url("user_123/generations/test.png", expiration_minutes=60)
+def test_storage_signed_url_generation(fake_bucket):
+    prod_service = StorageService(bucket=fake_bucket, environment="production")
+    url = prod_service.get_signed_download_url("user_123/generations/test.png", expiration_minutes=60)
     assert url.startswith("https://")
     assert "user_123/generations/test.png" in url
 

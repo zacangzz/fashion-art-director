@@ -63,7 +63,7 @@ class GenerationService:
         self.db_manager = db_manager
         self.api_key = api_key
         self.storage_dir = storage_dir or "./storage"
-        self.storage_service = storage_service
+        self.storage_service = storage_service or StorageService(storage_dir=self.storage_dir, environment="local")
         self.model_name = model_name
         self.inpaint_model_name = inpaint_model_name
         self.wardrobe_service = wardrobe_service
@@ -77,9 +77,6 @@ class GenerationService:
             default_model=self.model_name,
             telemetry=self.telemetry,
         )
-
-        self.gen_storage_dir = os.path.join(self.storage_dir, "generations")
-        os.makedirs(self.gen_storage_dir, exist_ok=True)
 
     @property
     def _last_call_metrics(self) -> Dict[str, Any]:
@@ -104,36 +101,22 @@ class GenerationService:
         self, user_id: str, filename: str, image_bytes: bytes, aspect_ratio: str
     ) -> tuple[str, int, int]:
         """
-        Saves generation image to Cloud Storage and/or disk, returns (storage_path, width, height).
+        Saves generation image via StorageService, returns (storage_path, width, height).
         """
         pil_img = Image.open(io.BytesIO(image_bytes))
         width, height = pil_img.size
 
-        if self.storage_service is not None:
-            storage_path = self.storage_service.upload_bytes(
-                user_id=user_id,
-                category="generations",
-                filename=filename,
-                data=image_bytes,
-                content_type="image/png",
-            )
-        else:
-            file_path = os.path.join(self.gen_storage_dir, filename)
-            with open(file_path, "wb") as f:
-                f.write(image_bytes)
-            storage_path = file_path
-
+        storage_path = self.storage_service.upload_bytes(
+            user_id=user_id,
+            category="generations",
+            filename=filename,
+            data=image_bytes,
+            content_type="image/png",
+        )
         return storage_path, width, height
 
     def _load_image_bytes(self, image_path: str) -> bytes:
-        if self.storage_service is not None and not os.path.exists(image_path):
-            return self.storage_service.download_bytes(image_path)
-        if os.path.exists(image_path):
-            with open(image_path, "rb") as f:
-                return f.read()
-        if self.storage_service is not None:
-            return self.storage_service.download_bytes(image_path)
-        raise FileNotFoundError(f"Image not found at {image_path}")
+        return self.storage_service.download_bytes(image_path)
 
     def _call_image_model(
         self,

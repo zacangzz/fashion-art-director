@@ -66,7 +66,7 @@ class WardrobeService:
         self.db_manager = db_manager
         self.api_key = api_key
         self.storage_dir = storage_dir or "./storage"
-        self.storage_service = storage_service
+        self.storage_service = storage_service or StorageService(storage_dir=self.storage_dir, environment="local")
         self.vision_model = vision_model
         self.imagen_model = imagen_model
         self.audit_path = audit_path
@@ -75,11 +75,6 @@ class WardrobeService:
         self.telemetry = telemetry or TelemetryLogger(
             component="wardrobe",
         )
-
-        self.sources_dir = os.path.join(self.storage_dir, "wardrobe", "sources")
-        self.items_dir = os.path.join(self.storage_dir, "wardrobe", "items")
-        os.makedirs(self.sources_dir, exist_ok=True)
-        os.makedirs(self.items_dir, exist_ok=True)
 
     def _audit(self, event_type: str, request_id: str, **kwargs):
         try:
@@ -273,19 +268,12 @@ class WardrobeService:
 
         safe_ext = os.path.splitext(original_filename)[1] or ".png"
         source_filename = f"{sheet_id}_source{safe_ext}"
-
-        if self.storage_service is not None:
-            source_storage_path = self.storage_service.upload_bytes(
-                user_id=user_id,
-                category="wardrobe/sources",
-                filename=source_filename,
-                data=image_bytes,
-            )
-        else:
-            source_filepath = os.path.join(self.sources_dir, source_filename)
-            with open(source_filepath, "wb") as f:
-                f.write(image_bytes)
-            source_storage_path = source_filepath
+        source_storage_path = self.storage_service.upload_bytes(
+            user_id=user_id,
+            category="wardrobe/sources",
+            filename=source_filename,
+            data=image_bytes,
+        )
 
         image_part = to_image_part(image_bytes)
         contents = [image_part, WARDROBE_SEGMENTATION_PROMPT]
@@ -364,18 +352,12 @@ class WardrobeService:
             crop_bytes = crop_buf.getvalue()
 
             crop_filename = f"{item_id}_cropped.png"
-            if self.storage_service is not None:
-                crop_storage_path = self.storage_service.upload_bytes(
-                    user_id=user_id,
-                    category="wardrobe/items",
-                    filename=crop_filename,
-                    data=crop_bytes,
-                )
-            else:
-                crop_filepath = os.path.join(self.items_dir, crop_filename)
-                with open(crop_filepath, "wb") as f:
-                    f.write(crop_bytes)
-                crop_storage_path = crop_filepath
+            crop_storage_path = self.storage_service.upload_bytes(
+                user_id=user_id,
+                category="wardrobe/items",
+                filename=crop_filename,
+                data=crop_bytes,
+            )
 
             # Extract detailed features
             details = self.extract_garment_features(
@@ -428,18 +410,7 @@ class WardrobeService:
         if not crop_path:
             raise ValueError(f"Wardrobe item '{item_id}' has no cropped image path")
 
-        if self.storage_service is not None and not os.path.exists(crop_path):
-            crop_bytes = self.storage_service.download_bytes(crop_path)
-        else:
-            if not os.path.exists(crop_path):
-                # Try downloading via storage_service if possible
-                if self.storage_service is not None:
-                    crop_bytes = self.storage_service.download_bytes(crop_path)
-                else:
-                    raise FileNotFoundError(f"Crop file not found at: {crop_path}")
-            else:
-                with open(crop_path, "rb") as f:
-                    crop_bytes = f.read()
+        crop_bytes = self.storage_service.download_bytes(crop_path)
 
         label = item.get("label", "Garment")
         category = item.get("category", "tops")
@@ -478,18 +449,12 @@ class WardrobeService:
             )
 
             upscale_filename = f"{item_id}_upscaled.png"
-            if self.storage_service is not None:
-                upscaled_storage_path = self.storage_service.upload_bytes(
-                    user_id=user_id,
-                    category="wardrobe/items",
-                    filename=upscale_filename,
-                    data=upscaled_bytes,
-                )
-            else:
-                upscaled_filepath = os.path.join(self.items_dir, upscale_filename)
-                with open(upscaled_filepath, "wb") as f:
-                    f.write(upscaled_bytes)
-                upscaled_storage_path = upscaled_filepath
+            upscaled_storage_path = self.storage_service.upload_bytes(
+                user_id=user_id,
+                category="wardrobe/items",
+                filename=upscale_filename,
+                data=upscaled_bytes,
+            )
 
             metrics = generator.last_call_metrics or {}
             upscale_cost = float(metrics.get("cost_usd", 0.04))
@@ -588,17 +553,9 @@ class WardrobeService:
 
         # Load master image
         img_path = gen.get("master_image_path")
-        if self.storage_service is not None and not os.path.exists(img_path):
-            img_bytes = self.storage_service.download_bytes(img_path)
-        else:
-            if not os.path.exists(img_path):
-                if self.storage_service is not None:
-                    img_bytes = self.storage_service.download_bytes(img_path)
-                else:
-                    raise FileNotFoundError(f"Master image not found: {img_path}")
-            else:
-                with open(img_path, "rb") as f:
-                    img_bytes = f.read()
+        if not img_path:
+            raise ValueError(f"Generation '{generation_id}' has no master image path")
+        img_bytes = self.storage_service.download_bytes(img_path)
 
         # Detect regions if pins lack explicit bounding box
         detected_regions = self.detect_clothing_regions(img_bytes, vision_model=active_model)

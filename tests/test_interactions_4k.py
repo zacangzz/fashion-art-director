@@ -50,7 +50,7 @@ def test_save_generation_image(tmp_path):
 
     storage_path, w, h = service._save_generation_image("local_dev_user", "out_master.png", raw_bytes, "16:9")
     assert (w, h) == (3840, 2160)
-    assert os.path.exists(storage_path)
+    assert os.path.exists(service.storage_service.get_local_file_path(storage_path))
 
 
 def test_image_generator_generate(tmp_path):

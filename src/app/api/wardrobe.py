@@ -214,11 +214,7 @@ def detect_clothing_regions(
                 detail=f"Generation '{request.generation_id}' not found.",
             )
         img_path = gen["master_image_path"]
-        if os.path.exists(img_path):
-            with open(img_path, "rb") as f:
-                img_bytes = f.read()
-        else:
-            img_bytes = storage_service.download_bytes(img_path)
+        img_bytes = storage_service.download_bytes(img_path)
 
         regions = wardrobe_service.detect_clothing_regions(
             img_bytes,
