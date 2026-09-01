@@ -1,26 +1,40 @@
-# Image Gen Pipeline Studio
+# Fashion AI Studio (Image Gen Pipeline)
 
-> **Creative & Fashion AI Studio** — A self-contained local studio that transforms moodboard imagery and creative intent into reproducible, deterministic, and fine-grain controllable image generation workflows powered by Google GenAI multimodal models.
+> **Creative & Fashion AI Studio** — An enterprise-grade, deterministic creative studio and image generation pipeline that transforms moodboard imagery and artistic intent into reproducible, high-fidelity visual assets powered by Google GenAI multimodal models (`gemini-3.5-flash-lite`, `gemini-3.7-flash`, `gemini-3.1-flash-image`, `gemini-3-pro-image`).
 
 ---
 
-## Key Capabilities
+## 🌐 Live Production Deployment
+
+| Service | Endpoint URL | Description |
+|---|---|---|
+| **Production Web App** | [https://ai-art-director-prod.web.app](https://ai-art-director-prod.web.app) | Global Firebase Hosting CDN + Edge Routing |
+| **Cloud Run Backend** | [https://fashion-art-director-1012864945903.asia-southeast1.run.app](https://fashion-art-director-1012864945903.asia-southeast1.run.app) | Auto-scaling FastAPI container service (`asia-southeast1`) |
+| **Studio Observability** | [https://ai-art-director-prod.web.app/observability](https://ai-art-director-prod.web.app/observability) | Real-time audit logs, telemetry, cost tracking & DB explorer |
+| **API Health Check** | [https://ai-art-director-prod.web.app/health](https://ai-art-director-prod.web.app/health) | Live service health check (`200 OK`) |
+
+---
+
+## 🚀 Key Capabilities
 
 1. **5-Step Sequential Creative Workflow**:
-   - **Step 1: Art Direction**: Upload 1–5 moodboard references + creative prompt to synthesize an optimal 4-phase Master Prompt, 9-category visual levers, and 4 concurrent baseline candidate seeds (or skip via Direct Photo Ingestion).
+   - **Step 1: Art Direction**: Upload 1–5 moodboard references + prompt to synthesize a 4-phase Master Prompt, 9-category visual levers, and 4 concurrent baseline candidate seeds (or skip via Direct Photo Ingestion).
    - **Step 2: Refinement**: Conversational natural-language chat studio with reference image conditioning, seed-locking, and interactive thread history timeline.
    - **Step 3: Canvas Studio**: Surgical spatial inpainting with full-canvas brush masking (`#FFFFFF` edit / `#000000` preserve), undo/redo stack, and boundary-preserving diffusion.
    - **Step 4: Wardrobe Studio**: Lookbook/sheet auto-detection and segmentation into categorized garment cards, interactive numbered pin-dropping (①, ②, ③) on subjects, and simultaneous multi-image composition.
    - **Step 5: Export Studio**: Lossless PNG / quality JPEG downloads, AI neural 4K master restoration & upscale, and 1-click 5-ratio production ZIP bundle (`4:5`, `9:16`, `1.85:1`, `1:1`, `1.8:1`) with JSON lineage metadata.
 
-2. **Chroma & Color Constancy Architecture**:
-   - Multi-turn reference conditioning encoded in lossless PNG/WebP with ICC profile preservation to eliminate $\text{YUV 4:2:0}$ chroma subsampling degradation and color drift across iterations.
+2. **Cloud-Native & Hybrid Architecture**:
+   - **Google Cloud Storage (GCS)**: Scalable binary asset storage (`gs://ai-art-director-prod-store`) with automated CORS and secure HTTP 307 signed URL streaming.
+   - **Cloud Firestore**: Serverless, multi-tenant NoSQL persistence across 7 flat collections with atomic batch writes and pre-computed lineage cost aggregation.
+   - **Firebase Authentication**: Seamless Google OAuth and Email/Password authentication with automatic JWT Bearer token propagation.
+   - **Secret Manager**: Secure API key management (`GEMINI_API_KEY`) accessed directly by Cloud Run runtime service accounts.
 
-3. **Observability & Telemetry Subsystem**:
-   - Built-in Observability Dashboard (`/telemetry` & `/observability`) with real-time audit logs, request lifecycle tracing (`req_...`), latency metrics, token/cost engine, and raw SQLite table inspector.
+3. **Color Constancy & Chroma Preservation**:
+   - Conditioning reference images are passed using lossless PNG/WebP with full ICC profile preservation to eliminate $\text{YUV 4:2:0}$ chroma degradation across iterative refinement turns.
 
-4. **100% Local Data Sovereignty**:
-   - All database records (`storage/studio.db`), generated images (`storage/generations/`), wardrobe pieces (`storage/wardrobe/`), and audit trails (`storage/logs/`) reside locally on your machine.
+4. **Automated CI/CD Pipeline (Keyless WIF)**:
+   - Automated testing (Pytest + Vitest) and continuous deployment to Cloud Run & Firebase Hosting via GitHub Actions and **Workload Identity Federation (WIF)**.
 
 ---
 
@@ -50,32 +64,18 @@
 
 ---
 
-## Prerequisites
+## 🛠️ Local Development Setup
+
+### Prerequisites
 
 - **Python 3.10+** (managed via [`uv`](https://docs.astral.sh/uv/))
-- **Node.js 18+** and `npm`
+- **Node.js 20+** and `npm`
 - **Google AI Studio API Key** ([Get a key here](https://aistudio.google.com/app/apikey))
 
----
-
-## How to Run the App
-
-### Option A: One-Click Desktop Launcher (macOS)
-
-The repository includes an automated launcher script that verifies dependencies, syncs the Python virtual environment with `uv`, validates your `.env` key, builds frontend assets if needed, frees ports, starts the backend, and opens your browser:
-
-```bash
-./launch.command
-```
-
-*(You can also double-click `launch.command` in macOS Finder).*
-
----
-
-### Option B: Manual Setup & Execution
+### Quickstart
 
 #### 1. Configure Environment Variables
-Create your local `.env` file from the provided template:
+Create your local `.env` file:
 ```bash
 cp .env.example .env
 ```
@@ -85,7 +85,6 @@ GEMINI_API_KEY=your_actual_google_ai_studio_api_key_here
 PORT=7860
 HOST=127.0.0.1
 DEBUG=True
-DATABASE_URL=sqlite:///./storage/studio.db
 STORAGE_DIR=./storage
 VISION_MODEL=gemini-3.5-flash-lite
 IMAGEN_MODEL=gemini-3.1-flash-image
@@ -93,85 +92,81 @@ INPAINT_MODEL=gemini-3-pro-image
 ```
 
 #### 2. Start the Backend API Server
-Use `uv` to synchronize dependencies and start the Uvicorn ASGI server:
 ```bash
-# Synchronize locked dependencies
+# Synchronize Python dependencies with uv
 uv sync
 
-# Activate virtual environment
-source .venv/bin/activate
-
-# Launch FastAPI backend on port 7860
-uvicorn --app-dir src app.main:app --host 127.0.0.1 --port 7860 --reload
+# Launch FastAPI backend with hot reloading
+uv run uvicorn src.app.main:app --host 127.0.0.1 --port 7860 --reload
 ```
 
-#### 3. Launch the Frontend Studio
-
-##### Development Mode (Hot Reloading — Recommended for development):
-In a separate terminal window:
+#### 3. Start the Frontend Development Server
+In a separate terminal:
 ```bash
 cd src/frontend
 npm install
 npm run dev
 ```
-Open your browser to: **`http://localhost:5173`**
-
-##### Production Mode (Served directly by FastAPI backend):
-Build the static bundle once:
-```bash
-cd src/frontend
-npm install
-npm run build
-```
-Open your browser directly to: **`http://localhost:7860`**
+Open **`http://localhost:5173`** in your browser.
 
 ---
 
-## Observability & Telemetry
-
-Open the built-in Observability & Telemetry Dashboard to monitor live operations, audit logs, model costs, and database records:
-- **Dev URL**: `http://localhost:5173/telemetry`
-- **Backend / Production URL**: `http://localhost:7860/telemetry`
-- **Interactive API Documentation (Swagger)**: `http://localhost:7860/docs`
-- **Backend Health Check**: `http://localhost:7860/health`
-
----
-
-## Configuration Reference (`.env`)
-
-| Variable | Default | Description |
-|---|---|---|
-| `GEMINI_API_KEY` | *None* | Google AI Studio API Key (**Required**) |
-| `PORT` | `7860` | Port for the backend FastAPI server |
-| `HOST` | `127.0.0.1` | Host address for binding |
-| `VISION_MODEL` | `gemini-3.5-flash-lite` | Default Vision Director model (`gemini-3.5-flash-lite`, `gemini-3.7-flash`) |
-| `IMAGEN_MODEL` | `gemini-3.1-flash-image` | Default Image Generation model (`gemini-3.1-flash-lite-image`, `gemini-3.1-flash-image`, `gemini-3-pro-image`) |
-| `INPAINT_MODEL` | `gemini-3-pro-image` | Model for Canvas spatial inpainting |
-| `DATABASE_URL` | `sqlite:///./storage/studio.db` | SQLite database URI |
-| `STORAGE_DIR` | `./storage` | Local directory for images, masks, and logs |
-| `GENAI_TIMEOUT_SECONDS` | `300` | Timeout threshold for Google GenAI API calls |
-
----
-
-## Running the Test Suites
+## 🧪 Testing
 
 ### Backend Pytest Suite
-Run the 106+ backend unit and integration tests covering services, database migrations, conflict scans, pricing, and API endpoints:
+Run the 79 backend tests covering services, Firestore management, pricing, and API endpoints:
 ```bash
-.venv/bin/pytest -v
+uv run pytest
 ```
 
 ### Frontend Vitest Suite
-Run the 104+ component and client tests:
+Run the 104 frontend unit and component tests:
 ```bash
 cd src/frontend
-npm test -- --run
+npm test
+```
+
+### Live Resiliency & Load Test
+Run concurrency and latency benchmarks against the deployed production service:
+```bash
+python3 scripts/load_test.py
 ```
 
 ---
 
-## Documentation
+## 🚢 CI/CD & Deployment
 
-- **[Product Requirements Document (PRD)](docs/PRD.md)**: Product vision, user journeys, 5-step workflow, and functional requirements.
-- **[Technical Specifications (SPEC)](docs/SPEC.md)**: System architecture, SQLite schemas, REST API endpoints, multi-turn prompting architecture, wardrobe pin grounding, and observability engine.
-- **[Prompting Architecture & Data Flow](docs/prompting_architecture_and_data_flow_report.md)**: Deep dive into Gemini vision synthesis, prompt compiler, relaxed refinement directives, and spatial inpaint prompt wrappers.
+Deployments are automated through GitHub Actions (`.github/workflows/deploy.yml`) using **Workload Identity Federation**:
+
+1. Pushing to `main` executes unit and integration tests for both backend and frontend.
+2. Once tests pass, the pipeline builds the multi-stage Docker container and deploys it to Cloud Run.
+3. Firebase Hosting rules, indexes, and static assets are updated automatically.
+
+### Manual Deployment via CLI
+
+```bash
+# 1. Deploy Cloud Run Backend
+gcloud run deploy fashion-art-director \
+  --project=ai-art-director-prod \
+  --region=asia-southeast1 \
+  --source=. \
+  --service-account=studio-runner@ai-art-director-prod.iam.gserviceaccount.com \
+  --set-secrets="GEMINI_API_KEY=GEMINI_API_KEY:latest" \
+  --set-env-vars="GCP_PROJECT_ID=ai-art-director-prod,GCS_BUCKET=ai-art-director-prod-store,ENVIRONMENT=production" \
+  --memory=2Gi \
+  --cpu=2 \
+  --timeout=300 \
+  --allow-unauthenticated
+
+# 2. Deploy Firebase Hosting
+cd src/frontend && npm run build && cd ../..
+npx -y firebase-tools deploy --project=ai-art-director-prod --only firestore:rules,firestore:indexes,hosting
+```
+
+---
+
+## 📚 Documentation
+
+- **[Product Requirements Document (PRD)](docs/PRD.md)**: Product vision, user journeys, 5-step workflow, and cloud architecture.
+- **[Technical Specifications (SPEC)](docs/SPEC.md)**: Firestore schemas, REST API endpoints, multi-turn prompting architecture, and WIF CI/CD specification.
+- **[Lessons Learned & API Insights](LESSONS.md)**: Resolution limits, color drift mitigation, structured outputs, and cloud configuration gotchas.

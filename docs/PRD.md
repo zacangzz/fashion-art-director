@@ -1,15 +1,15 @@
 # Product Requirements Document (PRD)
-## Image Gen Pipeline Studio
+## Fashion AI Studio (Image Gen Pipeline)
 
-**Document Version**: 5.0  
-**Status**: Active / 5-Step Production Studio  
-**Last Updated**: 2026-08-31  
+**Document Version**: 6.0  
+**Status**: Active / Production Cloud-Native Studio  
+**Last Updated**: 2026-09-01  
 
 ---
 
 ## 1. Product Overview & Vision
 
-**Image Gen Pipeline Studio** is a self-contained, local creative studio and production pipeline designed for fashion directors, visual artists, and creative teams. It transforms moodboard imagery and creative intent into deterministic, reproducible, and fine-grain controllable image generation workflows using Google GenAI multimodal models.
+**Fashion AI Studio** is an enterprise-grade, deterministic creative studio and production pipeline designed for fashion art directors, visual artists, and creative teams. It transforms moodboard imagery and artistic intent into reproducible, high-fidelity visual assets powered by Google GenAI multimodal models (`gemini-3.5-flash-lite`, `gemini-3.7-flash`, `gemini-3.1-flash-image`, `gemini-3-pro-image`).
 
 The studio operates across a **5-Step Sequential Workflow**:
 
@@ -65,17 +65,28 @@ The studio operates across a **5-Step Sequential Workflow**:
 - **Iterative Edit Degradation**: Chaining edits in typical image generators re-compresses assets with lossy chroma subsampling ($\text{YUV 4:2:0}$), causing chromatic degradation and severe color shifts across iterations.
 - **Unstructured Prompt Drift**: Editing isolated details (e.g., lighting or clothing) often mutates character facial identity, composition, and physical environment unintentionally.
 - **Fragmented Tooling**: Creators waste significant time bouncing between disparate tools for moodboard analysis, prompt engineering, multi-seed exploration, localized inpainting, multi-garment styling, and production ratio export.
+- **Enterprise Collaboration & Scale**: Local-only file storage hinders multi-user creative review, scalable cloud generation, and automated multi-environment delivery.
 
 ### 2.2 Core Value Proposition
-- **5-Step Unified Creative Pipeline**: Smooth transition from Art Direction → Refinement → Canvas → Wardrobe → Export.
-- **Chroma & Color Constancy Preservation**: Lossless PNG/WebP multi-turn conditioning, ICC profile preservation, and white balance locks prevent color drift across iterations.
+- **5-Step Unified Creative Pipeline**: Seamless transition from Art Direction → Refinement → Canvas → Wardrobe → Export.
+- **Chroma & Color Constancy Preservation**: Lossless PNG/WebP multi-turn conditioning, ICC profile preservation, and white balance locks eliminate color drift.
 - **Surgical Spatial Inpainting & Interactive Pinning**: Macro conversational refinement, micro canvas brush masking, and visual garment pin-dropping on subjects.
-- **Local Data Sovereignty & Auditability**: 100% local persistence in SQLite (`storage/studio.db`) and structured JSONL telemetry (`storage/logs/`).
+- **Cloud-Native Scalability & Multi-Tenancy**: Built on Google Cloud Run, Cloud Storage, Cloud Firestore, and Firebase Authentication with secure user data isolation.
+- **Global CDN Edge Delivery**: Firebase Hosting CDN edge routing for ultra-low latency asset delivery and zero-CORS API proxying.
 - **Cost & Token Transparency**: Real-time token and USD cost estimation per operation and accumulated across the full lineage tree.
 
 ---
 
-## 3. End-to-End User Journey
+## 3. Live Production Endpoints
+
+- **Web Application (Global CDN)**: `https://ai-art-director-prod.web.app`
+- **Backend Service (Cloud Run)**: `https://fashion-art-director-1012864945903.asia-southeast1.run.app`
+- **Observability Dashboard**: `https://ai-art-director-prod.web.app/observability`
+- **Health Check**: `https://ai-art-director-prod.web.app/health`
+
+---
+
+## 4. End-to-End User Journey
 
 ```mermaid
 flowchart TD
@@ -122,57 +133,63 @@ flowchart TD
 
 ---
 
-## 4. Functional Requirements
+## 5. Functional Requirements
 
-### 4.1 Step 1: Art Direction & Baseline Synthesis
+### 5.1 Step 1: Art Direction & Baseline Synthesis
 - **FR-1.1 Multi-Format Ingestion**: Ingest 1 to 5 files (PNG, JPEG, WebP, PDF) with drag-and-drop.
 - **FR-1.2 Direct Photo Ingestion**: Direct single-image upload bypassing moodboard analysis with automatic aspect ratio detection.
 - **FR-1.3 Master Prompt & Lever Extraction**: Synthesize 4-phase Master Prompt, scene logline, and 9-category visual tag chips.
 - **FR-1.4 Bi-Directional Re-Sync**: Synchronize Master Prompt from visual levers, or deconstruct Master Prompt back into visual levers.
 - **FR-1.5 Conflict Detection**: Identify conflicting lighting, color, or stylistic directives with severity and recommendations.
-- **FR-1.6 Parallel 4-Baseline Generation**: Asynchronously render 4 candidate images across distinct seeds.
+- **FR-1.6 Parallel 4-Baseline Generation**: Concurrently render 4 candidate images across distinct seeds.
 
-### 4.2 Step 2: Refinement Studio
+### 5.2 Step 2: Refinement Studio
 - **FR-2.1 Reference-Conditioned Refinement**: Natural-language prompts conditioned on parent image bytes.
 - **FR-2.2 Seed-Locking & Continuity**: Maintain seed across turns to preserve anatomical and stylistic consistency.
 - **FR-2.3 Conversation Thread Timeline**: Chronological message timeline with thumbnails, seeds, and click-to-load navigation.
 
-### 4.3 Step 3: Canvas Studio (Inpainting)
+### 5.3 Step 3: Canvas Studio (Inpainting)
 - **FR-3.1 Interactive Masking**: Full-bleed drawing canvas with customizable brush size, cursor indicator, and Undo/Redo.
 - **FR-3.2 Boundary-Preserving Inpainting**: Generates target edits strictly within masked pixels while harmonizing lighting transitions.
 
-### 4.4 Step 4: Wardrobe Studio & Composition
+### 5.4 Step 4: Wardrobe Studio & Composition
 - **FR-4.1 Sheet Auto-Segmentation**: Detect garments from multi-item lookbooks, extract normalized bounding boxes, and save cropped cards.
 - **FR-4.2 Drag-and-Drop Pinning**: Position numbered pins (①, ②, ③) on the subject viewport with coordinate tracking.
 - **FR-4.3 Multi-Image Composition**: Condition simultaneously on parent master and multiple garment image references in a single API call.
 - **FR-4.4 Garment Library Management**: Persistent item storage, metadata inspection, and soft deletion.
 
-### 4.5 Step 5: Export Studio & Production Delivery
+### 5.5 Step 5: Export Studio & Production Delivery
 - **FR-5.1 Formats & Presets**: Download single master (PNG / JPEG) and 5-ratio ZIP bundle (`4:5`, `9:16`, `1.85:1`, `1:1`, `1.8:1`).
 - **FR-5.2 AI Neural Master Upscale**: 4K texture and weave restoration via neural upscale pipeline.
 - **FR-5.3 Metadata Bundle**: Embed full generation lineage, seed, prompt, and token cost JSON in export archives.
 
-### 4.6 Cross-Cutting Capabilities
-- **FR-6.1 Observability & Telemetry**: Dedicated `/telemetry` dashboard with live audit logs, request lifecycle tracing, SQLite table inspector, and latency/cost metrics.
-- **FR-6.2 Lineage History & Split-Slider Diff**: History drawer tracking generation ancestry with side-by-side visual split-slider comparison.
-- **FR-6.3 Dynamic Model Switching**: Runtime selection between vision models (`gemini-3.5-flash-lite`, `gemini-3.7-flash`) and image models (`gemini-3.1-flash-lite-image`, `gemini-3.1-flash-image`, `gemini-3-pro-image`).
+### 5.6 Cross-Cutting Capabilities & Cloud Services
+- **FR-6.1 Multi-User Authentication**: Firebase Auth supporting Google OAuth & Email/Password with per-user data tenancy.
+- **FR-6.2 Observability & Telemetry**: Dedicated `/telemetry` dashboard with live audit logs, request lifecycle tracing, Firestore collection inspector, and latency/cost metrics.
+- **FR-6.3 Lineage History & Split-Slider Diff**: History drawer tracking generation ancestry with side-by-side visual split-slider comparison.
+- **FR-6.4 Dynamic Model Switching**: Runtime selection between vision models (`gemini-3.5-flash-lite`, `gemini-3.7-flash`) and image models (`gemini-3.1-flash-lite-image`, `gemini-3.1-flash-image`, `gemini-3-pro-image`).
+- **FR-6.5 Automated CI/CD**: Keyless GitHub Actions deployment via Workload Identity Federation on push to `main`.
 
 ---
 
-## 5. Technical Stack & Architecture
+## 6. Technical Stack & Cloud Architecture
 
-- **Backend**: Python 3.10+ with FastAPI, Uvicorn, and `uv` package management.
-- **Database**: SQLite with `aiosqlite` (`storage/studio.db`).
+- **Compute & Deployment**: Google Cloud Run (Serverless container, multi-stage Docker build, Python 3.11 + `uv`).
+- **Edge CDN & Hosting**: Firebase Hosting with unified same-origin routing to Cloud Run.
+- **Database**: Google Cloud Firestore (Native mode, 7 flat collections, atomic transactions).
+- **Blob Storage**: Google Cloud Storage (`gs://ai-art-director-prod-store`) with HTTP 307 signed URL redirection.
+- **Authentication**: Firebase Authentication with JWT Bearer validation in FastAPI.
+- **Secrets Management**: Google Secret Manager (`GEMINI_API_KEY`).
 - **AI Framework**: Google GenAI SDK (`google-genai`) with Interactions API (`client.interactions.create`).
 - **Frontend**: React 18+ with Vite, Lucide React icons, and modern dark Vanilla CSS.
-- **Image Processing**: Pillow (`PIL`) for chroma preservation, masking, and multi-ratio bundle processing.
+- **CI/CD**: GitHub Actions with Workload Identity Federation (WIF).
 
 ---
 
-## 6. Non-Functional Requirements (NFRs)
+## 7. Non-Functional Requirements (NFRs)
 
 - **NFR-1 Color & Chroma Constancy**: Reference images encoded in lossless PNG/WebP with ICC profile preservation to eliminate multi-turn degradation.
-- **NFR-2 Latency & Concurrency**: 4-baseline generation dispatches concurrently via `asyncio.gather` for minimal turnaround.
-- **NFR-3 Local Data Sovereignty**: All generation records, masks, moodboards, and audit logs remain strictly on local storage.
+- **NFR-2 Latency & Concurrency**: 4-baseline generation dispatches concurrently for minimal turnaround (~300ms average edge latency).
+- **NFR-3 Enterprise Security**: Secret Manager key retrieval, keyless CI/CD, uniform bucket access, and least-privilege IAM service accounts.
 - **NFR-4 UI Fluidity**: 60 FPS canvas painting, drag-and-drop pin tracking, and responsive split-slider comparison.
-- **NFR-5 Comprehensive Error Diagnostics**: Structured error parsing and user-friendly alerts for API timeouts, safety filters, and model constraints.
+- **NFR-5 High Availability**: Serverless auto-scaling (0–5 instances) with zero idle compute cost.

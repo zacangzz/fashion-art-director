@@ -43,3 +43,47 @@
   * Generative diffusion/autoregressive image models naturally bias slightly warm on skin and lighting. If prompts instruct the model to calculate unrestricted "ambient color bounce", each progressive turn compounds the warmth of the previous generation.
   * **Fix**: In multi-turn styling/editing system prompts, always include a **Color Constancy & Calibrated White Balance Lock** (locking Kelvin temperature, neutral white points, and background chromaticity), and trace lineage ancestry to anchor multi-turn generations ($\text{Turn} \ge 2$) to the pristine root baseline scene.
 
+---
+
+## Cloud Deployment, Containers & CI/CD
+
+### 4. FastAPI Packaging in Multi-Stage Docker with `uv`
+* **Python Path in Containers**: When code is organized under `src/app/`, Uvicorn requires `PYTHONPATH=/app/src` so `from app.config import get_settings` resolves cleanly:
+  ```dockerfile
+  ENV PYTHONPATH=/app/src
+  CMD ["/app/.venv/bin/uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+  ```
+* **Multi-Stage Build**: Use `node:22-alpine` for building frontend assets and copy `/build/dist` directly into `/app/src/frontend/dist` in the Python runtime stage.
+
+---
+
+### 5. Firebase Hosting CDN Rewrites to Cloud Run
+* **Unified Same-Origin Routing**: Avoid CORS complexity by proxying `/api/**` to Cloud Run via Firebase Hosting edge rewrites in `firebase.json`:
+  ```json
+  {
+    "hosting": {
+      "public": "src/frontend/dist",
+      "rewrites": [
+        { "source": "/api/**", "run": { "serviceId": "fashion-art-director", "region": "asia-southeast1" } },
+        { "source": "/health", "run": { "serviceId": "fashion-art-director", "region": "asia-southeast1" } },
+        { "source": "**", "destination": "/index.html" }
+      ]
+    }
+  }
+  ```
+
+---
+
+### 6. Keyless CI/CD via Workload Identity Federation (WIF)
+* **OIDC Provider Configuration**: When creating GitHub OIDC providers with `--attribute-mapping`, provide `--attribute-condition` matching the repository claim to satisfy GCP IAM security constraints:
+  ```bash
+  gcloud iam workload-identity-pools providers create-oidc "github-actions-provider" \
+    --project="ai-art-director-prod" \
+    --location="global" \
+    --workload-identity-pool="github-actions-pool" \
+    --issuer-uri="https://token.actions.githubusercontent.com" \
+    --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository" \
+    --attribute-condition="assertion.repository == 'zacangzz/fashion-art-director'"
+  ```
+* **GitHub Actions Workflow**: Authenticate securely using `google-github-actions/auth@v2` without storing long-lived service account keys in repository secrets.
+
