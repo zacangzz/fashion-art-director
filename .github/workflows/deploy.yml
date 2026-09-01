@@ -120,6 +120,7 @@ jobs:
           VITE_FIREBASE_MESSAGING_SENDER_ID: "1012864945903"
           VITE_FIREBASE_APP_ID: "1:1012864945903:web:b35b58a3248ad9ff10551a"
           VITE_FIREBASE_MEASUREMENT_ID: G-Q7243Y8D0H
+          VITE_API_URL: https://fashion-art-director-1012864945903.asia-southeast1.run.app
         run: |
           npm ci
           npm run build

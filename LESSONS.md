@@ -57,20 +57,24 @@
 
 ---
 
-### 5. Firebase Hosting CDN Rewrites to Cloud Run
-* **Unified Same-Origin Routing**: Avoid CORS complexity by proxying `/api/**` to Cloud Run via Firebase Hosting edge rewrites in `firebase.json`:
-  ```json
-  {
-    "hosting": {
-      "public": "src/frontend/dist",
-      "rewrites": [
-        { "source": "/api/**", "run": { "serviceId": "fashion-art-director", "region": "asia-southeast1" } },
-        { "source": "/health", "run": { "serviceId": "fashion-art-director", "region": "asia-southeast1" } },
-        { "source": "**", "destination": "/index.html" }
-      ]
+### 5. Firebase Hosting CDN Rewrites vs. Direct Cloud Run Routing (60s Timeout Limit)
+* **The Pitfall (60-Second Proxy Ceiling)**:
+  * Firebase Hosting CDN rewrites (`"source": "/api/**", "run": { ... }`) have a hardcoded, non-configurable **60.0-second reverse proxy timeout**.
+  * Heavy generative workflows—such as multi-image wardrobe composition using Nano Banana Pro (`gemini-3-pro-image`) at **4K resolution**—routinely take $45\text{–}90$ seconds.
+  * When a request takes $>60$ seconds, Firebase Hosting drops the client connection and returns an empty/HTML `502 Bad Gateway` or `504 Gateway Timeout`, even though Cloud Run continues running and finishes successfully in the background.
+* **The Solution (Direct Cloud Run API Base URL)**:
+  * Cloud Run natively supports up to 3600s timeouts (configured to `300s`).
+  * In the frontend (`apiClient.js`), dynamically prefix API calls with `VITE_API_URL` when deployed:
+    ```javascript
+    export const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
+    export function buildApiUrl(path) {
+      if (!path || path.startsWith('http://') || path.startsWith('https://')) return path;
+      return `${API_BASE}${path.startsWith('/') ? '' : '/'}${path}`;
     }
-  }
-  ```
+    ```
+  * In the CI/CD build step, inject `VITE_API_URL=https://fashion-art-director-<hash>.asia-southeast1.run.app`.
+  * Enable CORS origins on FastAPI (`CORSMiddleware`) for the Firebase Hosting domain (`https://<project-id>.web.app`).
+  * **Result**: Bypasses the 60s proxy timeout, unlocking the full 300s execution window for heavy 4K Pro model generations.
 
 ---
 

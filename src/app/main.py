@@ -104,7 +104,14 @@ async def log_requests(request: Request, call_next):
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:7860", "http://127.0.0.1:7860", "*"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://localhost:7860",
+        "http://127.0.0.1:7860",
+        "https://ai-art-director-prod.web.app",
+        "https://ai-art-director-prod.firebaseapp.com",
+        "*",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -71,8 +71,8 @@ class ImageGenerator:
         self,
         func: Any,
         *args: Any,
-        max_retries: int = 4,
-        initial_backoff: float = 2.0,
+        max_retries: int = 2,
+        initial_backoff: float = 1.5,
         **kwargs: Any,
     ) -> Any:
         last_exc = None

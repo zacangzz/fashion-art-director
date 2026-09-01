@@ -12,6 +12,8 @@ import {
   generateImage,
   resyncPromptFromLevers,
   resyncLeversFromPrompt,
+  buildApiUrl,
+  resolveImageUrl,
 } from './apiClient';
 
 describe('apiClient', () => {
@@ -209,5 +211,39 @@ describe('apiClient', () => {
       body: JSON.stringify(payload),
     }));
     expect(res).toEqual(mockResult);
+  });
+
+  it('buildApiUrl and resolveImageUrl format relative and absolute paths cleanly', () => {
+    expect(buildApiUrl('')).toBe('');
+    expect(buildApiUrl('/api/test')).toBe('/api/test');
+    expect(buildApiUrl('api/test')).toBe('/api/test');
+    expect(buildApiUrl('https://custom-domain.com/image.png')).toBe('https://custom-domain.com/image.png');
+    expect(buildApiUrl('blob:http://localhost/123')).toBe('blob:http://localhost/123');
+    expect(resolveImageUrl('/api/images/gen_1.png')).toBe('/api/images/gen_1.png');
+  });
+
+  it('handles 429 Too Many Requests error with descriptive message', async () => {
+    fetch.mockResolvedValueOnce({
+      ok: false,
+      status: 429,
+      json: async () => ({ detail: 'Rate limit reached' }),
+    });
+
+    await expect(fineTuneGeneration({ parent_id: 'gen_1' })).rejects.toThrow(
+      'Rate limit reached'
+    );
+  });
+
+  it('handles 502/504 Gateway errors with fallback guidance when body is non-JSON', async () => {
+    fetch.mockResolvedValueOnce({
+      ok: false,
+      status: 502,
+      json: async () => { throw new Error('HTML response'); },
+      text: async () => '<html>502 Bad Gateway</html>',
+    });
+
+    await expect(fineTuneGeneration({ parent_id: 'gen_1' })).rejects.toThrow(
+      'Backend gateway error (502)'
+    );
   });
 });

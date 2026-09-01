@@ -354,8 +354,8 @@ class GenerationService:
                 user_id=user_id,
             )
 
-        logger.info(f"Dispatching 4 concurrent baseline generation workers for seeds: {seeds}")
-        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        logger.info(f"Dispatching baseline generation workers (max_workers=2) for seeds: {seeds}")
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
             results = list(executor.map(_generate, seeds))
 
         return results

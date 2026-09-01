@@ -1,6 +1,32 @@
 import { auth } from '../config/firebase';
 
 /**
+ * API Base URL resolution:
+ * - When VITE_API_URL is configured (e.g. production Cloud Run URL), all API requests
+ *   route directly to Cloud Run, unlocking the full 300s timeout for heavy Nano Banana Pro 4K models.
+ * - In local dev or when omitted, uses relative paths ('/api/...') routed via Vite proxy.
+ */
+export const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
+
+export function buildApiUrl(path) {
+  if (!path) return '';
+  if (
+    path.startsWith('http://') ||
+    path.startsWith('https://') ||
+    path.startsWith('blob:') ||
+    path.startsWith('data:')
+  ) {
+    return path;
+  }
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  return `${API_BASE}${cleanPath}`;
+}
+
+export function resolveImageUrl(path) {
+  return buildApiUrl(path);
+}
+
+/**
  * Enhanced fetch wrapper that attaches Firebase ID token if user is signed in.
  */
 async function authFetch(url, options = {}) {
@@ -19,7 +45,9 @@ async function authFetch(url, options = {}) {
     console.warn('Failed to retrieve auth token for request:', err);
   }
 
-  return fetch(url, {
+  const finalUrl = buildApiUrl(url);
+
+  return fetch(finalUrl, {
     ...options,
     headers,
   });
@@ -42,7 +70,10 @@ async function handleApiResponse(response, defaultMessage) {
     errorDetail = errorData.detail || errorData.message || '';
   } catch {
     try {
-      errorDetail = await response.text();
+      const rawText = await response.text();
+      if (rawText && !rawText.trim().startsWith('<!DOCTYPE') && !rawText.trim().startsWith('<html')) {
+        errorDetail = rawText.trim();
+      }
     } catch {
       errorDetail = '';
     }
@@ -55,10 +86,17 @@ async function handleApiResponse(response, defaultMessage) {
     );
   }
 
-  if (response.status === 502) {
+  if (response.status === 429) {
     throw new Error(
       errorDetail ||
-        `Backend gateway error (502): External service call failed. Verify your Google AI Studio API key and model availability in .env.`
+        'Google AI Quota Exceeded (429): Rate limit or quota limit reached in Google AI Studio. Please wait a few moments before retrying.'
+    );
+  }
+
+  if (response.status === 502 || response.status === 504) {
+    throw new Error(
+      errorDetail ||
+        `Backend gateway error (${response.status}): External service call failed or timed out. Verify your Google AI Studio API key and Cloud Run service availability.`
     );
   }
 
