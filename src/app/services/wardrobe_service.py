@@ -447,6 +447,13 @@ class WardrobeService:
             model=active_model,
         )
 
+        # Mark as processing in DB immediately so clients see active status
+        self.db.update_wardrobe_item_upscale(
+            item_id=item_id,
+            upscaled_image_path=None,
+            upscale_status="processing",
+        )
+
         try:
             upscaled_bytes = generator.generate(
                 prompt=prompt,

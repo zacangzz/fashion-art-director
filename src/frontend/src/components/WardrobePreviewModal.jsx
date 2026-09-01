@@ -20,6 +20,7 @@ import {
   ShieldCheck,
   DollarSign,
 } from 'lucide-react';
+import { upscaleGarment } from '../services/apiClient';
 
 const CATEGORY_COLORS = {
   outerwear: '#f59e0b',
@@ -36,6 +37,7 @@ export default function WardrobePreviewModal({
   initialItemId = null,
   onAddAssignment,
   onDeleteItem,
+  onUpdateItem,
 }) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [viewMode, setViewMode] = useState('hd'); // 'hd', 'crop', 'split', 'source'
@@ -45,6 +47,8 @@ export default function WardrobePreviewModal({
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
   const [copiedText, setCopiedText] = useState(false);
+  const [isUpscalingCurrent, setIsUpscalingCurrent] = useState(false);
+  const [upscaleError, setUpscaleError] = useState(null);
 
   const containerRef = useRef(null);
 
@@ -146,6 +150,22 @@ export default function WardrobePreviewModal({
     navigator.clipboard?.writeText(text);
     setCopiedText(true);
     setTimeout(() => setCopiedText(false), 2000);
+  };
+
+  const handleManualUpscale = async () => {
+    if (!currentItem || isUpscalingCurrent) return;
+    try {
+      setIsUpscalingCurrent(true);
+      setUpscaleError(null);
+      const res = await upscaleGarment(currentItem.id);
+      if (res && onUpdateItem) {
+        onUpdateItem(res);
+      }
+    } catch (err) {
+      setUpscaleError(err.message || 'Failed to upscale garment.');
+    } finally {
+      setIsUpscalingCurrent(false);
+    }
   };
 
   if (!isOpen || !currentItem) return null;
@@ -561,17 +581,35 @@ export default function WardrobePreviewModal({
 
               {/* Upscale Resolution & Quality Status */}
               <div className="inspector-spec-item">
-                <span className="spec-label">Upscale Status</span>
-                <div className="status-indicator-row">
+                <div className="flex items-center justify-between">
+                  <span className="spec-label">Upscale Status</span>
+                  {!isUpscaled && (
+                    <button
+                      type="button"
+                      className="btn-accent-sm flex items-center gap-1.5 text-xs py-1 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm shadow-indigo-600/30 transition disabled:opacity-50"
+                      onClick={handleManualUpscale}
+                      disabled={isUpscalingCurrent || currentItem.upscale_status === 'processing'}
+                      title="Generate 4K studio AI enhancement"
+                    >
+                      <Sparkles size={12} className={isUpscalingCurrent || currentItem.upscale_status === 'processing' ? 'animate-spin' : ''} />
+                      <span>{isUpscalingCurrent || currentItem.upscale_status === 'processing' ? 'Enhancing...' : 'Enhance to 4K Master'}</span>
+                    </button>
+                  )}
+                </div>
+                <div className="status-indicator-row mt-1.5">
                   {isUpscaled ? (
                     <span className="status-badge-success">
                       <Sparkles size={12} />
                       <span>4K Ultra-HD Enhanced</span>
                     </span>
-                  ) : currentItem.upscale_status === 'pending' || currentItem.upscale_status === 'processing' ? (
+                  ) : currentItem.upscale_status === 'processing' || isUpscalingCurrent ? (
                     <span className="status-badge-pending">
                       <Sparkles size={12} className="animate-spin" />
                       <span>Enhancing Details...</span>
+                    </span>
+                  ) : currentItem.upscale_status === 'failed' ? (
+                    <span className="status-badge-neutral text-rose-300">
+                      <span>Upscale Failed (Click Enhance to retry)</span>
                     </span>
                   ) : (
                     <span className="status-badge-neutral">
@@ -579,6 +617,11 @@ export default function WardrobePreviewModal({
                     </span>
                   )}
                 </div>
+                {upscaleError && (
+                  <div className="text-xs text-rose-400 mt-1 font-mono">
+                    {upscaleError}
+                  </div>
+                )}
               </div>
 
               {/* API Cost & Token Metrics */}

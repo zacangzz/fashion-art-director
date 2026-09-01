@@ -1,6 +1,6 @@
 import os
 import uuid
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form, status, Depends
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, status, Depends, BackgroundTasks
 from fastapi.responses import RedirectResponse
 from typing import Optional
 
@@ -35,6 +35,7 @@ router = APIRouter(prefix="/api/wardrobe", tags=["wardrobe"])
 
 @router.post("/upload", response_model=WardrobeUploadResponse)
 def upload_wardrobe_sheet(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     vision_model: Optional[str] = Form(None),
     user: dict = Depends(get_current_user),
@@ -43,6 +44,7 @@ def upload_wardrobe_sheet(
     """
     Uploads a multi-garment sheet or lookbook image.
     Uses Gemini vision to detect bounding boxes and auto-segments into individual garment cards synchronously.
+    Dispatches asynchronous 4K AI enhancement tasks in the background.
     """
     settings = get_settings()
     eff_vision_model = vision_model or settings.VISION_MODEL
@@ -64,6 +66,12 @@ def upload_wardrobe_sheet(
             vision_model=eff_vision_model,
             user_id=user["uid"],
         )
+        for item in items:
+            background_tasks.add_task(
+                wardrobe_service.upscale_garment,
+                item_id=item["id"],
+                user_id=user["uid"],
+            )
         return WardrobeUploadResponse(items=[GarmentCard(**item) for item in items])
     except Exception as exc:
         parse_and_raise_http_error(exc, model_name=eff_vision_model, context="Wardrobe Segmentation")

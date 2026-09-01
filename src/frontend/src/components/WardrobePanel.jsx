@@ -505,6 +505,11 @@ export default function WardrobePanel({
         initialItemId={previewItemId}
         onAddAssignment={onAddAssignment}
         onDeleteItem={handleDeleteItem}
+        onUpdateItem={(updated) => {
+          setItems((prev) =>
+            prev.map((it) => (it.id === updated.id ? { ...it, ...updated } : it))
+          );
+        }}
       />
     </aside>
   );
