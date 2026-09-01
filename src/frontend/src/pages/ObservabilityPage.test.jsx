@@ -5,6 +5,7 @@ import ObservabilityPage from './ObservabilityPage';
 import * as apiClient from '../services/apiClient';
 
 vi.mock('../services/apiClient', () => ({
+  fetchGenerationRuns: vi.fn(),
   fetchTelemetryEvents: vi.fn(),
   fetchRequestTrace: vi.fn(),
   fetchTelemetryStats: vi.fn(),
@@ -14,21 +15,56 @@ vi.mock('../services/apiClient', () => ({
 }));
 
 describe('ObservabilityPage', () => {
+  const mockRuns = [
+    {
+      request_id: 'req_test_123',
+      timestamp: '2026-08-26T10:00:00Z',
+      status: 'success',
+      duration_ms: 2450.5,
+      cost_usd: 0.042,
+      tokens: 1250,
+      models: ['gemini-3.7-flash', 'gemini-3.1-flash-image'],
+      primary_model: 'gemini-3.7-flash',
+      component: 'generation',
+      components: ['vision', 'generation'],
+      prompt: 'Cinematic portrait with rim light and editorial styling',
+      step_count: 2,
+      input_images: ['https://example.com/ref1.jpg'],
+      output_images: ['https://example.com/out1.jpg'],
+      events: [
+        {
+          id: 'ev_1',
+          event: 'vision_analysis_completed',
+          component: 'vision',
+          duration_ms: 850,
+          status: 'success',
+        },
+        {
+          id: 'ev_2',
+          event: 'baseline_generation_completed',
+          component: 'generation',
+          duration_ms: 1600.5,
+          status: 'success',
+        },
+      ],
+    },
+  ];
+
   const mockEvents = [
     {
+      id: 'ev_1',
       timestamp: '2026-08-26T10:00:00Z',
       event: 'fine_tune_request',
       event_type: 'fine_tune_request',
       request_id: 'req_test_123',
       component: 'generation',
       status: 'success',
-      model: 'gemini-3.1-flash-lite-image',
+      model: 'gemini-3.1-flash-image',
       duration_ms: 850.5,
-      final_prompt: 'Cinematic portrait with rim light',
-      seed: 4289102,
-      aspect_ratio: '2:3',
+      cost_usd: 0.02,
     },
     {
+      id: 'ev_2',
       timestamp: '2026-08-26T10:01:00Z',
       event: 'vision_error',
       event_type: 'vision_error',
@@ -40,26 +76,28 @@ describe('ObservabilityPage', () => {
   ];
 
   const mockStats = {
-    total_events: 2,
+    total_events: 10,
     error_count: 1,
-    success_rate: 50.0,
-    components: { generation: 1, vision: 1 },
-    event_types: { fine_tune_request: 1, vision_error: 1 },
-    average_latencies_ms: { 'gemini-3.1-flash-lite-image': 850.5 },
+    success_rate: 90.0,
+    total_cost_usd: 0.245,
+    total_tokens: 8500,
+    components: { generation: 6, vision: 4 },
+    event_types: { fine_tune_request: 5, vision_analysis: 5 },
+    average_latencies_ms: { 'gemini-3.7-flash': 1200.0 },
   };
 
   const mockLogs = {
     total_lines: 2,
     logs: [
-      '2026-08-26 10:00:00 [INFO] [req:req_test_123] [studio.generation:45] Generation started',
-      '2026-08-26 10:01:00 [ERROR] [req:req_vis_error_1] [studio.vision:88] Model timeout',
+      '[INFO] [req:req_test_123] Generation pipeline started',
+      '[INFO] [req:req_test_123] Image synthesized successfully',
     ],
   };
 
   const mockDbSummary = {
-    generations: { row_count: 12, columns: [{ name: 'id', type: 'TEXT' }] },
-    moodboards: { row_count: 3, columns: [{ name: 'id', type: 'TEXT' }] },
-    wardrobe_items: { row_count: 8, columns: [{ name: 'id', type: 'TEXT' }] },
+    generations: 12,
+    telemetry_events: 55,
+    users: 4,
   };
 
   const mockDbRows = {
@@ -70,10 +108,7 @@ describe('ObservabilityPage', () => {
     rows: [
       {
         id: 'gen_001',
-        parent_id: null,
-        is_baseline: true,
-        seed: 4289102,
-        compiled_prompt: 'Cinematic portrait',
+        prompt: 'Cinematic portrait',
         created_at: '2026-08-26T10:00:00Z',
       },
     ],
@@ -81,6 +116,12 @@ describe('ObservabilityPage', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    apiClient.fetchGenerationRuns.mockResolvedValue({
+      total: 1,
+      limit: 30,
+      offset: 0,
+      runs: mockRuns,
+    });
     apiClient.fetchTelemetryEvents.mockResolvedValue({
       total: 2,
       limit: 50,
@@ -89,63 +130,60 @@ describe('ObservabilityPage', () => {
     });
     apiClient.fetchTelemetryStats.mockResolvedValue(mockStats);
     apiClient.fetchSystemLogs.mockResolvedValue(mockLogs);
-    apiClient.fetchDatabaseSummary.mockResolvedValue(mockDbSummary);
+    apiClient.fetchDatabaseSummary.mockResolvedValue({ tables: mockDbSummary });
     apiClient.fetchDatabaseTableRecords.mockResolvedValue(mockDbRows);
-    apiClient.fetchRequestTrace.mockResolvedValue([mockEvents[0]]);
+    apiClient.fetchRequestTrace.mockResolvedValue(mockRuns[0].events);
   });
 
-  it('renders page header, KPI cards, and default telemetry events list', async () => {
+  it('renders header, global KPI strip, and default Pipeline Traces view', async () => {
     render(<ObservabilityPage />);
 
     expect(screen.getByText(/Studio Observability & System Intelligence/i)).toBeInTheDocument();
     expect(screen.getByText(/Studio Pipeline/i)).toBeInTheDocument();
 
     await waitFor(() => {
-      expect(screen.getAllByText(/fine_tune_request/i).length).toBeGreaterThan(0);
-      expect(screen.getAllByText(/vision_error/i).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/req_test_123/i).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/Cinematic portrait with rim light/i).length).toBeGreaterThan(0);
     });
 
-    expect(screen.getByText(/50.0%/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/Cinematic portrait with rim light/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/90%/i)).toBeInTheDocument();
+    expect(screen.getByText(/Tokens Processed/i)).toBeInTheDocument();
+    expect(screen.getByText(/8,500/i)).toBeInTheDocument();
   });
 
-  it('allows switching to Live System Logs tab and viewing rotating logs', async () => {
+  it('allows switching to Audit Events tab and viewing event records', async () => {
     render(<ObservabilityPage />);
 
-    const logsTabBtn = screen.getByRole('button', { name: /Live System Logs/i });
+    const eventsTabBtn = screen.getByRole('button', { name: /Audit Events/i });
+    fireEvent.click(eventsTabBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText(/fine_tune_request/i)).toBeInTheDocument();
+      expect(screen.getByText(/vision_error/i)).toBeInTheDocument();
+    });
+  });
+
+  it('allows switching to System Logs tab and viewing live logs stream', async () => {
+    render(<ObservabilityPage />);
+
+    const logsTabBtn = screen.getByRole('button', { name: /System Logs/i });
     fireEvent.click(logsTabBtn);
 
     await waitFor(() => {
-      expect(screen.getByText(/storage\/logs\/studio.log/i)).toBeInTheDocument();
-      expect(screen.getByText(/Generation started/i)).toBeInTheDocument();
-      expect(screen.getByText(/Model timeout/i)).toBeInTheDocument();
+      expect(screen.getByText(/Generation pipeline started/i)).toBeInTheDocument();
+      expect(screen.getByText(/Image synthesized successfully/i)).toBeInTheDocument();
     });
   });
 
-  it('allows switching to Database Explorer tab and viewing SQLite tables and records', async () => {
+  it('allows switching to Database Explorer tab and viewing collections', async () => {
     render(<ObservabilityPage />);
 
     const dbTabBtn = screen.getByRole('button', { name: /Database Explorer/i });
     fireEvent.click(dbTabBtn);
 
     await waitFor(() => {
-      expect(screen.getByText(/Table:/i)).toBeInTheDocument();
       expect(screen.getAllByText(/generations/i).length).toBeGreaterThan(0);
       expect(screen.getByText('gen_001')).toBeInTheDocument();
-      expect(screen.getByText(/Cinematic portrait/i)).toBeInTheDocument();
-    });
-  });
-
-  it('allows switching to Metrics & Distribution tab', async () => {
-    render(<ObservabilityPage />);
-
-    const statsTabBtn = screen.getByRole('button', { name: /Metrics & Distribution/i });
-    fireEvent.click(statsTabBtn);
-
-    await waitFor(() => {
-      expect(screen.getByText(/Component Request Volume/i)).toBeInTheDocument();
-      expect(screen.getByText(/Average Model Latency/i)).toBeInTheDocument();
-      expect(screen.getByText(/Event Types Breakdown/i)).toBeInTheDocument();
     });
   });
 });

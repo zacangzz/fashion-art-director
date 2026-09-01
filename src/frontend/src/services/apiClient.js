@@ -607,6 +607,23 @@ export async function fetchTelemetryEvents({ component, event, requestId, status
 }
 
 /**
+ * Fetches grouped end-to-end generation runs with stage events, prompts, and metrics.
+ * @param {Object} [params]
+ * @returns {Promise<{total: number, limit: number, offset: number, runs: Array}>}
+ */
+export async function fetchGenerationRuns({ component, status, search, limit = 50, offset = 0 } = {}) {
+  const query = new URLSearchParams();
+  if (component && component !== 'all') query.set('component', component);
+  if (status && status !== 'all') query.set('status', status);
+  if (search && search.trim()) query.set('search', search.trim());
+  query.set('limit', String(limit));
+  query.set('offset', String(offset));
+
+  const response = await authFetch(`/api/telemetry/runs?${query.toString()}`);
+  return handleApiResponse(response, 'Failed to fetch generation runs');
+}
+
+/**
  * Fetches the complete chronological trace of events for a request ID.
  * @param {string} requestId
  * @returns {Promise<Array>}

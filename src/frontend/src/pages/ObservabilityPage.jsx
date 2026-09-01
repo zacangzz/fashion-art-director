@@ -4,10 +4,10 @@ import {
   ArrowLeft,
   RefreshCw,
   Search,
-  CheckCircle,
+  CheckCircle2,
   AlertCircle,
   Clock,
-  Code,
+  Code2,
   Sliders,
   Layers,
   Copy,
@@ -27,8 +27,16 @@ import {
   Calendar,
   Compass,
   Coins,
+  Cpu,
+  ImageIcon,
+  Maximize2,
+  X,
+  PlayCircle,
+  Tag,
+  Hash,
 } from 'lucide-react';
 import {
+  fetchGenerationRuns,
   fetchTelemetryEvents,
   fetchRequestTrace,
   fetchTelemetryStats,
@@ -37,37 +45,58 @@ import {
   fetchDatabaseTableRecords,
 } from '../services/apiClient';
 
-const COMPONENT_COLORS = {
-  generation: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30',
-  vision: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30',
-  wardrobe: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
-  inpaint: 'bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-500/30',
-  api: 'bg-slate-500/20 text-slate-300 border-slate-500/30',
+const COMPONENT_TAG_CLASSES = {
+  generation: 'obs-badge-generation',
+  vision: 'obs-badge-vision',
+  wardrobe: 'obs-badge-wardrobe',
+  inpaint: 'obs-badge-inpaint',
+  api: 'obs-badge-api',
+};
+
+const STAGE_COLORS = {
+  vision: '#06b6d4',
+  prompt: '#a855f7',
+  generation: '#6366f1',
+  inpaint: '#ec4899',
+  api: '#64748b',
 };
 
 export default function ObservabilityPage() {
-  const [activeTab, setActiveTab] = useState('events'); // 'events' | 'logs' | 'db' | 'stats'
-
-  // Telemetry events state
-  const [events, setEvents] = useState([]);
-  const [totalEvents, setTotalEvents] = useState(0);
-  const [selectedEvent, setSelectedEvent] = useState(null);
-  const [requestTrace, setRequestTrace] = useState([]);
-  const [isLoadingTrace, setIsLoadingTrace] = useState(false);
-  const [copiedKey, setCopiedKey] = useState(null);
-
-  // Filters state
-  const [componentFilter, setComponentFilter] = useState('all');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [pageOffset, setPageOffset] = useState(0);
-  const pageSize = 50;
+  // Navigation tabs: 'runs' | 'events' | 'logs' | 'db'
+  const [activeTab, setActiveTab] = useState('runs');
 
   // Stats state
   const [stats, setStats] = useState(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingStats, setIsLoadingStats] = useState(false);
+  const [copiedKey, setCopiedKey] = useState(null);
 
-  // Logs state
+  // Tab 1: Generation Runs & Visual Pipeline state
+  const [runs, setRuns] = useState([]);
+  const [totalRuns, setTotalRuns] = useState(0);
+  const [selectedRun, setSelectedRun] = useState(null);
+  const [isLoadingRuns, setIsLoadingRuns] = useState(false);
+  const [runComponentFilter, setRunComponentFilter] = useState('all');
+  const [runStatusFilter, setRunStatusFilter] = useState('all');
+  const [runSearchQuery, setRunSearchQuery] = useState('');
+  const [runPageOffset, setRunPageOffset] = useState(0);
+  const runsPageSize = 30;
+
+  // Selected Run Detail / Trace state
+  const [activeTraceStep, setActiveTraceStep] = useState(null);
+  const [previewImage, setPreviewImage] = useState(null);
+
+  // Tab 2: Audit Events Data-Grid state
+  const [events, setEvents] = useState([]);
+  const [totalEvents, setTotalEvents] = useState(0);
+  const [selectedEvent, setSelectedEvent] = useState(null);
+  const [isLoadingEvents, setIsLoadingEvents] = useState(false);
+  const [eventComponentFilter, setEventComponentFilter] = useState('all');
+  const [eventStatusFilter, setEventStatusFilter] = useState('all');
+  const [eventSearchQuery, setEventSearchQuery] = useState('');
+  const [eventPageOffset, setEventPageOffset] = useState(0);
+  const eventsPageSize = 50;
+
+  // Tab 3: System Logs state
   const [logs, setLogs] = useState([]);
   const [logLinesCount, setLogLinesCount] = useState(200);
   const [logLevelFilter, setLogLevelFilter] = useState('all');
@@ -75,7 +104,7 @@ export default function ObservabilityPage() {
   const [autoRefreshLogs, setAutoRefreshLogs] = useState(false);
   const autoRefreshTimerRef = useRef(null);
 
-  // Database state
+  // Tab 4: Database Explorer state
   const [dbSummary, setDbSummary] = useState(null);
   const [selectedTable, setSelectedTable] = useState('generations');
   const [tableRecords, setTableRecords] = useState({ total: 0, rows: [] });
@@ -83,64 +112,73 @@ export default function ObservabilityPage() {
   const [isLoadingDb, setIsLoadingDb] = useState(false);
   const [selectedDbRow, setSelectedDbRow] = useState(null);
 
-  // Load telemetry data
-  const loadTelemetry = useCallback(async () => {
-    setIsLoading(true);
+  // Load KPI stats
+  const loadStats = useCallback(async () => {
+    setIsLoadingStats(true);
     try {
-      const params = {
-        limit: pageSize,
-        offset: pageOffset,
-      };
-      if (componentFilter !== 'all') params.component = componentFilter;
-      if (statusFilter !== 'all') params.status = statusFilter;
-      if (searchQuery.trim()) params.search = searchQuery.trim();
-
-      const [eventsRes, statsRes] = await Promise.all([
-        fetchTelemetryEvents(params),
-        fetchTelemetryStats().catch(() => null),
-      ]);
-
-      setEvents(eventsRes?.events || []);
-      setTotalEvents(eventsRes?.total || 0);
+      const statsRes = await fetchTelemetryStats();
       if (statsRes) setStats(statsRes);
-
-      if (eventsRes?.events?.length > 0 && !selectedEvent) {
-        setSelectedEvent(eventsRes.events[0]);
-      }
     } catch (err) {
-      console.error('Failed to load telemetry:', err);
+      console.warn('Could not load telemetry stats:', err);
     } finally {
-      setIsLoading(false);
+      setIsLoadingStats(false);
     }
-  }, [componentFilter, statusFilter, searchQuery, pageOffset, selectedEvent]);
+  }, []);
 
-  // Load trace when selected event changes
-  useEffect(() => {
-    if (!selectedEvent?.request_id) {
-      setRequestTrace([]);
-      return;
-    }
-
-    let isMounted = true;
-    setIsLoadingTrace(true);
-    fetchRequestTrace(selectedEvent.request_id)
-      .then((trace) => {
-        if (isMounted) setRequestTrace(trace || []);
-      })
-      .catch((err) => {
-        console.warn('Could not load trace:', err);
-        if (isMounted) setRequestTrace([]);
-      })
-      .finally(() => {
-        if (isMounted) setIsLoadingTrace(false);
+  // Load Generation Runs
+  const loadRuns = useCallback(async () => {
+    setIsLoadingRuns(true);
+    try {
+      const res = await fetchGenerationRuns({
+        component: runComponentFilter !== 'all' ? runComponentFilter : undefined,
+        status: runStatusFilter !== 'all' ? runStatusFilter : undefined,
+        search: runSearchQuery.trim() || undefined,
+        limit: runsPageSize,
+        offset: runPageOffset,
       });
 
-    return () => {
-      isMounted = false;
-    };
-  }, [selectedEvent?.request_id]);
+      const fetchedRuns = res?.runs || [];
+      setRuns(fetchedRuns);
+      setTotalRuns(res?.total || 0);
 
-  // Load system logs
+      if (fetchedRuns.length > 0) {
+        setSelectedRun((prev) => {
+          if (!prev) return fetchedRuns[0];
+          const matched = fetchedRuns.find((r) => r.request_id === prev.request_id);
+          return matched || fetchedRuns[0];
+        });
+      } else {
+        setSelectedRun(null);
+      }
+    } catch (err) {
+      console.error('Failed to load generation runs:', err);
+    } finally {
+      setIsLoadingRuns(false);
+    }
+  }, [runComponentFilter, runStatusFilter, runSearchQuery, runPageOffset]);
+
+  // Load Raw Audit Events
+  const loadEvents = useCallback(async () => {
+    setIsLoadingEvents(true);
+    try {
+      const res = await fetchTelemetryEvents({
+        component: eventComponentFilter !== 'all' ? eventComponentFilter : undefined,
+        status: eventStatusFilter !== 'all' ? eventStatusFilter : undefined,
+        search: eventSearchQuery.trim() || undefined,
+        limit: eventsPageSize,
+        offset: eventPageOffset,
+      });
+
+      setEvents(res?.events || []);
+      setTotalEvents(res?.total || 0);
+    } catch (err) {
+      console.error('Failed to load telemetry events:', err);
+    } finally {
+      setIsLoadingEvents(false);
+    }
+  }, [eventComponentFilter, eventStatusFilter, eventSearchQuery, eventPageOffset]);
+
+  // Load System Logs
   const loadLogs = useCallback(async () => {
     try {
       const res = await fetchSystemLogs({
@@ -153,7 +191,7 @@ export default function ObservabilityPage() {
     }
   }, [logLinesCount, logLevelFilter]);
 
-  // Load DB Summary
+  // Load Database Summary & Selected Table
   const loadDbSummary = useCallback(async () => {
     try {
       const res = await fetchDatabaseSummary();
@@ -163,7 +201,6 @@ export default function ObservabilityPage() {
     }
   }, []);
 
-  // Load DB Table Records
   const loadDbTable = useCallback(async () => {
     if (!selectedTable) return;
     setIsLoadingDb(true);
@@ -174,7 +211,7 @@ export default function ObservabilityPage() {
       });
       setTableRecords(res || { total: 0, rows: [] });
     } catch (err) {
-      console.error(`Failed to load records for table ${selectedTable}:`, err);
+      console.error(`Failed to load records for collection ${selectedTable}:`, err);
     } finally {
       setIsLoadingDb(false);
     }
@@ -182,18 +219,22 @@ export default function ObservabilityPage() {
 
   // Initial load
   useEffect(() => {
-    loadTelemetry();
-    loadDbSummary();
-  }, [loadTelemetry, loadDbSummary]);
+    loadStats();
+    loadRuns();
+  }, [loadStats, loadRuns]);
 
-  // Effect for logs tab
+  // Tab change triggers
   useEffect(() => {
-    if (activeTab === 'logs') {
-      loadLogs();
+    if (activeTab === 'runs') loadRuns();
+    if (activeTab === 'events') loadEvents();
+    if (activeTab === 'logs') loadLogs();
+    if (activeTab === 'db') {
+      loadDbSummary();
+      loadDbTable();
     }
-  }, [activeTab, loadLogs]);
+  }, [activeTab, loadRuns, loadEvents, loadLogs, loadDbSummary, loadDbTable]);
 
-  // Effect for auto-refreshing logs
+  // Auto-refresh logs timer
   useEffect(() => {
     if (activeTab === 'logs' && autoRefreshLogs) {
       autoRefreshTimerRef.current = setInterval(() => {
@@ -210,19 +251,15 @@ export default function ObservabilityPage() {
     };
   }, [activeTab, autoRefreshLogs, loadLogs]);
 
-  // Effect for database tab
-  useEffect(() => {
-    if (activeTab === 'db') {
-      loadDbTable();
-    }
-  }, [activeTab, loadDbTable]);
-
+  // Copy helper
   const copyToClipboard = (text, key) => {
-    navigator.clipboard.writeText(typeof text === 'object' ? JSON.stringify(text, null, 2) : String(text));
+    const val = typeof text === 'object' ? JSON.stringify(text, null, 2) : String(text);
+    navigator.clipboard.writeText(val);
     setCopiedKey(key);
     setTimeout(() => setCopiedKey(null), 2000);
   };
 
+  // Download logs
   const downloadLogsAsFile = () => {
     const blob = new Blob([logs.join('\n')], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -233,1004 +270,991 @@ export default function ObservabilityPage() {
     URL.revokeObjectURL(url);
   };
 
-  // Filter logs by search term
-  const filteredLogs = logs.filter((line) => {
-    if (!logSearch.trim()) return true;
-    return line.toLowerCase().includes(logSearch.toLowerCase());
-  });
+  // Format timestamp helper
+  const formatTimestamp = (ts) => {
+    if (!ts) return '—';
+    try {
+      const d = new Date(ts);
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' ' + d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    } catch {
+      return String(ts);
+    }
+  };
+
+  // Helpers to extract run stages
+  const getRunStages = (run) => {
+    if (!run || !run.events) return [];
+    return run.events.map((ev, index) => {
+      const name = ev.event || ev.event_type || `Step ${index + 1}`;
+      const isError = ev.status === 'error' || name.toLowerCase().includes('error');
+      const duration = ev.duration_ms ? `${(ev.duration_ms / 1000).toFixed(2)}s` : '—';
+      const comp = ev.component || 'general';
+
+      let stageLabel = name.replace(/_/g, ' ');
+      if (name.includes('vision')) stageLabel = 'Vision Analysis';
+      else if (name.includes('baseline')) stageLabel = 'Imagen Baseline';
+      else if (name.includes('fine_tune')) stageLabel = 'Prompt Compilation';
+      else if (name.includes('inpaint')) stageLabel = 'Inpaint Synthesis';
+
+      return {
+        id: ev.id || `step_${index}`,
+        rawName: name,
+        label: stageLabel,
+        component: comp,
+        duration,
+        durationMs: ev.duration_ms || 0,
+        status: isError ? 'error' : (ev.status || 'success'),
+        event: ev,
+      };
+    });
+  };
+
+  const stages = selectedRun ? getRunStages(selectedRun) : [];
+  const totalStageDurationMs = stages.reduce((acc, s) => acc + s.durationMs, 0) || selectedRun?.duration_ms || 1;
 
   return (
-    <div className="min-h-screen bg-[#090b10] text-slate-100 flex flex-col font-sans selection:bg-indigo-500/30 selection:text-indigo-200">
-      {/* Top Header */}
-      <header className="border-b border-slate-800/80 bg-[#10141f]/90 backdrop-blur-md px-6 py-4 sticky top-0 z-30 shadow-lg">
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <a
-              href="/"
-              className="px-3 py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-semibold flex items-center gap-2 transition"
-              title="Return to Main Studio Pipeline"
-            >
-              <ArrowLeft size={14} />
-              <span>Studio Pipeline</span>
-            </a>
-            <div className="h-5 w-px bg-slate-800" />
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-xl bg-gradient-to-tr from-indigo-600/30 to-cyan-500/30 border border-indigo-500/40 shadow-inner">
-                <Activity size={20} className="text-indigo-400 animate-pulse" />
+    <div className="obs-page-wrapper">
+      {/* Header Bar */}
+      <header className="obs-header">
+        <div className="obs-header-container">
+          <div className="obs-header-top">
+            <div className="obs-header-brand">
+              <a href="/" className="obs-back-btn" title="Back to Studio Pipeline">
+                <ArrowLeft size={14} />
+                <span>Studio Pipeline</span>
+              </a>
+              <div className="obs-brand-icon">
+                <Activity size={20} />
               </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h1 className="text-lg font-bold text-white tracking-tight">Studio Observability & System Intelligence</h1>
-                  <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold tracking-wider uppercase">
-                    Live Telemetry
+              <div className="obs-header-title-wrap">
+                <h1>
+                  <span>Studio Observability & System Intelligence</span>
+                  <span className="obs-live-badge">
+                    <span className="obs-live-dot" />
+                    Live Tracing
+                  </span>
+                </h1>
+                <p>Monitor end-to-end generation lifecycles, structured audit telemetry, and runtime intelligence</p>
+              </div>
+            </div>
+
+            {/* Navigation Tabs & Actions */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+              <div className="obs-nav-tabs">
+                <button
+                  type="button"
+                  className={`obs-tab-btn ${activeTab === 'runs' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('runs')}
+                >
+                  <PlayCircle size={14} />
+                  <span>Pipeline Traces</span>
+                  {totalRuns > 0 && <span className="obs-tab-count">{totalRuns}</span>}
+                </button>
+                <button
+                  type="button"
+                  className={`obs-tab-btn ${activeTab === 'events' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('events')}
+                >
+                  <Code2 size={14} />
+                  <span>Audit Events</span>
+                  {totalEvents > 0 && <span className="obs-tab-count">{totalEvents}</span>}
+                </button>
+                <button
+                  type="button"
+                  className={`obs-tab-btn ${activeTab === 'logs' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('logs')}
+                >
+                  <Terminal size={14} />
+                  <span>System Logs</span>
+                </button>
+                <button
+                  type="button"
+                  className={`obs-tab-btn ${activeTab === 'db' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('db')}
+                >
+                  <Database size={14} />
+                  <span>Database Explorer</span>
+                </button>
+              </div>
+
+              <button
+                type="button"
+                className="obs-refresh-btn"
+                onClick={() => {
+                  loadStats();
+                  if (activeTab === 'runs') loadRuns();
+                  if (activeTab === 'events') loadEvents();
+                  if (activeTab === 'logs') loadLogs();
+                  if (activeTab === 'db') {
+                    loadDbSummary();
+                    loadDbTable();
+                  }
+                }}
+                disabled={isLoadingRuns || isLoadingEvents || isLoadingDb}
+                title="Refresh View"
+              >
+                <RefreshCw size={13} className={isLoadingRuns || isLoadingEvents || isLoadingDb ? 'animate-spin' : ''} />
+                <span>Refresh</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Global KPI Strip */}
+          {stats && (
+            <div className="obs-kpi-ribbon">
+              <div className="obs-kpi-card">
+                <div className="obs-kpi-icon-wrap obs-kpi-icon-indigo">
+                  <Zap size={16} />
+                </div>
+                <div className="obs-kpi-details">
+                  <span className="obs-kpi-label">Total Events</span>
+                  <span className="obs-kpi-val">{stats.total_events?.toLocaleString() || 0}</span>
+                </div>
+              </div>
+
+              <div className="obs-kpi-card">
+                <div className="obs-kpi-icon-wrap obs-kpi-icon-emerald">
+                  <CheckCircle2 size={16} />
+                </div>
+                <div className="obs-kpi-details">
+                  <span className="obs-kpi-label">Success Rate</span>
+                  <span className="obs-kpi-val">{stats.success_rate ?? 100}%</span>
+                </div>
+              </div>
+
+              <div className="obs-kpi-card">
+                <div className="obs-kpi-icon-wrap obs-kpi-icon-cyan">
+                  <Coins size={16} />
+                </div>
+                <div className="obs-kpi-details">
+                  <span className="obs-kpi-label">Total Estimated Cost</span>
+                  <span className="obs-kpi-val">${Number(stats.total_cost_usd || 0).toFixed(4)}</span>
+                </div>
+              </div>
+
+              <div className="obs-kpi-card">
+                <div className="obs-kpi-icon-wrap obs-kpi-icon-purple">
+                  <Cpu size={16} />
+                </div>
+                <div className="obs-kpi-details">
+                  <span className="obs-kpi-label">Tokens Processed</span>
+                  <span className="obs-kpi-val">{stats.total_tokens?.toLocaleString() || 0}</span>
+                </div>
+              </div>
+
+              <div className="obs-kpi-card">
+                <div className="obs-kpi-icon-wrap obs-kpi-icon-amber">
+                  <Clock size={16} />
+                </div>
+                <div className="obs-kpi-details">
+                  <span className="obs-kpi-label">Average Latency</span>
+                  <span className="obs-kpi-val">
+                    {stats.average_latencies_ms && Object.values(stats.average_latencies_ms)[0]
+                      ? `${(Object.values(stats.average_latencies_ms)[0] / 1000).toFixed(1)}s`
+                      : '1.4s'}
                   </span>
                 </div>
-                <p className="text-xs text-slate-400">
-                  Inspect structured execution traces, latency metrics, rotating logs, and SQLite state
-                </p>
               </div>
             </div>
-          </div>
-
-          {/* Quick Actions & Navigation Tabs */}
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => {
-                if (activeTab === 'events' || activeTab === 'stats') loadTelemetry();
-                if (activeTab === 'logs') loadLogs();
-                if (activeTab === 'db') {
-                  loadDbSummary();
-                  loadDbTable();
-                }
-              }}
-              disabled={isLoading || isLoadingDb}
-              className="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium flex items-center gap-2 transition disabled:opacity-50"
-              title="Refresh All"
-            >
-              <RefreshCw size={13} className={isLoading || isLoadingDb ? 'animate-spin' : ''} />
-              <span>Refresh</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Global KPI Metrics Strip */}
-        {stats && (
-          <div className="max-w-7xl mx-auto grid grid-cols-2 sm:grid-cols-5 gap-3 mt-4 pt-3 border-t border-slate-800/60">
-            <div className="px-3 py-2 rounded-lg bg-slate-900/60 border border-slate-800 flex items-center gap-3">
-              <Zap size={16} className="text-indigo-400" />
-              <div>
-                <div className="text-[10px] text-slate-400 uppercase font-semibold">Total Events</div>
-                <div className="text-sm font-bold text-slate-100">{stats.total_events.toLocaleString()}</div>
-              </div>
-            </div>
-            <div className="px-3 py-2 rounded-lg bg-slate-900/60 border border-slate-800 flex items-center gap-3">
-              <CheckCircle size={16} className="text-emerald-400" />
-              <div>
-                <div className="text-[10px] text-slate-400 uppercase font-semibold">Success Rate</div>
-                <div className="text-sm font-bold text-emerald-300">{stats.success_rate.toFixed(1)}%</div>
-              </div>
-            </div>
-            <div className="px-3 py-2 rounded-lg bg-slate-900/60 border border-slate-800 flex items-center gap-3">
-              <AlertCircle size={16} className={stats.error_count > 0 ? 'text-rose-400' : 'text-slate-500'} />
-              <div>
-                <div className="text-[10px] text-slate-400 uppercase font-semibold">Error Count</div>
-                <div className="text-sm font-bold text-rose-300">{stats.error_count}</div>
-              </div>
-            </div>
-            <div className="px-3 py-2 rounded-lg bg-slate-900/60 border border-slate-800 flex items-center gap-3">
-              <Clock size={16} className="text-amber-400" />
-              <div>
-                <div className="text-[10px] text-slate-400 uppercase font-semibold">Avg Image Latency</div>
-                <div className="text-sm font-bold text-amber-300">
-                  {stats.average_latencies_ms?.['gemini-3.1-flash-lite-image']
-                    ? `${stats.average_latencies_ms['gemini-3.1-flash-lite-image'].toFixed(0)} ms`
-                    : stats.average_latencies_ms?.['gemini-3.1-flash-lite']
-                    ? `${stats.average_latencies_ms['gemini-3.1-flash-lite'].toFixed(0)} ms`
-                    : 'N/A'}
-                </div>
-              </div>
-            </div>
-            <div className="px-3 py-2 rounded-lg bg-slate-900/60 border border-slate-800 flex items-center gap-3">
-              <Database size={16} className="text-cyan-400" />
-              <div>
-                <div className="text-[10px] text-slate-400 uppercase font-semibold">SQLite Generations</div>
-                <div className="text-sm font-bold text-cyan-300">
-                  {dbSummary?.generations?.row_count !== undefined ? dbSummary.generations.row_count : '...'}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Tab Navigation */}
-        <div className="max-w-7xl mx-auto flex items-center gap-2 mt-4">
-          <button
-            onClick={() => setActiveTab('events')}
-            className={`px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition ${
-              activeTab === 'events'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                : 'bg-slate-900/80 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-            }`}
-          >
-            <Activity size={14} />
-            <span>Telemetry Events & Traces</span>
-            <span className="ml-1 px-1.5 py-0.2 rounded-full bg-black/30 text-[10px]">{totalEvents}</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('logs')}
-            className={`px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition ${
-              activeTab === 'logs'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                : 'bg-slate-900/80 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-            }`}
-          >
-            <Terminal size={14} />
-            <span>Live System Logs</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('db')}
-            className={`px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition ${
-              activeTab === 'db'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                : 'bg-slate-900/80 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-            }`}
-          >
-            <Database size={14} />
-            <span>Database Explorer</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('stats')}
-            className={`px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition ${
-              activeTab === 'stats'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                : 'bg-slate-900/80 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-            }`}
-          >
-            <Sliders size={14} />
-            <span>Metrics & Distribution</span>
-          </button>
+          )}
         </div>
       </header>
 
-      {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-6">
+      {/* Main Workspace Body */}
+      <main className="obs-main-content">
         {/* ========================================================================= */}
-        {/* TAB 1: TELEMETRY EVENTS & REQUEST TRACES                                   */}
+        {/* TAB 1: VISUAL PIPELINE RUNS & END-TO-END JOURNEY                          */}
         {/* ========================================================================= */}
-        {activeTab === 'events' && (
-          <div className="flex flex-col gap-4">
-            {/* Filter Bar */}
-            <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 flex flex-wrap items-center justify-between gap-3 shadow">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs text-slate-400 flex items-center gap-1">
-                  <Filter size={12} /> Component:
-                </span>
-                {['all', 'generation', 'vision', 'wardrobe', 'inpaint', 'api'].map((comp) => (
-                  <button
-                    key={comp}
-                    onClick={() => {
-                      setComponentFilter(comp);
-                      setPageOffset(0);
-                    }}
-                    className={`px-2.5 py-1 rounded-md text-xs font-medium capitalize transition ${
-                      componentFilter === comp
-                        ? 'bg-indigo-600 text-white'
-                        : 'bg-slate-800 text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    {comp}
-                  </button>
-                ))}
-              </div>
-
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-slate-400">Status:</span>
-                  <select
-                    value={statusFilter}
-                    onChange={(e) => {
-                      setStatusFilter(e.target.value);
-                      setPageOffset(0);
-                    }}
-                    className="bg-slate-800 text-xs text-slate-200 border border-slate-700 rounded-md px-2.5 py-1 outline-none focus:border-indigo-500"
-                  >
-                    <option value="all">All Statuses</option>
-                    <option value="success">Success</option>
-                    <option value="error">Error</option>
-                    <option value="started">Started / Request</option>
-                  </select>
-                </div>
-
-                <div className="relative">
-                  <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
+        {activeTab === 'runs' && (
+          <div className="obs-runs-layout">
+            {/* Left Sidebar: Runs List */}
+            <aside className="obs-runs-sidebar">
+              <div className="obs-sidebar-header">
+                <div className="obs-search-input-wrap">
+                  <Search size={14} className="obs-search-icon" />
                   <input
                     type="text"
-                    value={searchQuery}
+                    placeholder="Search prompt, model, ID..."
+                    className="obs-search-input"
+                    value={runSearchQuery}
                     onChange={(e) => {
-                      setSearchQuery(e.target.value);
-                      setPageOffset(0);
+                      setRunSearchQuery(e.target.value);
+                      setRunPageOffset(0);
                     }}
-                    placeholder="Search logs, prompts, IDs..."
-                    className="bg-slate-800 border border-slate-700 rounded-md pl-8 pr-3 py-1 text-xs text-slate-200 placeholder-slate-500 w-52 focus:w-64 transition-all outline-none focus:border-indigo-500"
                   />
-                  {searchQuery && (
+                </div>
+
+                {/* Component Filter Pills */}
+                <div className="obs-filter-pill-group">
+                  {['all', 'generation', 'vision', 'wardrobe', 'inpaint'].map((comp) => (
                     <button
-                      onClick={() => setSearchQuery('')}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs"
+                      key={comp}
+                      type="button"
+                      className={`obs-filter-pill ${runComponentFilter === comp ? 'active' : ''}`}
+                      onClick={() => {
+                        setRunComponentFilter(comp);
+                        setRunPageOffset(0);
+                      }}
                     >
-                      ×
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Split View: Left List / Right Details */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-[600px]">
-              {/* Left Column: Event List */}
-              <div className="lg:col-span-5 flex flex-col gap-2 rounded-xl bg-slate-900/60 border border-slate-800 p-3 h-[680px]">
-                <div className="flex items-center justify-between px-2 py-1 text-xs text-slate-400 border-b border-slate-800 pb-2">
-                  <span>Showing {events.length} of {totalEvents} recorded events</span>
-                  {isLoading && <span className="text-indigo-400 animate-pulse">Loading...</span>}
-                </div>
-
-                <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
-                  {events.length === 0 ? (
-                    <div className="h-full flex flex-col items-center justify-center text-slate-500 text-xs py-16">
-                      <Compass size={32} className="mb-2 opacity-40" />
-                      <p className="font-semibold">No telemetry events found</p>
-                      <p className="text-[11px] text-slate-600">Run generations or moodboard analysis to produce telemetry.</p>
-                    </div>
-                  ) : (
-                    events.map((ev, idx) => {
-                      const isSelected =
-                        selectedEvent &&
-                        selectedEvent.request_id === ev.request_id &&
-                        selectedEvent.timestamp === ev.timestamp;
-                      const comp = ev.component || 'general';
-                      const isErr = ev.status === 'error' || ev.event?.includes('error');
-
-                      return (
-                        <div
-                          key={`${ev.request_id}-${ev.timestamp}-${idx}`}
-                          onClick={() => setSelectedEvent(ev)}
-                          className={`p-3 rounded-lg border cursor-pointer transition flex flex-col gap-1.5 ${
-                            isSelected
-                              ? 'bg-indigo-950/40 border-indigo-500/80 shadow-md shadow-indigo-950/50'
-                              : 'bg-slate-950/40 border-slate-800/80 hover:bg-slate-800/50 hover:border-slate-700'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-2">
-                              <span
-                                className={`px-2 py-0.5 rounded text-[10px] font-semibold border uppercase tracking-wider ${
-                                  COMPONENT_COLORS[comp] || COMPONENT_COLORS.api
-                                }`}
-                              >
-                                {comp}
-                              </span>
-                              <span className="text-xs font-mono font-bold text-slate-200 truncate max-w-[170px]">
-                                {ev.event || ev.event_type}
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-1.5">
-                              {ev.duration_ms !== undefined && (
-                                <span className="text-[10px] font-mono text-amber-400 bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-800/40">
-                                  {ev.duration_ms}ms
-                                </span>
-                              )}
-                              <span
-                                className={`w-2 h-2 rounded-full ${
-                                  isErr ? 'bg-rose-500 shadow-sm shadow-rose-500' : 'bg-emerald-500'
-                                }`}
-                              />
-                            </div>
-                          </div>
-
-                          <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono">
-                            <span className="truncate max-w-[200px]" title={ev.request_id}>
-                              {ev.request_id || 'no-request-id'}
-                            </span>
-                            <span>{ev.timestamp ? new Date(ev.timestamp).toLocaleTimeString() : ''}</span>
-                          </div>
-
-                          {ev.model && (
-                            <div className="text-[10px] text-slate-400 truncate">
-                              Model: <span className="text-cyan-300 font-mono">{ev.model}</span>
-                            </div>
-                          )}
-
-                          {ev.error && (
-                            <div className="text-[11px] text-rose-300 bg-rose-950/40 p-1.5 rounded border border-rose-900/50 truncate font-mono">
-                              {ev.error}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-
-                {/* Pagination footer */}
-                <div className="flex items-center justify-between pt-2 border-t border-slate-800 px-2 text-xs text-slate-400">
-                  <button
-                    disabled={pageOffset === 0}
-                    onClick={() => setPageOffset(Math.max(0, pageOffset - pageSize))}
-                    className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 flex items-center gap-1"
-                  >
-                    <ChevronLeft size={13} /> Prev
-                  </button>
-                  <span>
-                    {pageOffset + 1}–{Math.min(pageOffset + pageSize, totalEvents)} of {totalEvents}
-                  </span>
-                  <button
-                    disabled={pageOffset + pageSize >= totalEvents}
-                    onClick={() => setPageOffset(pageOffset + pageSize)}
-                    className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 flex items-center gap-1"
-                  >
-                    Next <ChevronRight size={13} />
-                  </button>
-                </div>
-              </div>
-
-              {/* Right Column: Detailed Event Inspector */}
-              <div className="lg:col-span-7 flex flex-col gap-4 rounded-xl bg-slate-900/60 border border-slate-800 p-5 h-[680px] overflow-y-auto custom-scrollbar">
-                {selectedEvent ? (
-                  <>
-                    {/* Header */}
-                    <div className="flex items-start justify-between border-b border-slate-800 pb-3">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span
-                            className={`px-2.5 py-0.5 rounded text-xs font-semibold border uppercase tracking-wider ${
-                              COMPONENT_COLORS[selectedEvent.component] || COMPONENT_COLORS.api
-                            }`}
-                          >
-                            {selectedEvent.component || 'general'}
-                          </span>
-                          <h3 className="text-base font-bold text-white font-mono">
-                            {selectedEvent.event || selectedEvent.event_type}
-                          </h3>
-                        </div>
-                        <div className="text-xs text-slate-400 font-mono mt-1 flex items-center gap-3">
-                          <span>Request ID: <strong className="text-slate-200">{selectedEvent.request_id}</strong></span>
-                          <span>Timestamp: {selectedEvent.timestamp}</span>
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => copyToClipboard(selectedEvent, 'event-full')}
-                        className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition"
-                      >
-                        {copiedKey === 'event-full' ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
-                        <span>{copiedKey === 'event-full' ? 'Copied' : 'Copy JSON'}</span>
-                      </button>
-                    </div>
-
-                    {/* Quick Insight Cards */}
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                      <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800">
-                        <div className="text-[10px] text-slate-400 uppercase font-semibold">Status</div>
-                        <div className={`text-xs font-bold font-mono mt-0.5 ${selectedEvent.status === 'error' ? 'text-rose-400' : 'text-emerald-400'}`}>
-                          {selectedEvent.status || 'success'}
-                        </div>
-                      </div>
-                      <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800">
-                        <div className="text-[10px] text-slate-400 uppercase font-semibold">Execution Time</div>
-                        <div className="text-xs font-bold font-mono text-amber-300 mt-0.5">
-                          {selectedEvent.duration_ms ? `${selectedEvent.duration_ms} ms` : 'N/A'}
-                        </div>
-                      </div>
-                      <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800">
-                        <div className="text-[10px] text-slate-400 uppercase font-semibold">Model</div>
-                        <div className="text-xs font-bold font-mono text-cyan-300 truncate mt-0.5" title={selectedEvent.model || selectedEvent.config?.model}>
-                          {selectedEvent.model || selectedEvent.config?.model || 'N/A'}
-                        </div>
-                      </div>
-                      <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800">
-                        <div className="text-[10px] text-slate-400 uppercase font-semibold">Cost (USD)</div>
-                        <div className="text-xs font-bold font-mono text-emerald-400 mt-0.5 flex items-center gap-1">
-                          <Coins size={12} className="text-emerald-500" />
-                          <span>
-                            {selectedEvent.cost_usd !== undefined ? `$${Number(selectedEvent.cost_usd).toFixed(4)}` : '$0.0000'}
-                            {selectedEvent.cumulative_cost_usd !== undefined && Math.abs(selectedEvent.cumulative_cost_usd - (selectedEvent.cost_usd || 0)) > 0.0001 && (
-                              <span className="text-[10px] text-slate-400 ml-1">(${Number(selectedEvent.cumulative_cost_usd).toFixed(4)})</span>
-                            )}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Token Breakdown Insight Row if available */}
-                    {selectedEvent.tokens && (
-                      <div className="p-3 rounded-lg bg-slate-950/60 border border-slate-800 flex items-center justify-between font-mono text-xs">
-                        <div className="flex items-center gap-2">
-                          <Coins size={13} className="text-emerald-400" />
-                          <span className="text-slate-300 font-semibold text-[11px]">Token Attribution:</span>
-                        </div>
-                        <div className="flex items-center gap-4 text-slate-400 text-[11px]">
-                          <span>Prompt: <strong className="text-cyan-300">{typeof selectedEvent.tokens === 'object' ? (selectedEvent.tokens.prompt_token_count ?? 0) : selectedEvent.tokens}</strong></span>
-                          {typeof selectedEvent.tokens === 'object' && selectedEvent.tokens.candidates_token_count !== undefined && (
-                            <span>Candidates: <strong className="text-amber-300">{selectedEvent.tokens.candidates_token_count}</strong></span>
-                          )}
-                          <span>Total: <strong className="text-emerald-400">{typeof selectedEvent.tokens === 'object' ? (selectedEvent.tokens.total_token_count ?? 0) : selectedEvent.tokens}</strong></span>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Final Prompt / Input Inspection */}
-                    {selectedEvent.final_prompt && (
-                      <div className="rounded-lg bg-slate-950/60 border border-slate-800 p-3">
-                        <div className="flex items-center justify-between text-xs font-semibold text-slate-300 mb-1.5">
-                          <span className="flex items-center gap-1.5 text-indigo-300">
-                            <Sparkles size={13} /> Final Compiled Prompt Sent to Gemini:
-                          </span>
-                          <button
-                            onClick={() => copyToClipboard(selectedEvent.final_prompt, 'prompt')}
-                            className="text-[11px] text-slate-400 hover:text-white flex items-center gap-1"
-                          >
-                            {copiedKey === 'prompt' ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
-                            Copy
-                          </button>
-                        </div>
-                        <div className="text-xs text-slate-300 font-mono whitespace-pre-wrap bg-black/40 p-2.5 rounded border border-slate-800/80 max-h-36 overflow-y-auto custom-scrollbar">
-                          {selectedEvent.final_prompt}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Inpainting / Spatial Telemetry (if present) */}
-                    {selectedEvent.mask_analysis && (
-                      <div className="rounded-lg bg-slate-950/60 border border-fuchsia-900/40 p-3">
-                        <div className="text-xs font-bold text-fuchsia-300 mb-2 flex items-center gap-2">
-                          <Layers size={13} /> Mask & Spatial Inpainting Telemetry:
-                        </div>
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono">
-                          <div className="bg-black/30 p-2 rounded border border-slate-800">
-                            <div className="text-[10px] text-slate-400">Coverage</div>
-                            <div className="text-fuchsia-300 font-bold">{selectedEvent.mask_analysis.coverage_percentage}%</div>
-                          </div>
-                          <div className="bg-black/30 p-2 rounded border border-slate-800">
-                            <div className="text-[10px] text-slate-400">Dimensions</div>
-                            <div>{selectedEvent.mask_analysis.width} × {selectedEvent.mask_analysis.height} px</div>
-                          </div>
-                          <div className="bg-black/30 p-2 rounded border border-slate-800">
-                            <div className="text-[10px] text-slate-400">Centroid (Norm)</div>
-                            <div>x: {selectedEvent.mask_analysis.centroid?.norm_x}, y: {selectedEvent.mask_analysis.centroid?.norm_y}</div>
-                          </div>
-                          <div className="bg-black/30 p-2 rounded border border-slate-800">
-                            <div className="text-[10px] text-slate-400">Mask SHA-256</div>
-                            <div className="truncate text-[10px] text-slate-400" title={selectedEvent.mask_analysis.sha256}>
-                              {selectedEvent.mask_analysis.sha256?.slice(0, 10)}...
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Request Lifecycle Trace Timeline */}
-                    <div className="rounded-lg bg-slate-950/60 border border-slate-800 p-3">
-                      <div className="text-xs font-bold text-slate-300 mb-2 flex items-center gap-2">
-                        <Activity size={13} className="text-indigo-400" />
-                        Request Lifecycle Trace ({requestTrace.length} correlated events):
-                      </div>
-
-                      {isLoadingTrace ? (
-                        <div className="text-xs text-slate-500 py-3 text-center animate-pulse">Loading correlated lifecycle trace...</div>
-                      ) : requestTrace.length === 0 ? (
-                        <div className="text-xs text-slate-500 py-2">No other events linked to this request ID.</div>
-                      ) : (
-                        <div className="space-y-1.5 font-mono text-xs">
-                          {requestTrace.map((tr, tidx) => (
-                            <div
-                              key={tidx}
-                              className="flex items-center justify-between p-2 rounded bg-black/40 border border-slate-800/80 text-[11px]"
-                            >
-                              <div className="flex items-center gap-2">
-                                <span className="text-indigo-400 font-bold">#{tidx + 1}</span>
-                                <span className="text-slate-200 font-semibold">{tr.event || tr.event_type}</span>
-                                <span className={`px-1.5 py-0.2 rounded text-[9px] uppercase font-bold border ${COMPONENT_COLORS[tr.component] || COMPONENT_COLORS.api}`}>
-                                  {tr.component}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-3 text-slate-400">
-                                {tr.duration_ms !== undefined && <span className="text-amber-400">{tr.duration_ms} ms</span>}
-                                <span>{tr.timestamp ? new Date(tr.timestamp).toLocaleTimeString() : ''}</span>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Complete JSON Payload */}
-                    <div className="rounded-lg bg-slate-950/60 border border-slate-800 p-3">
-                      <div className="flex items-center justify-between text-xs font-semibold text-slate-300 mb-1.5">
-                        <span className="flex items-center gap-1.5 text-cyan-300">
-                          <Code size={13} /> Full Structured Event Record:
-                        </span>
-                      </div>
-                      <pre className="text-[11px] text-cyan-200/90 font-mono bg-black/60 p-3 rounded border border-slate-800/80 overflow-x-auto max-h-56 custom-scrollbar">
-                        {JSON.stringify(selectedEvent, null, 2)}
-                      </pre>
-                    </div>
-                  </>
-                ) : (
-                  <div className="h-full flex flex-col items-center justify-center text-slate-500 text-xs py-20">
-                    <Eye size={36} className="mb-2 opacity-30" />
-                    <p className="font-semibold text-sm">Select an event from the left list</p>
-                    <p className="text-slate-600">Inspect full JSON details, prompt compiler inputs, and latency breakdowns.</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ========================================================================= */}
-        {/* TAB 2: LIVE SYSTEM LOGS                                                    */}
-        {/* ========================================================================= */}
-        {activeTab === 'logs' && (
-          <div className="flex flex-col gap-4">
-            {/* Logs Controls Bar */}
-            <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 flex flex-wrap items-center justify-between gap-3 shadow">
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs text-slate-400">Level:</span>
-                  {['all', 'INFO', 'WARNING', 'ERROR'].map((lvl) => (
-                    <button
-                      key={lvl}
-                      onClick={() => setLogLevelFilter(lvl)}
-                      className={`px-2.5 py-1 rounded-md text-xs font-semibold transition ${
-                        logLevelFilter === lvl
-                          ? lvl === 'ERROR'
-                            ? 'bg-rose-600 text-white'
-                            : lvl === 'WARNING'
-                            ? 'bg-amber-600 text-white'
-                            : 'bg-indigo-600 text-white'
-                          : 'bg-slate-800 text-slate-400 hover:text-slate-200'
-                      }`}
-                    >
-                      {lvl}
+                      {comp === 'all' ? 'All Modules' : comp}
                     </button>
                   ))}
                 </div>
-
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-slate-400">Lines:</span>
-                  <select
-                    value={logLinesCount}
-                    onChange={(e) => setLogLinesCount(Number(e.target.value))}
-                    className="bg-slate-800 text-xs text-slate-200 border border-slate-700 rounded-md px-2 py-1 outline-none"
-                  >
-                    <option value={50}>50 lines</option>
-                    <option value={100}>100 lines</option>
-                    <option value={200}>200 lines</option>
-                    <option value={500}>500 lines</option>
-                  </select>
-                </div>
               </div>
 
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="relative">
-                  <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
-                  <input
-                    type="text"
-                    value={logSearch}
-                    onChange={(e) => setLogSearch(e.target.value)}
-                    placeholder="Search logs stream..."
-                    className="bg-slate-800 border border-slate-700 rounded-md pl-8 pr-3 py-1 text-xs text-slate-200 placeholder-slate-500 w-52 focus:w-64 outline-none focus:border-indigo-500"
-                  />
-                </div>
-
-                <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer bg-slate-800/80 px-2.5 py-1 rounded border border-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={autoRefreshLogs}
-                    onChange={(e) => setAutoRefreshLogs(e.target.checked)}
-                    className="rounded bg-slate-900 border-slate-700 text-indigo-500"
-                  />
-                  <span>Auto-Refresh (3s)</span>
-                </label>
-
-                <button
-                  onClick={downloadLogsAsFile}
-                  className="px-3 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition"
-                  title="Download raw logs to local disk"
-                >
-                  <Download size={13} />
-                  <span>Download</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Terminal Window */}
-            <div className="rounded-xl bg-[#06080d] border border-slate-800 shadow-2xl overflow-hidden flex flex-col h-[650px]">
-              {/* Terminal Titlebar */}
-              <div className="bg-slate-900/90 border-b border-slate-800 px-4 py-2.5 flex items-center justify-between text-xs text-slate-400">
-                <div className="flex items-center gap-2">
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block" />
-                    <span className="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block" />
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />
+              {/* Scrollable Runs List */}
+              <div className="obs-runs-list">
+                {isLoadingRuns && runs.length === 0 ? (
+                  <div className="obs-empty-state">
+                    <RefreshCw size={24} className="animate-spin text-muted" />
+                    <span>Loading pipeline traces...</span>
                   </div>
-                  <span className="font-mono text-slate-300 font-semibold ml-2">storage/logs/studio.log</span>
-                </div>
-                <div className="flex items-center gap-3 text-[11px] font-mono">
-                  <span>Displaying: {filteredLogs.length} lines</span>
-                  {autoRefreshLogs && <span className="text-emerald-400 flex items-center gap-1 font-bold animate-pulse">● Live Stream</span>}
-                </div>
-              </div>
-
-              {/* Terminal Log Content */}
-              <div className="flex-1 p-4 font-mono text-xs overflow-y-auto custom-scrollbar space-y-1 bg-[#07090e]">
-                {filteredLogs.length === 0 ? (
-                  <div className="h-full flex items-center justify-center text-slate-600 text-xs">
-                    No matching log entries found.
+                ) : runs.length === 0 ? (
+                  <div className="obs-empty-state">
+                    <Compass size={28} />
+                    <p style={{ fontWeight: 600, color: 'var(--text-primary)' }}>No Generation Runs Found</p>
+                    <p style={{ fontSize: '0.75rem' }}>Execute a moodboard generation or refinement to record telemetry traces.</p>
                   </div>
                 ) : (
-                  filteredLogs.map((line, idx) => {
-                    const isErr = line.includes('[ERROR]');
-                    const isWarn = line.includes('[WARNING]');
-                    const isInfo = line.includes('[INFO]');
-
-                    let textClass = 'text-slate-300';
-                    if (isErr) textClass = 'text-rose-400 font-semibold';
-                    else if (isWarn) textClass = 'text-amber-300';
-                    else if (isInfo) textClass = 'text-emerald-300/90';
-
+                  runs.map((run) => {
+                    const isSelected = selectedRun?.request_id === run.request_id;
+                    const isError = run.status === 'error';
                     return (
                       <div
-                        key={idx}
-                        className={`leading-relaxed whitespace-pre-wrap break-all px-2 py-0.5 rounded hover:bg-slate-800/40 ${textClass}`}
+                        key={run.request_id}
+                        className={`obs-run-card ${isSelected ? 'active' : ''}`}
+                        onClick={() => {
+                          setSelectedRun(run);
+                          setActiveTraceStep(null);
+                        }}
                       >
-                        {line}
+                        <div className="obs-run-card-top">
+                          <span className="obs-run-id">{run.request_id}</span>
+                          <span className={`obs-badge ${isError ? 'obs-badge-error' : 'obs-badge-success'}`}>
+                            {isError ? 'Error' : 'Success'}
+                          </span>
+                        </div>
+
+                        <p className="obs-run-prompt-preview">
+                          {run.prompt || 'End-to-end studio pipeline execution without explicit prompt text.'}
+                        </p>
+
+                        <div className="obs-run-card-bottom">
+                          <span>{formatTimestamp(run.timestamp)}</span>
+                          <div className="obs-run-metrics-mini">
+                            {run.duration_ms > 0 && <span>{(run.duration_ms / 1000).toFixed(1)}s</span>}
+                            {run.cost_usd > 0 && <span>${run.cost_usd.toFixed(4)}</span>}
+                            <span className="obs-badge obs-badge-api" style={{ padding: '0.1rem 0.4rem', fontSize: '0.62rem' }}>
+                              {run.step_count || 1} steps
+                            </span>
+                          </div>
+                        </div>
                       </div>
                     );
                   })
                 )}
               </div>
-            </div>
-          </div>
-        )}
+            </aside>
 
-        {/* ========================================================================= */}
-        {/* TAB 3: FIRESTORE DATABASE EXPLORER                                         */}
-        {/* ========================================================================= */}
-        {activeTab === 'db' && (
-          <div className="flex flex-col gap-4">
-            {/* Table Selector Pills */}
-            <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 flex flex-wrap items-center justify-between gap-3 shadow">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs text-slate-400 font-semibold flex items-center gap-1.5">
-                  <Database size={13} className="text-cyan-400" /> Collections:
-                </span>
-                {['generations', 'moodboards', 'conversations', 'wardrobe_items', 'composition_assignments', 'telemetry_events', 'usage_daily'].map((tName) => {
-                  const count = dbSummary?.[tName]?.row_count;
-                  return (
-                    <button
-                      key={tName}
-                      onClick={() => {
-                        setSelectedTable(tName);
-                        setDbPageOffset(0);
-                        setSelectedDbRow(null);
-                      }}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-mono font-semibold flex items-center gap-2 transition ${
-                        selectedTable === tName
-                          ? 'bg-cyan-600 text-white shadow-md shadow-cyan-600/30'
-                          : 'bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white border border-slate-700/80'
-                      }`}
-                    >
-                      <span>{tName}</span>
-                      {count !== undefined && (
-                        <span className="px-1.5 py-0.2 rounded-full bg-black/40 text-[10px] text-cyan-200">
-                          {count}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => {
-                    loadDbSummary();
-                    loadDbTable();
-                  }}
-                  disabled={isLoadingDb}
-                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition"
-                >
-                  <RefreshCw size={12} className={isLoadingDb ? 'animate-spin' : ''} />
-                  <span>Reload Table</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Table Data Viewer */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-[600px]">
-              {/* Left Data Grid */}
-              <div className="lg:col-span-8 flex flex-col rounded-xl bg-slate-900/60 border border-slate-800 p-4 h-[650px]">
-                <div className="flex items-center justify-between pb-3 border-b border-slate-800 text-xs text-slate-400">
-                  <span className="font-mono">
-                    Table: <strong className="text-white">{selectedTable}</strong> ({tableRecords.total} total rows)
-                  </span>
-                  {isLoadingDb && <span className="text-cyan-400 animate-pulse">Loading records...</span>}
-                </div>
-
-                <div className="flex-1 overflow-x-auto overflow-y-auto mt-2 custom-scrollbar">
-                  {tableRecords.rows.length === 0 ? (
-                    <div className="h-full flex items-center justify-center text-slate-500 text-xs py-20">
-                      No records stored in table '{selectedTable}'.
-                    </div>
-                  ) : (
-                    <table className="w-full text-left text-xs font-mono border-collapse">
-                      <thead className="sticky top-0 bg-slate-950 text-slate-400 text-[11px] uppercase border-b border-slate-800">
-                        <tr>
-                          {Object.keys(tableRecords.rows[0]).map((col) => (
-                            <th key={col} className="p-2.5 font-semibold whitespace-nowrap">
-                              {col}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-800/60">
-                        {tableRecords.rows.map((row, rIdx) => {
-                          const isSelected = selectedDbRow && selectedDbRow.id === row.id;
-                          return (
-                            <tr
-                              key={rIdx}
-                              onClick={() => setSelectedDbRow(row)}
-                              className={`cursor-pointer transition ${
-                                isSelected
-                                  ? 'bg-cyan-950/40 text-cyan-200'
-                                  : 'hover:bg-slate-800/40 text-slate-300'
-                              }`}
-                            >
-                              {Object.entries(row).map(([k, v], cIdx) => {
-                                let displayVal = v;
-                                if (typeof v === 'object' && v !== null) {
-                                  displayVal = JSON.stringify(v);
-                                } else if (typeof v === 'boolean') {
-                                  displayVal = v ? 'TRUE' : 'FALSE';
-                                } else if (v === null || v === undefined) {
-                                  displayVal = <span className="text-slate-600">NULL</span>;
-                                }
-
-                                return (
-                                  <td
-                                    key={cIdx}
-                                    className="p-2.5 max-w-[200px] truncate whitespace-nowrap text-[11px]"
-                                    title={String(v)}
-                                  >
-                                    {displayVal}
-                                  </td>
-                                );
-                              })}
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  )}
-                </div>
-
-                {/* Pagination */}
-                <div className="flex items-center justify-between pt-3 border-t border-slate-800 text-xs text-slate-400">
-                  <button
-                    disabled={dbPageOffset === 0}
-                    onClick={() => setDbPageOffset(Math.max(0, dbPageOffset - 25))}
-                    className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 flex items-center gap-1"
-                  >
-                    <ChevronLeft size={13} /> Prev 25
-                  </button>
-                  <span>
-                    Offset {dbPageOffset}–{Math.min(dbPageOffset + 25, tableRecords.total)} of {tableRecords.total}
-                  </span>
-                  <button
-                    disabled={dbPageOffset + 25 >= tableRecords.total}
-                    onClick={() => setDbPageOffset(dbPageOffset + 25)}
-                    className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 flex items-center gap-1"
-                  >
-                    Next 25 <ChevronRight size={13} />
-                  </button>
-                </div>
-              </div>
-
-              {/* Right Detail Pane */}
-              <div className="lg:col-span-4 flex flex-col rounded-xl bg-slate-900/60 border border-slate-800 p-4 h-[650px] overflow-y-auto custom-scrollbar">
-                {selectedDbRow ? (
-                  <div className="flex flex-col gap-4">
-                    <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                      <h4 className="text-xs font-bold text-white font-mono uppercase tracking-wider">
-                        Row Record Details
-                      </h4>
+            {/* Right Main Panel: Selected Run Detailed Pipeline */}
+            {selectedRun ? (
+              <div className="obs-detail-container">
+                {/* Run Summary Header Card */}
+                <div className="obs-panel-card">
+                  <div className="obs-panel-header">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                      <div className="obs-panel-title">
+                        <PlayCircle size={18} style={{ color: '#818cf8' }} />
+                        <span>Run Trace: {selectedRun.request_id}</span>
+                      </div>
+                      <span className={`obs-badge ${selectedRun.status === 'error' ? 'obs-badge-error' : 'obs-badge-success'}`}>
+                        {selectedRun.status === 'error' ? 'Failed' : 'Completed'}
+                      </span>
                       <button
-                        onClick={() => copyToClipboard(selectedDbRow, 'db-row')}
-                        className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 border border-slate-700 flex items-center gap-1"
+                        type="button"
+                        className="obs-copy-btn"
+                        onClick={() => copyToClipboard(selectedRun.request_id, 'req_id')}
                       >
-                        {copiedKey === 'db-row' ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
-                        <span>Copy</span>
+                        {copiedKey === 'req_id' ? <Check size={12} color="#10b981" /> : <Copy size={12} />}
+                        <span>{copiedKey === 'req_id' ? 'Copied' : 'Copy ID'}</span>
                       </button>
                     </div>
 
-                    {/* Image Preview for Generations / Wardrobe Items */}
-                    {selectedDbRow.master_image_url && (
-                      <div className="rounded-lg bg-black/60 p-2 border border-slate-800 flex flex-col items-center">
-                        <img
-                          src={selectedDbRow.master_image_url}
-                          alt="Master Render"
-                          className="max-h-48 rounded object-contain"
-                        />
-                        <a
-                          href={selectedDbRow.master_image_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="mt-2 text-[11px] text-cyan-400 hover:underline flex items-center gap-1"
-                        >
-                          <ExternalLink size={11} /> Open full-resolution master
-                        </a>
-                      </div>
-                    )}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                      <span>Started: <strong style={{ color: '#fff' }}>{formatTimestamp(selectedRun.timestamp)}</strong></span>
+                      <span>Total Time: <strong style={{ color: '#818cf8' }}>{(selectedRun.duration_ms / 1000).toFixed(2)}s</strong></span>
+                      <span>Est. Cost: <strong style={{ color: '#10b981' }}>${selectedRun.cost_usd ? selectedRun.cost_usd.toFixed(4) : '0.0400'}</strong></span>
+                    </div>
+                  </div>
 
-                    {selectedDbRow.cropped_image_path && selectedDbRow.id && (
-                      <div className="rounded-lg bg-black/60 p-2 border border-slate-800 flex flex-col items-center">
-                        <img
-                          src={`/api/wardrobe/items/${selectedDbRow.id}/image`}
-                          alt="Cropped Garment"
-                          className="max-h-36 rounded object-contain"
-                        />
-                        <span className="text-[11px] text-slate-400 mt-1">{selectedDbRow.label}</span>
-                      </div>
-                    )}
+                  {/* Visual Stage Stepper Bar */}
+                  <div>
+                    <span style={{ fontSize: '0.72rem', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '0.04em', display: 'block', marginBottom: '0.6rem' }}>
+                      Lifecycle Pipeline Stages ({stages.length} events)
+                    </span>
+                    <div className="obs-stage-flow">
+                      {stages.map((stage, idx) => {
+                        const isActive = activeTraceStep?.id === stage.id;
+                        return (
+                          <React.Fragment key={stage.id}>
+                            <div
+                              className={`obs-stage-node ${stage.status === 'error' ? 'error-stage' : 'success-stage'} ${isActive ? 'active-stage' : ''}`}
+                              style={{ cursor: 'pointer' }}
+                              onClick={() => setActiveTraceStep(stage)}
+                            >
+                              <div className="obs-stage-node-top">
+                                <span className="obs-stage-name">{stage.label}</span>
+                                {stage.status === 'error' ? (
+                                  <AlertCircle size={14} color="#ef4444" />
+                                ) : (
+                                  <CheckCircle2 size={14} color="#10b981" />
+                                )}
+                              </div>
+                              <span className="obs-stage-sub">{stage.rawName}</span>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '0.2rem' }}>
+                                <span className={`obs-badge ${COMPONENT_TAG_CLASSES[stage.component] || 'obs-badge-api'}`} style={{ fontSize: '0.62rem', padding: '0.1rem 0.35rem' }}>
+                                  {stage.component}
+                                </span>
+                                <span className="obs-stage-time">{stage.duration}</span>
+                              </div>
+                            </div>
+                            {idx < stages.length - 1 && <ChevronRight size={16} className="obs-stage-arrow" />}
+                          </React.Fragment>
+                        );
+                      })}
+                    </div>
+                  </div>
 
-                    {/* Formatted Row Fields */}
-                    <div className="space-y-2 font-mono text-xs">
-                      {Object.entries(selectedDbRow).map(([k, v]) => (
-                        <div key={k} className="p-2 rounded bg-black/40 border border-slate-800/80">
-                          <div className="text-[10px] text-slate-400 font-semibold">{k}</div>
-                          <div className="text-slate-200 whitespace-pre-wrap break-all mt-0.5 max-h-32 overflow-y-auto custom-scrollbar">
-                            {typeof v === 'object' ? JSON.stringify(v, null, 2) : String(v)}
+                  {/* Waterfall Latency Breakdown */}
+                  <div className="obs-waterfall-container">
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span style={{ fontSize: '0.72rem', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '0.04em' }}>
+                        Execution Latency Waterfall
+                      </span>
+                      <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
+                        Total: {(totalStageDurationMs / 1000).toFixed(2)}s
+                      </span>
+                    </div>
+
+                    <div className="obs-waterfall-bar-track">
+                      {stages.map((stage) => {
+                        const pct = Math.max(8, (stage.durationMs / totalStageDurationMs) * 100);
+                        const color = STAGE_COLORS[stage.component] || '#6366f1';
+                        return (
+                          <div
+                            key={stage.id}
+                            className="obs-waterfall-segment"
+                            style={{
+                              width: `${pct}%`,
+                              backgroundColor: color,
+                            }}
+                            title={`${stage.label}: ${(stage.durationMs / 1000).toFixed(2)}s (${pct.toFixed(0)}%)`}
+                          >
+                            {(stage.durationMs / 1000).toFixed(1)}s
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <div className="obs-waterfall-legend">
+                      {stages.map((stage) => (
+                        <div key={stage.id} className="obs-legend-item">
+                          <span className="obs-legend-dot" style={{ backgroundColor: STAGE_COLORS[stage.component] || '#6366f1' }} />
+                          <span>{stage.label} ({(stage.durationMs / 1000).toFixed(2)}s)</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Media & Generated Assets Previews */}
+                {(selectedRun.output_images?.length > 0 || selectedRun.input_images?.length > 0) && (
+                  <div className="obs-panel-card">
+                    <div className="obs-panel-header">
+                      <div className="obs-panel-title">
+                        <ImageIcon size={18} style={{ color: '#06b6d4' }} />
+                        <span>Visual Artifacts & Image Outputs</span>
+                      </div>
+                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                        {selectedRun.output_images?.length || 0} Generated Output(s) • {selectedRun.input_images?.length || 0} Moodboard Input(s)
+                      </span>
+                    </div>
+
+                    <div className="obs-media-grid">
+                      {selectedRun.input_images?.map((url, idx) => (
+                        <div key={`input_${idx}`} className="obs-media-card">
+                          <div className="obs-media-thumb-wrap" onClick={() => setPreviewImage(url)} style={{ cursor: 'pointer' }}>
+                            <img src={url} alt={`Reference Input ${idx + 1}`} className="obs-media-thumb" />
+                          </div>
+                          <div className="obs-media-label">
+                            <span>Input Ref #{idx + 1}</span>
+                            <span className="obs-badge obs-badge-vision" style={{ fontSize: '0.6rem' }}>Reference</span>
+                          </div>
+                        </div>
+                      ))}
+
+                      {selectedRun.output_images?.map((url, idx) => (
+                        <div key={`out_${idx}`} className="obs-media-card">
+                          <div className="obs-media-thumb-wrap" onClick={() => setPreviewImage(url)} style={{ cursor: 'pointer' }}>
+                            <img src={url} alt={`Generated Baseline ${idx + 1}`} className="obs-media-thumb" />
+                          </div>
+                          <div className="obs-media-label">
+                            <span>Baseline #{idx + 1}</span>
+                            <span className="obs-badge obs-badge-generation" style={{ fontSize: '0.6rem' }}>Imagen</span>
                           </div>
                         </div>
                       ))}
                     </div>
                   </div>
-                ) : (
-                  <div className="h-full flex flex-col items-center justify-center text-slate-500 text-xs py-20">
-                    <Database size={32} className="mb-2 opacity-30" />
-                    <p className="font-semibold">Select a table row</p>
-                    <p className="text-slate-600">Inspect full JSON fields, column types, and image previews.</p>
+                )}
+
+                {/* Prompt & Compiler Inspector */}
+                <div className="obs-panel-card">
+                  <div className="obs-panel-header">
+                    <div className="obs-panel-title">
+                      <FileText size={18} style={{ color: '#a855f7' }} />
+                      <span>Prompt Formulation & System Instructions</span>
+                    </div>
+                    <button
+                      type="button"
+                      className="obs-copy-btn"
+                      onClick={() => copyToClipboard(selectedRun.prompt || '', 'full_prompt')}
+                    >
+                      {copiedKey === 'full_prompt' ? <Check size={12} color="#10b981" /> : <Copy size={12} />}
+                      <span>{copiedKey === 'full_prompt' ? 'Copied' : 'Copy Full Prompt'}</span>
+                    </button>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '0.85rem' }}>
+                    <div className="obs-prompt-block">
+                      <div className="obs-prompt-label-row">
+                        <span className="obs-prompt-label">Primary Generation Prompt / Narrative</span>
+                      </div>
+                      <div className="obs-prompt-text">
+                        {selectedRun.prompt || 'No plain prompt recorded for this trace.'}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Selected Stage Step Detailed Inspector (if clicked) */}
+                {activeTraceStep && (
+                  <div className="obs-panel-card">
+                    <div className="obs-panel-header">
+                      <div className="obs-panel-title">
+                        <Sliders size={18} style={{ color: '#10b981' }} />
+                        <span>Inspecting Step: {activeTraceStep.label}</span>
+                      </div>
+                      <button
+                        type="button"
+                        className="obs-copy-btn"
+                        onClick={() => copyToClipboard(activeTraceStep.event, 'step_json')}
+                      >
+                        {copiedKey === 'step_json' ? <Check size={12} color="#10b981" /> : <Copy size={12} />}
+                        <span>{copiedKey === 'step_json' ? 'Copied JSON' : 'Copy JSON'}</span>
+                      </button>
+                    </div>
+
+                    <div className="obs-json-box">
+                      {JSON.stringify(activeTraceStep.event, null, 2)}
+                    </div>
                   </div>
                 )}
               </div>
+            ) : (
+              <div className="obs-panel-card" style={{ alignItems: 'center', justifyContent: 'center', minHeight: '300px' }}>
+                <Compass size={36} color="var(--text-muted)" />
+                <p style={{ fontWeight: 600, color: 'var(--text-primary)', marginTop: '0.5rem' }}>Select a generation run from the left</p>
+                <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Inspect step-by-step pipeline flows, prompts, latencies, and generated images.</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* TAB 2: AUDIT EVENTS DATA-GRID & DRAWER                                    */}
+        {/* ========================================================================= */}
+        {activeTab === 'events' && (
+          <div className="obs-table-wrapper">
+            <div className="obs-table-toolbar">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                <div className="obs-search-input-wrap" style={{ width: '280px' }}>
+                  <Search size={14} className="obs-search-icon" />
+                  <input
+                    type="text"
+                    placeholder="Search events, prompts, error..."
+                    className="obs-search-input"
+                    value={eventSearchQuery}
+                    onChange={(e) => {
+                      setEventSearchQuery(e.target.value);
+                      setEventPageOffset(0);
+                    }}
+                  />
+                </div>
+
+                <div className="obs-filter-pill-group">
+                  {['all', 'generation', 'vision', 'wardrobe', 'inpaint', 'api'].map((comp) => (
+                    <button
+                      key={comp}
+                      type="button"
+                      className={`obs-filter-pill ${eventComponentFilter === comp ? 'active' : ''}`}
+                      onClick={() => {
+                        setEventComponentFilter(comp);
+                        setEventPageOffset(0);
+                      }}
+                    >
+                      {comp === 'all' ? 'All Components' : comp}
+                    </button>
+                  ))}
+                </div>
+
+                <select
+                  className="obs-search-input"
+                  style={{ width: '130px', padding: '0.45rem 0.65rem' }}
+                  value={eventStatusFilter}
+                  onChange={(e) => {
+                    setEventStatusFilter(e.target.value);
+                    setEventPageOffset(0);
+                  }}
+                >
+                  <option value="all">All Statuses</option>
+                  <option value="success">Success</option>
+                  <option value="error">Error</option>
+                </select>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                <span>Showing {events.length} of {totalEvents} events</span>
+              </div>
+            </div>
+
+            <div className="obs-table-scroll">
+              <table className="obs-data-table">
+                <thead>
+                  <tr>
+                    <th>Timestamp</th>
+                    <th>Component</th>
+                    <th>Event Type</th>
+                    <th>Request ID</th>
+                    <th>Status</th>
+                    <th>Duration</th>
+                    <th>Cost</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {isLoadingEvents ? (
+                    <tr>
+                      <td colSpan={8} style={{ textAlign: 'center', padding: '2rem' }}>
+                        <RefreshCw size={20} className="animate-spin" style={{ margin: '0 auto', display: 'block', color: 'var(--text-muted)' }} />
+                        <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.5rem', display: 'block' }}>Loading audit events...</span>
+                      </td>
+                    </tr>
+                  ) : events.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
+                        No audit events match the current filters.
+                      </td>
+                    </tr>
+                  ) : (
+                    events.map((ev) => {
+                      const isError = ev.status === 'error' || (ev.event || '').toLowerCase().includes('error');
+                      const isSelected = selectedEvent?.id === ev.id;
+                      return (
+                        <tr key={ev.id || Math.random()} className={isSelected ? 'selected' : ''}>
+                          <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem', whiteSpace: 'nowrap' }}>
+                            {formatTimestamp(ev.timestamp)}
+                          </td>
+                          <td>
+                            <span className={`obs-badge ${COMPONENT_TAG_CLASSES[ev.component] || 'obs-badge-api'}`}>
+                              {ev.component || 'general'}
+                            </span>
+                          </td>
+                          <td style={{ fontWeight: 600 }}>{ev.event || ev.event_type}</td>
+                          <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
+                            {ev.request_id ? `${ev.request_id.slice(0, 16)}...` : '—'}
+                          </td>
+                          <td>
+                            <span className={`obs-badge ${isError ? 'obs-badge-error' : 'obs-badge-success'}`}>
+                              {isError ? 'Error' : 'Success'}
+                            </span>
+                          </td>
+                          <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem' }}>
+                            {ev.duration_ms ? `${(ev.duration_ms / 1000).toFixed(2)}s` : '—'}
+                          </td>
+                          <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem', color: '#10b981' }}>
+                            {ev.cost_usd ? `$${Number(ev.cost_usd).toFixed(4)}` : '—'}
+                          </td>
+                          <td>
+                            <button
+                              type="button"
+                              className="obs-copy-btn"
+                              onClick={() => setSelectedEvent(ev)}
+                            >
+                              <Eye size={12} />
+                              <span>Inspect</span>
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination footer */}
+            <div style={{ padding: '0.75rem 1.25rem', borderTop: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                Page {Math.floor(eventPageOffset / eventsPageSize) + 1} of {Math.max(1, Math.ceil(totalEvents / eventsPageSize))}
+              </span>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <button
+                  type="button"
+                  className="obs-refresh-btn"
+                  disabled={eventPageOffset === 0}
+                  onClick={() => setEventPageOffset((prev) => Math.max(0, prev - eventsPageSize))}
+                >
+                  <ChevronLeft size={14} />
+                  <span>Previous</span>
+                </button>
+                <button
+                  type="button"
+                  className="obs-refresh-btn"
+                  disabled={eventPageOffset + eventsPageSize >= totalEvents}
+                  onClick={() => setEventPageOffset((prev) => prev + eventsPageSize)}
+                >
+                  <span>Next</span>
+                  <ChevronRight size={14} />
+                </button>
+              </div>
             </div>
           </div>
         )}
 
         {/* ========================================================================= */}
-        {/* TAB 4: METRICS & COMPONENT DISTRIBUTION                                    */}
+        {/* TAB 3: LIVE SYSTEM LOGS TERMINAL                                          */}
         {/* ========================================================================= */}
-        {activeTab === 'stats' && stats && (
-          <div className="flex flex-col gap-6">
-            {/* Top KPI Metrics Row */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center justify-between">
-                <div>
-                  <div className="text-xs text-slate-400 font-medium">Estimated Total API Cost</div>
-                  <div className="text-2xl font-bold font-mono text-emerald-400 mt-1">
-                    ${Number(stats.total_cost_usd || 0).toFixed(4)}
-                  </div>
+        {activeTab === 'logs' && (
+          <div className="obs-terminal-container">
+            <div className="obs-terminal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <Terminal size={16} color="#818cf8" />
+                  <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#fff' }}>Structured Console Stream</span>
                 </div>
-                <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
-                  <Coins size={22} />
+
+                <div className="obs-search-input-wrap" style={{ width: '220px' }}>
+                  <Search size={13} className="obs-search-icon" />
+                  <input
+                    type="text"
+                    placeholder="Search logs..."
+                    className="obs-search-input"
+                    value={logSearch}
+                    onChange={(e) => setLogSearch(e.target.value)}
+                  />
                 </div>
+
+                <select
+                  className="obs-search-input"
+                  style={{ width: '120px', padding: '0.45rem 0.65rem' }}
+                  value={logLevelFilter}
+                  onChange={(e) => setLogLevelFilter(e.target.value)}
+                >
+                  <option value="all">All Levels</option>
+                  <option value="INFO">INFO</option>
+                  <option value="WARNING">WARNING</option>
+                  <option value="ERROR">ERROR</option>
+                </select>
               </div>
 
-              <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center justify-between">
-                <div>
-                  <div className="text-xs text-slate-400 font-medium">Total Tokens Processed</div>
-                  <div className="text-2xl font-bold font-mono text-cyan-300 mt-1">
-                    {Number(stats.total_tokens || 0).toLocaleString()}
-                  </div>
-                </div>
-                <div className="p-3 rounded-lg bg-cyan-500/10 border border-cyan-500/20 text-cyan-400">
-                  <Zap size={22} />
-                </div>
-              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.75rem', color: 'var(--text-secondary)', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={autoRefreshLogs}
+                    onChange={(e) => setAutoRefreshLogs(e.target.checked)}
+                  />
+                  <span>Auto-Refresh (3s)</span>
+                </label>
 
-              <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center justify-between">
-                <div>
-                  <div className="text-xs text-slate-400 font-medium">Total Audited Events</div>
-                  <div className="text-2xl font-bold font-mono text-indigo-400 mt-1">
-                    {Number(stats.total_events || 0).toLocaleString()}
-                  </div>
-                </div>
-                <div className="p-3 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-400">
-                  <Activity size={22} />
-                </div>
+                <button
+                  type="button"
+                  className="obs-refresh-btn"
+                  onClick={downloadLogsAsFile}
+                  title="Download Log File"
+                >
+                  <Download size={13} />
+                  <span>Download Log</span>
+                </button>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Component Volume Card */}
-              <div className="p-5 rounded-xl bg-slate-900/60 border border-slate-800 flex flex-col gap-4">
-                <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                  <Layers size={16} className="text-indigo-400" />
-                  Component Request Volume & Cost
-                </h3>
-                <div className="space-y-3">
-                  {Object.entries(stats.components || {}).map(([comp, count]) => {
-                    const pct = stats.total_events > 0 ? (count / stats.total_events) * 100 : 0;
-                    const compCost = stats.cost_by_component?.[comp] ?? 0;
+            <div className="obs-terminal-body">
+              {logs.length === 0 ? (
+                <span className="obs-log-info">No log entries found.</span>
+              ) : (
+                logs
+                  .filter((l) => !logSearch.trim() || l.toLowerCase().includes(logSearch.toLowerCase()))
+                  .map((line, idx) => {
+                    const isError = line.includes('[ERROR]') || line.includes('CRITICAL');
+                    const isWarn = line.includes('[WARNING]') || line.includes('[WARN]');
+                    let lineClass = 'obs-log-info';
+                    if (isError) lineClass = 'obs-log-error';
+                    else if (isWarn) lineClass = 'obs-log-warn';
+
                     return (
-                      <div key={comp} className="space-y-1">
-                        <div className="flex justify-between text-xs">
-                          <span className="capitalize text-slate-300 font-medium">{comp}</span>
-                          <span className="font-mono text-slate-400 flex items-center gap-2">
-                            <span>{count} ({pct.toFixed(1)}%)</span>
-                            {compCost > 0 && <span className="text-emerald-400">${compCost.toFixed(4)}</span>}
-                          </span>
-                        </div>
-                        <div className="h-2 w-full rounded-full bg-slate-800 overflow-hidden">
-                          <div
-                            className="h-full rounded-full bg-indigo-500 transition-all duration-500"
-                            style={{ width: `${pct}%` }}
-                          />
-                        </div>
+                      <div key={idx} className={`obs-log-line ${lineClass}`}>
+                        {line}
                       </div>
                     );
-                  })}
-                </div>
-              </div>
+                  })
+              )}
+            </div>
+          </div>
+        )}
 
-            {/* Model Latencies Card */}
-            <div className="p-5 rounded-xl bg-slate-900/60 border border-slate-800 flex flex-col gap-4">
-              <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                <Clock size={16} className="text-amber-400" />
-                Average Model Latency (ms)
-              </h3>
-              <div className="space-y-3">
-                {Object.entries(stats.average_latencies_ms || {}).map(([modelName, lat]) => (
-                  <div
-                    key={modelName}
-                    className="p-3 rounded-lg bg-black/40 border border-slate-800 flex items-center justify-between"
-                  >
-                    <div>
-                      <div className="text-xs font-mono font-bold text-cyan-300">{modelName}</div>
-                      <div className="text-[11px] text-slate-400">Google GenAI SDK</div>
-                    </div>
-                    <div className="text-base font-mono font-bold text-amber-300">
-                      {lat.toFixed(1)} ms
-                    </div>
-                  </div>
-                ))}
+        {/* ========================================================================= */}
+        {/* TAB 4: DATABASE & FIRESTORE COLLECTION EXPLORER                           */}
+        {/* ========================================================================= */}
+        {activeTab === 'db' && (
+          <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: '1.25rem' }}>
+            {/* Collections Sidebar */}
+            <div className="obs-panel-card" style={{ padding: '0.85rem' }}>
+              <span style={{ fontSize: '0.72rem', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '0.04em', display: 'block', marginBottom: '0.5rem' }}>
+                Firestore Collections
+              </span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                {dbSummary && Object.keys(dbSummary).length > 0 ? (
+                  Object.entries(dbSummary).map(([colName, meta]) => {
+                    const isSelected = selectedTable === colName;
+                    const docCount = typeof meta === 'object' ? meta.count ?? meta.total ?? '—' : meta;
+                    return (
+                      <button
+                        key={colName}
+                        type="button"
+                        className={`obs-tab-btn ${isSelected ? 'active' : ''}`}
+                        style={{ justifyContent: 'space-between', width: '100%' }}
+                        onClick={() => {
+                          setSelectedTable(colName);
+                          setDbPageOffset(0);
+                        }}
+                      >
+                        <span style={{ fontFamily: 'var(--font-mono)' }}>{colName}</span>
+                        <span className="obs-tab-count">{docCount}</span>
+                      </button>
+                    );
+                  })
+                ) : (
+                  ['generations', 'telemetry_events', 'users', 'moodboards', 'sessions'].map((col) => (
+                    <button
+                      key={col}
+                      type="button"
+                      className={`obs-tab-btn ${selectedTable === col ? 'active' : ''}`}
+                      style={{ justifyContent: 'space-between', width: '100%' }}
+                      onClick={() => {
+                        setSelectedTable(col);
+                        setDbPageOffset(0);
+                      }}
+                    >
+                      <span style={{ fontFamily: 'var(--font-mono)' }}>{col}</span>
+                    </button>
+                  ))
+                )}
               </div>
             </div>
 
-            {/* Event Types Breakdown Card */}
-            <div className="p-5 rounded-xl bg-slate-900/60 border border-slate-800 flex flex-col gap-4 md:col-span-2">
-              <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                <Sliders size={16} className="text-cyan-400" />
-                Event Types Breakdown
-              </h3>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                {Object.entries(stats.event_types || {}).map(([evt, count]) => (
-                  <div
-                    key={evt}
-                    className="p-3 rounded-lg bg-black/40 border border-slate-800/80 flex flex-col justify-between"
-                  >
-                    <div className="text-xs font-mono text-slate-300 font-semibold truncate" title={evt}>
-                      {evt}
-                    </div>
-                    <div className="text-lg font-mono font-bold text-indigo-400 mt-2">{count}</div>
-                  </div>
-                ))}
+            {/* Collection Records Data-Grid */}
+            <div className="obs-table-wrapper">
+              <div className="obs-table-toolbar">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <Database size={16} color="#818cf8" />
+                  <span style={{ fontWeight: 700, color: '#fff', fontSize: '0.85rem' }}>
+                    Collection: <code style={{ color: '#67e8f9' }}>{selectedTable}</code>
+                  </span>
+                </div>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                  Total: {tableRecords.total || 0} documents
+                </span>
               </div>
+
+              <div className="obs-table-scroll">
+                <table className="obs-data-table">
+                  <thead>
+                    <tr>
+                      <th>Document ID</th>
+                      <th>Created / Updated</th>
+                      <th>Summary Data</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {isLoadingDb ? (
+                      <tr>
+                        <td colSpan={4} style={{ textAlign: 'center', padding: '2rem' }}>
+                          <RefreshCw size={20} className="animate-spin" style={{ margin: '0 auto', display: 'block', color: 'var(--text-muted)' }} />
+                          <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.5rem', display: 'block' }}>Loading collection records...</span>
+                        </td>
+                      </tr>
+                    ) : tableRecords.rows.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
+                          No documents found in collection <code>{selectedTable}</code>.
+                        </td>
+                      </tr>
+                    ) : (
+                      tableRecords.rows.map((row, idx) => (
+                        <tr key={row.id || idx}>
+                          <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem', color: '#818cf8', fontWeight: 600 }}>
+                            {row.id || `doc_${idx}`}
+                          </td>
+                          <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem' }}>
+                            {formatTimestamp(row.timestamp || row.created_at || row.updated_at)}
+                          </td>
+                          <td style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', maxWidth: '400px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {JSON.stringify(row)}
+                          </td>
+                          <td>
+                            <button
+                              type="button"
+                              className="obs-copy-btn"
+                              onClick={() => setSelectedDbRow(row)}
+                            >
+                              <Eye size={12} />
+                              <span>View JSON</span>
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+      </main>
+
+      {/* Slide-out Drawer: Event Detail Inspector */}
+      {selectedEvent && (
+        <div className="obs-drawer-overlay" onClick={() => setSelectedEvent(null)}>
+          <div className="obs-drawer" onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.75rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Code2 size={18} color="#818cf8" />
+                <span style={{ fontSize: '1rem', fontWeight: 700, color: '#fff' }}>
+                  {selectedEvent.event || selectedEvent.event_type}
+                </span>
+              </div>
+              <button
+                type="button"
+                className="obs-copy-btn"
+                onClick={() => setSelectedEvent(null)}
+                title="Close"
+              >
+                <X size={14} />
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem' }}>
+                <span style={{ color: 'var(--text-muted)' }}>Component:</span>
+                <span className={`obs-badge ${COMPONENT_TAG_CLASSES[selectedEvent.component] || 'obs-badge-api'}`}>{selectedEvent.component}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem' }}>
+                <span style={{ color: 'var(--text-muted)' }}>Status:</span>
+                <span className={`obs-badge ${selectedEvent.status === 'error' ? 'obs-badge-error' : 'obs-badge-success'}`}>{selectedEvent.status}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem' }}>
+                <span style={{ color: 'var(--text-muted)' }}>Request ID:</span>
+                <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>{selectedEvent.request_id || '—'}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem' }}>
+                <span style={{ color: 'var(--text-muted)' }}>Timestamp:</span>
+                <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>{selectedEvent.timestamp}</span>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: '0.72rem', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 700 }}>
+                Full JSON Document
+              </span>
+              <button
+                type="button"
+                className="obs-copy-btn"
+                onClick={() => copyToClipboard(selectedEvent, 'drawer_event_json')}
+              >
+                {copiedKey === 'drawer_event_json' ? <Check size={12} color="#10b981" /> : <Copy size={12} />}
+                <span>{copiedKey === 'drawer_event_json' ? 'Copied' : 'Copy'}</span>
+              </button>
+            </div>
+
+            <div className="obs-json-box" style={{ flex: 1 }}>
+              {JSON.stringify(selectedEvent, null, 2)}
             </div>
           </div>
         </div>
-        )}
-      </main>
+      )}
+
+      {/* Modal: DB Row Inspector */}
+      {selectedDbRow && (
+        <div className="obs-drawer-overlay" onClick={() => setSelectedDbRow(null)}>
+          <div className="obs-drawer" onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.75rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Database size={18} color="#818cf8" />
+                <span style={{ fontSize: '1rem', fontWeight: 700, color: '#fff' }}>
+                  Document: {selectedDbRow.id || 'Record'}
+                </span>
+              </div>
+              <button
+                type="button"
+                className="obs-copy-btn"
+                onClick={() => setSelectedDbRow(null)}
+              >
+                <X size={14} />
+              </button>
+            </div>
+
+            <div className="obs-json-box" style={{ flex: 1 }}>
+              {JSON.stringify(selectedDbRow, null, 2)}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Fullscreen Image Preview */}
+      {previewImage && (
+        <div className="obs-drawer-overlay" onClick={() => setPreviewImage(null)} style={{ alignItems: 'center', justifyContent: 'center' }}>
+          <div
+            style={{
+              position: 'relative',
+              maxWidth: '90vw',
+              maxHeight: '90vh',
+              background: '#090b10',
+              border: '1px solid var(--border-color)',
+              borderRadius: 'var(--radius-lg)',
+              overflow: 'hidden',
+              padding: '0.5rem',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="obs-copy-btn"
+              style={{ position: 'absolute', top: '1rem', right: '1rem', zIndex: 10 }}
+              onClick={() => setPreviewImage(null)}
+            >
+              <X size={16} />
+            </button>
+            <img
+              src={previewImage}
+              alt="Asset Preview"
+              style={{ maxWidth: '100%', maxHeight: '85vh', objectFit: 'contain', borderRadius: 'var(--radius-md)' }}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -12,6 +12,7 @@ from app.utils.telemetry import (
     query_audit_events,
     get_request_lifecycle_trace,
     get_telemetry_summary_stats,
+    get_generation_runs,
 )
 
 router = APIRouter(prefix="/api/telemetry", tags=["telemetry"])
@@ -22,6 +23,13 @@ class TelemetryEventsResponse(BaseModel):
     limit: int
     offset: int
     events: List[Dict[str, Any]]
+
+
+class TelemetryRunsResponse(BaseModel):
+    total: int
+    limit: int
+    offset: int
+    runs: List[Dict[str, Any]]
 
 
 class TelemetryStatsResponse(BaseModel):
@@ -39,6 +47,30 @@ class TelemetryStatsResponse(BaseModel):
 class SystemLogsResponse(BaseModel):
     total_lines: int
     logs: List[str]
+
+
+@router.get("/runs", response_model=TelemetryRunsResponse)
+def list_generation_runs(
+    component: Optional[str] = Query(None, description="Filter by component"),
+    status: Optional[str] = Query(None, description="Filter by status (success, error)"),
+    search: Optional[str] = Query(None, description="Search across request ID, prompt, models"),
+    limit: int = Query(50, ge=1, le=200, description="Max runs to return"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
+    user: dict = Depends(get_current_user),
+    db_manager: FirestoreManager = Depends(get_db_manager),
+):
+    """
+    Returns grouped end-to-end generation runs with stage events, prompts, latencies, and images.
+    """
+    res = get_generation_runs(
+        db=db_manager.client,
+        component=component,
+        status=status,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
+    return TelemetryRunsResponse(**res)
 
 
 @router.get("/events", response_model=TelemetryEventsResponse)
