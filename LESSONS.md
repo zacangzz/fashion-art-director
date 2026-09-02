@@ -45,9 +45,29 @@
 
 ---
 
+### 4. Pre-Inference Prohibited Content Interceptions (`prohibited_content` / 400 Bad Request)
+* **The Pitfall**:
+  * Google's Generative AI pre-call input safety classifiers will intercept and reject prompts (`Error code: 400 - prohibited_content`) before inference if system prompt few-shot examples or instructions contain references to minors (`"young boy"`, `"young girl"`, `"child"`) paired with body anatomy (`"torso / chest"`, `"legs"`), bare skin/hair (`"bare-headed"`), or clothing modification instructions.
+* **Best Practice**:
+  * Use neutral, age-agnostic subject descriptions in all system prompts and few-shot examples (e.g., `"model in the center"`, `"subject standing on the left"`, `"unadorned hair"`, `"secondary model in beige coat"`).
+  * Maintain heuristic fallbacks (such as `_heuristic_spatial_grounding`) around vision analysis pre-passes so generation pipelines degrade gracefully rather than failing hard if safety filters trigger.
+
+---
+
+### 5. Google GenAI Client Timeout (`HttpOptions.timeout`) & Retry Amplification on 4K Multi-Image Synthesis
+* **The Pitfall**:
+  * Multi-image 4K image synthesis with `gemini-3-pro-image` (Nano Banana Pro) can take $400\text{–}500+$ seconds under high Google Cloud backend load.
+  * A default `HttpOptions(timeout=300000)` (300s) causes the client SDK to abort with `APITimeoutError: Request timed out. This is a client-side timeout.`
+  * If a generic retry wrapper catches `"timeout"` on image synthesis, it re-submits the entire 4K generation request from scratch, compounding user wait times to $10\text{–}20$ minutes.
+* **Best Practices**:
+  1. Configure `GENAI_TIMEOUT_SECONDS = 900` (15 minutes) for clients performing 4K multi-image synthesis.
+  2. Treat generative image timeouts as fail-fast events rather than transient retries to prevent duplicate quota consumption and double wait times.
+
+---
+
 ## Cloud Deployment, Containers & CI/CD
 
-### 4. FastAPI Packaging in Multi-Stage Docker with `uv`
+### 6. FastAPI Packaging in Multi-Stage Docker with `uv`
 * **Python Path in Containers**: When code is organized under `src/app/`, Uvicorn requires `PYTHONPATH=/app/src` so `from app.config import get_settings` resolves cleanly:
   ```dockerfile
   ENV PYTHONPATH=/app/src
@@ -57,7 +77,7 @@
 
 ---
 
-### 5. Firebase Hosting CDN Rewrites vs. Direct Cloud Run Routing (60s Timeout Limit)
+### 7. Firebase Hosting CDN Rewrites vs. Direct Cloud Run Routing (60s Timeout Limit)
 * **The Pitfall (60-Second Proxy Ceiling)**:
   * Firebase Hosting CDN rewrites (`"source": "/api/**", "run": { ... }`) have a hardcoded, non-configurable **60.0-second reverse proxy timeout**.
   * Heavy generative workflows—such as multi-image wardrobe composition using Nano Banana Pro (`gemini-3-pro-image`) at **4K resolution**—routinely take $45\text{–}90$ seconds.
@@ -78,7 +98,7 @@
 
 ---
 
-### 6. Keyless CI/CD via Workload Identity Federation (WIF)
+### 8. Keyless CI/CD via Workload Identity Federation (WIF)
 * **OIDC Provider Configuration**: When creating GitHub OIDC providers with `--attribute-mapping`, provide `--attribute-condition` matching the repository claim to satisfy GCP IAM security constraints:
   ```bash
   gcloud iam workload-identity-pools providers create-oidc "github-actions-provider" \
@@ -93,7 +113,7 @@
 
 ---
 
-### 7. Cloud Storage Image Delivery on Cloud Run (Signed URLs vs. Direct Streaming)
+### 9. Cloud Storage Image Delivery on Cloud Run (Signed URLs vs. Direct Streaming)
 * **The Pitfall**: Calling `blob.generate_signed_url(version="v4")` from Cloud Run with default Compute Engine service account credentials fails with:
   ```
   you need a private key to sign credentials. the credentials you are currently using <class 'google.auth.compute_engine.credentials.Credentials'> just contains a token.
@@ -109,7 +129,7 @@
 
 ## Frontend & Styling Architecture
 
-### 8. Global CSS Consolidation & Component Class Preservation
+### 10. Global CSS Consolidation & Component Class Preservation
 * **The Pitfall**: In large frontend refactorings, replacing a monolithic stylesheet (e.g., `index.css`) with a concise set of generic design-token classes without simultaneously rewriting the JSX class names in every component strips all component-specific CSS selectors (`.ratio-btn`, `.category-card`, `.tag-chip`, `.prompt-review-card`, `.lever-item`, etc.).
 * **Visual Symptom**: The app renders as raw unstyled HTML with broken grids, lost card backdrops, and unformatted controls.
 * **Best Practice**:

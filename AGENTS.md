@@ -9,7 +9,7 @@
 * avoid using in-line prompts, always create prompt templates in a separate file and import them.
 
 ## LESSONS.md
-* when something new about API is learnt or discovered throuought the iteration and development process, request permission from the user to allow update of the lessons learnt in LESSONS.md
+* when something new about API is learnt or discovered throuought the iteration and development process, request permission from the user to allow update of the lessons learnt in LESSONS.md with proposed entry
 * in writing lessons learnt: be concise, keep it short and sweet, cover the main points and where necessary include appropriate code snippets or commands for clarity
 
 ## Gemini Interactions API (`client.interactions.create`) Guidelines

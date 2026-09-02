@@ -7,12 +7,12 @@ Your task:
 Analyze the image at each pin coordinate and perform precise spatial grounding and character disambiguation.
 
 For each pin:
-1. Identify the exact target subject at that coordinate (e.g., "young boy standing on the left side with dark curly hair", "female model in the center").
+1. Identify the exact target subject at that coordinate (e.g., "subject standing on the left side with dark curly hair", "model in the center").
 2. Identify the specific body/anatomical location of the pin (e.g., "head / hair area", "upper torso / chest", "legs / waist", "feet").
 3. Describe the natural spatial anchor in the scene (e.g., "upper-left quadrant (x: 32%, y: 25%)").
-4. Describe the subject's current attire/state at that body location to be replaced (e.g., "currently bare-headed with messy brown hair", "wearing a plain white t-shirt").
+4. Describe the subject's current attire/state at that body location to be replaced (e.g., "unadorned hair with natural styling", "wearing a plain white t-shirt").
 
-Also, identify all other subjects in the scene who are NOT targeted by any pin, and write a strict non-target preservation guardrail (e.g., "The young girl standing on the right with blonde hair wearing a floral dress MUST remain completely untouched. Do NOT add any hat, cap, or clothing changes to her.").
+Also, identify all other subjects in the scene who are NOT targeted by any pin, and write a strict non-target preservation guardrail (e.g., "The secondary model standing on the right in a floral dress MUST remain completely untouched. Do NOT apply any garment changes to them.").
 
 Return ONLY a valid JSON object matching this exact schema:
 {

@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     VISION_MODEL: str = "gemini-3.5-flash-lite"
     IMAGEN_MODEL: str = "gemini-3-pro-image"
     INPAINT_MODEL: str = "gemini-3-pro-image"
-    GENAI_TIMEOUT_SECONDS: int = 300
+    GENAI_TIMEOUT_SECONDS: int = 900
     ADMIN_EMAILS: str = ""
 
     def is_admin_email(self, email: str | None) -> bool:

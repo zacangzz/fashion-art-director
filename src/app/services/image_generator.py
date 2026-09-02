@@ -82,6 +82,14 @@ class ImageGenerator:
             except Exception as e:
                 last_exc = e
                 err_str = str(e).lower()
+
+                # Generative image timeouts (e.g. APITimeoutError) mean the request
+                # reached the full configured timeout window (e.g. 900s). Fail fast immediately
+                # to prevent compounding user wait times and duplicate quota consumption.
+                if "timeout" in err_str or "deadline_exceeded" in err_str:
+                    logger.error(f"Image generation timed out on attempt {attempt + 1}: {e}")
+                    raise
+
                 retryable = any(
                     code in err_str
                     for code in [
@@ -89,8 +97,6 @@ class ImageGenerator:
                         "503",
                         "resource_exhausted",
                         "unavailable",
-                        "timeout",
-                        "deadline_exceeded",
                         "connection",
                     ]
                 )
