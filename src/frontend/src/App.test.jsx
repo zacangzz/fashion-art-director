@@ -89,4 +89,44 @@ describe('App Component Workflow & Locking', () => {
 
     expect(screen.getByText(/Generation Lineage & History/i)).toBeInTheDocument();
   });
+
+  it('renders ProxyBanner and retains admin navbar access when in proxy mode', () => {
+    vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({
+      currentUser: { uid: 'admin_123', email: 'director@fashion.com', displayName: 'Fashion Director' },
+      userProfile: {
+        id: 'designer_456',
+        uid: 'designer_456',
+        email: 'designer@fashion.com',
+        display_name: 'Studio Designer',
+        role: 'user',
+        status: 'approved',
+        is_approved: true,
+        is_admin: false,
+        is_proxy: true,
+        proxied_by: {
+          email: 'director@fashion.com',
+        },
+        real_user: {
+          id: 'admin_123',
+          role: 'admin',
+          is_admin: true,
+        },
+      },
+      loading: false,
+      signOutUser: vi.fn(),
+      signInWithGoogle: vi.fn(),
+      signInWithEmail: vi.fn(),
+      signUpWithEmail: vi.fn(),
+      quickDevLogin: vi.fn(),
+      refreshUserProfile: vi.fn(),
+      stopProxy: vi.fn(),
+    });
+
+    render(<App />);
+
+    expect(screen.getByText(/PROXY SESSION ACTIVE/i)).toBeInTheDocument();
+    expect(screen.getAllByText('Studio Designer').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByTitle(/Studio Whitelist & Team Management/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Exit Proxy/i })).toBeInTheDocument();
+  });
 });

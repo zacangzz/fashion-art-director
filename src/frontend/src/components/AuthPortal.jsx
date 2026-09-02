@@ -11,6 +11,7 @@ import {
   LogOut,
   RefreshCw,
   Terminal,
+  VenetianMask,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -24,6 +25,7 @@ export default function AuthPortal() {
     signOutUser,
     quickDevLogin,
     refreshUserProfile,
+    stopProxy,
   } = useAuth();
 
   const [isSignUp, setIsSignUp] = useState(false);
@@ -124,6 +126,19 @@ export default function AuthPortal() {
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+              {userProfile?.is_proxy && (
+                <button
+                  type="button"
+                  onClick={stopProxy}
+                  className="auth-btn-primary"
+                  style={{ background: 'linear-gradient(135deg, #f59e0b, #d97706)', color: '#000000', fontWeight: 600 }}
+                  title="Exit proxy mode and return to your authentic administrator account"
+                >
+                  <VenetianMask size={14} />
+                  <span>Exit Proxy Mode (Return to Admin)</span>
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={handleRefreshStatus}

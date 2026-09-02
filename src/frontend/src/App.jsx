@@ -10,6 +10,7 @@ import {
   Cpu,
   LogOut,
   Users as UsersIcon,
+  VenetianMask,
 } from 'lucide-react';
 
 import MoodboardUploader from './components/MoodboardUploader';
@@ -24,6 +25,7 @@ import HistoryDrawer from './components/HistoryDrawer';
 import ComparisonModal from './components/ComparisonModal';
 import AuthPortal from './components/AuthPortal';
 import AdminPortalModal from './components/AdminPortalModal';
+import ProxyBanner from './components/ProxyBanner';
 import { useAuth } from './contexts/AuthContext';
 import { compileModularPrompt } from './utils/promptCompiler';
 
@@ -179,6 +181,13 @@ export default function App() {
     refinement.generationResult?.master_image_url || moodboard.activeBaseline?.image_url
   );
 
+  // Reload history and assets whenever the active user or proxy identity switches
+  useEffect(() => {
+    if (userProfile?.id || userProfile?.uid) {
+      historyHook.loadHistoryList();
+    }
+  }, [userProfile?.id, userProfile?.uid]);
+
   // 1. Loading Splash
   if (loading) {
     return (
@@ -203,8 +212,17 @@ export default function App() {
     return <AuthPortal />;
   }
 
+  const hasAdminAccess = Boolean(
+    userProfile?.is_admin ||
+    userProfile?.is_proxy ||
+    userProfile?.real_user?.is_admin
+  );
+
   return (
     <div className="app-container">
+      {/* Top Luxury Proxy HUD Banner (Active only during proxy mode) */}
+      <ProxyBanner onOpenAdminModal={() => setIsAdminModalOpen(true)} />
+
       {/* Top Header */}
       <header className="header">
         <div className="header-brand">
@@ -326,7 +344,7 @@ export default function App() {
 
             {currentUser && (
               <div className="user-nav-group">
-                {userProfile?.is_admin && (
+                {hasAdminAccess && (
                   <button
                     type="button"
                     onClick={() => setIsAdminModalOpen(true)}
@@ -340,15 +358,26 @@ export default function App() {
                 )}
 
                 <div
-                  className="user-profile-chip"
-                  title={`Signed in as ${currentUser.email || currentUser.displayName || 'User'}`}
+                  className={`user-profile-chip ${userProfile?.is_proxy ? 'user-profile-chip-proxy' : ''}`}
+                  title={
+                    userProfile?.is_proxy
+                      ? `Acting as ${userProfile.display_name || userProfile.email} (Proxied by ${userProfile.proxied_by?.email || 'Admin'})`
+                      : `Signed in as ${currentUser.email || currentUser.displayName || 'User'}`
+                  }
                 >
                   <div className="user-profile-avatar">
-                    {(currentUser.email || currentUser.displayName || 'U')[0]}
+                    {userProfile?.is_proxy ? (
+                      <VenetianMask size={13} style={{ color: '#f59e0b' }} />
+                    ) : (
+                      (currentUser.email || currentUser.displayName || 'U')[0]
+                    )}
                   </div>
                   <span className="user-profile-name">
                     {userProfile?.display_name || currentUser.displayName || currentUser.email?.split('@')[0]}
                   </span>
+                  {userProfile?.is_proxy && (
+                    <span className="proxy-pill-tag">Proxy</span>
+                  )}
                 </div>
 
                 <button

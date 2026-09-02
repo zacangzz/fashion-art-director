@@ -38,6 +38,9 @@ class UserProfileResponse(BaseModel):
     created_at: Optional[str] = None
     approved_at: Optional[str] = None
     last_login_at: Optional[str] = None
+    is_proxy: bool = False
+    proxied_by: Optional[Dict[str, Any]] = None
+    real_user: Optional[Dict[str, Any]] = None
 
 
 @router.get("/me", response_model=UserProfileResponse)
@@ -63,6 +66,9 @@ def get_my_profile(request: Request):
         created_at=profile.get("created_at"),
         approved_at=profile.get("approved_at"),
         last_login_at=profile.get("last_login_at"),
+        is_proxy=profile.get("is_proxy", False),
+        proxied_by=profile.get("proxied_by"),
+        real_user=profile.get("real_user"),
     )
 
 

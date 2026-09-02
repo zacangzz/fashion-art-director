@@ -26,8 +26,24 @@ export function resolveImageUrl(path) {
   return buildApiUrl(path);
 }
 
+// In-memory ephemeral proxy user tracking (cleared automatically on page refresh)
+let activeProxyUserId = null;
+
+export function getProxyUserId() {
+  return activeProxyUserId;
+}
+
+export function setProxyUserId(userId) {
+  activeProxyUserId = userId ? String(userId).trim() : null;
+}
+
+export function clearProxyUserId() {
+  activeProxyUserId = null;
+}
+
 /**
- * Enhanced fetch wrapper that attaches Firebase ID token if user is signed in.
+ * Enhanced fetch wrapper that attaches Firebase ID token if user is signed in,
+ * and attaches X-Proxy-User-Id when proxying as another account.
  */
 async function authFetch(url, options = {}) {
   const headers = new Headers(options.headers || {});
@@ -43,6 +59,11 @@ async function authFetch(url, options = {}) {
     }
   } catch (err) {
     console.warn('Failed to retrieve auth token for request:', err);
+  }
+
+  // Attach ephemeral proxy header if active
+  if (activeProxyUserId) {
+    headers.set('X-Proxy-User-Id', activeProxyUserId);
   }
 
   const finalUrl = buildApiUrl(url);

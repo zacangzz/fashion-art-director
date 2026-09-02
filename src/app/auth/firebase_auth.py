@@ -89,6 +89,7 @@ def get_current_user_profile(request: Request) -> dict:
     """
     Retrieves user profile and syncs with database without throwing 403 on unapproved status.
     Useful for the `/api/auth/me` endpoint to let users inspect their current status.
+    Supports secure admin proxying/impersonation via `X-Proxy-User-Id` header.
     """
     raw_user = get_raw_user(request)
     if raw_user.get("is_anonymous"):
@@ -101,6 +102,9 @@ def get_current_user_profile(request: Request) -> dict:
             "status": "anonymous",
             "is_approved": False,
             "is_admin": False,
+            "is_proxy": False,
+            "proxied_by": None,
+            "real_user": None,
         }
 
     settings = get_settings()
@@ -113,19 +117,18 @@ def get_current_user_profile(request: Request) -> dict:
     if uid == "local_dev_user":
         try:
             db = get_db_manager()
-            user_record = db.activate_user_on_login(
+            caller_record = db.activate_user_on_login(
                 uid="local_dev_user",
                 email=email,
                 display_name=name or "Local Developer",
                 photo_url=picture,
                 is_bootstrap_admin=True,
             )
-            user_record["uid"] = "local_dev_user"
-            user_record["is_approved"] = True
-            user_record["is_admin"] = True
-            return user_record
+            caller_record["uid"] = "local_dev_user"
+            caller_record["is_approved"] = True
+            caller_record["is_admin"] = True
         except Exception:
-            return {
+            caller_record = {
                 "id": "local_dev_user",
                 "uid": "local_dev_user",
                 "email": email,
@@ -139,36 +142,116 @@ def get_current_user_profile(request: Request) -> dict:
                 "total_spend_sgd": 0.0,
                 "total_tokens": 0,
             }
+    else:
+        try:
+            db = get_db_manager()
+            is_bootstrap_admin = settings.is_admin_email(email)
+            caller_record = db.activate_user_on_login(
+                uid=uid,
+                email=email,
+                display_name=name,
+                photo_url=picture,
+                is_bootstrap_admin=is_bootstrap_admin,
+            )
+            caller_record["uid"] = caller_record.get("id", uid)
+            caller_record["is_approved"] = caller_record.get("status") == "approved"
+            caller_record["is_admin"] = caller_record.get("role") == "admin"
+        except Exception as exc:
+            logger.warning(f"Failed to load or activate user in DB ({uid}): {exc}")
+            # Fallback profile if DB lookup fails
+            is_bootstrap = settings.is_admin_email(email)
+            caller_record = {
+                "id": uid,
+                "uid": uid,
+                "email": email,
+                "display_name": name or email.split("@")[0],
+                "photo_url": picture,
+                "role": "admin" if is_bootstrap else "user",
+                "status": "approved" if is_bootstrap else "pending_invite",
+                "is_approved": is_bootstrap,
+                "is_admin": is_bootstrap,
+            }
 
-    try:
-        db = get_db_manager()
-        is_bootstrap_admin = settings.is_admin_email(email)
-        user_record = db.activate_user_on_login(
-            uid=uid,
-            email=email,
-            display_name=name,
-            photo_url=picture,
-            is_bootstrap_admin=is_bootstrap_admin,
+    # Check for proxy / impersonation header
+    proxy_target_id = request.headers.get("X-Proxy-User-Id") or request.headers.get("X-Impersonate-User-Id")
+    if proxy_target_id:
+        proxy_target_id = proxy_target_id.strip()
+
+    # If no proxy header or proxying self, return regular authentic profile
+    if not proxy_target_id or proxy_target_id == caller_record.get("id") or proxy_target_id == caller_record.get("uid") or proxy_target_id == caller_record.get("email"):
+        caller_record["is_proxy"] = False
+        caller_record["proxied_by"] = None
+        caller_record["real_user"] = None
+        return caller_record
+
+    # Verify that the authentic caller has admin privileges
+    if not caller_record.get("is_admin") and caller_record.get("role") != "admin":
+        logger.warning(
+            f"Unauthorized proxy attempt: user '{caller_record.get('email')}' attempted to proxy '{proxy_target_id}'"
         )
-        user_record["uid"] = user_record.get("id", uid)
-        user_record["is_approved"] = user_record.get("status") == "approved"
-        user_record["is_admin"] = user_record.get("role") == "admin"
-        return user_record
-    except Exception as exc:
-        logger.warning(f"Failed to load or activate user in DB ({uid}): {exc}")
-        # Fallback profile if DB lookup fails
-        is_bootstrap = settings.is_admin_email(email)
-        return {
-            "id": uid,
-            "uid": uid,
-            "email": email,
-            "display_name": name or email.split("@")[0],
-            "photo_url": picture,
-            "role": "admin" if is_bootstrap else "user",
-            "status": "approved" if is_bootstrap else "pending_invite",
-            "is_approved": is_bootstrap,
-            "is_admin": is_bootstrap,
-        }
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Administrative privileges required to proxy as another user.",
+        )
+
+    # Locate the target user from database
+    db = get_db_manager()
+    target_user = db.get_user(proxy_target_id)
+    if not target_user and "@" in proxy_target_id:
+        target_user = db.get_user_by_email(proxy_target_id)
+
+    if not target_user:
+        # Fallback search across list of users
+        try:
+            users_list = db.list_users(limit=200)
+            for u in users_list:
+                if u.get("id") == proxy_target_id or u.get("uid") == proxy_target_id or u.get("email") == proxy_target_id:
+                    target_user = u
+                    break
+        except Exception as err:
+            logger.debug(f"User list fallback search note: {err}")
+
+    if not target_user:
+        logger.warning(f"Admin '{caller_record.get('email')}' attempted to proxy non-existent user '{proxy_target_id}'")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Proxy target user '{proxy_target_id}' not found on the studio whitelist.",
+        )
+
+    # Construct the proxy profile reflecting the target user's perspective
+    target_uid = target_user.get("id") or target_user.get("uid") or proxy_target_id
+    target_email = target_user.get("email")
+    target_role = target_user.get("role", "user")
+    target_status = target_user.get("status", "approved")
+
+    proxy_profile = {
+        "id": target_uid,
+        "uid": target_uid,
+        "email": target_email,
+        "display_name": target_user.get("display_name") or (target_email.split("@")[0] if target_email else "Studio Member"),
+        "photo_url": target_user.get("photo_url"),
+        "role": target_role,
+        "status": target_status,
+        "is_approved": target_status == "approved",
+        "is_admin": target_role == "admin",
+        "total_spend_usd": float(target_user.get("total_spend_usd") or 0.0),
+        "total_spend_sgd": float(target_user.get("total_spend_sgd") or 0.0),
+        "total_tokens": int(target_user.get("total_tokens") or 0),
+        "created_at": target_user.get("created_at"),
+        "approved_at": target_user.get("approved_at"),
+        "last_login_at": target_user.get("last_login_at"),
+        "is_proxy": True,
+        "proxied_by": {
+            "id": caller_record.get("id"),
+            "uid": caller_record.get("uid"),
+            "email": caller_record.get("email"),
+            "display_name": caller_record.get("display_name"),
+            "role": caller_record.get("role"),
+        },
+        "real_user": caller_record,
+    }
+    logger.info(f"Admin '{caller_record.get('email')}' active proxy as user '{target_email}' (uid={target_uid})")
+    return proxy_profile
 
 
 def get_current_user(request: Request) -> dict:
@@ -202,11 +285,19 @@ def get_current_user(request: Request) -> dict:
 def get_admin_user(request: Request) -> dict:
     """
     Dependency for administrator-only routes (user management, whitelist control).
+    Grants access if current profile is admin OR if the authentic caller who is proxying is admin.
     """
-    profile = get_current_user(request)
-    if profile.get("role") != "admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Administrative privileges required to access this resource.",
-        )
-    return profile
+    profile = get_current_user_profile(request)
+
+    # If effective profile is admin
+    if profile.get("role") == "admin":
+        return profile
+
+    # If proxying as a non-admin, verify that the real caller is an admin
+    if profile.get("is_proxy") and profile.get("real_user", {}).get("role") == "admin":
+        return profile.get("real_user")
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Administrative privileges required to access this resource.",
+    )

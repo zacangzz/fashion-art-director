@@ -7,19 +7,28 @@ import {
   signOut,
 } from "firebase/auth";
 import { auth, googleProvider } from "../config/firebase";
-import { fetchCurrentUserProfile } from "../services/apiClient";
+import {
+  fetchCurrentUserProfile,
+  setProxyUserId,
+  clearProxyUserId,
+  getProxyUserId,
+} from "../services/apiClient";
 
 const AuthContext = createContext({
   currentUser: null,
   userProfile: null,
   loading: true,
   isDevBypass: false,
+  isProxying: false,
+  proxyUser: null,
   signInWithGoogle: async () => {},
   signInWithEmail: async () => {},
   signUpWithEmail: async () => {},
   signOutUser: async () => {},
   quickDevLogin: async () => {},
   refreshUserProfile: async () => {},
+  startProxy: async () => {},
+  stopProxy: async () => {},
   getIdToken: async () => null,
 });
 
@@ -51,6 +60,9 @@ export function AuthProvider({ children }) {
           status: "pending_invite",
           is_approved: false,
           is_admin: false,
+          is_proxy: false,
+          proxied_by: null,
+          real_user: null,
         });
       }
     }
@@ -85,6 +97,7 @@ export function AuthProvider({ children }) {
   }, [syncUserProfile]);
 
   const signInWithGoogle = async () => {
+    clearProxyUserId();
     localStorage.removeItem("dev_bypass_auth");
     setIsDevBypass(false);
     const result = await signInWithPopup(auth, googleProvider);
@@ -94,6 +107,7 @@ export function AuthProvider({ children }) {
   };
 
   const signInWithEmail = async (email, password) => {
+    clearProxyUserId();
     localStorage.removeItem("dev_bypass_auth");
     setIsDevBypass(false);
     const result = await signInWithEmailAndPassword(auth, email, password);
@@ -103,6 +117,7 @@ export function AuthProvider({ children }) {
   };
 
   const signUpWithEmail = async (email, password) => {
+    clearProxyUserId();
     localStorage.removeItem("dev_bypass_auth");
     setIsDevBypass(false);
     const result = await createUserWithEmailAndPassword(auth, email, password);
@@ -112,6 +127,7 @@ export function AuthProvider({ children }) {
   };
 
   const quickDevLogin = async () => {
+    clearProxyUserId();
     localStorage.setItem("dev_bypass_auth", "true");
     setIsDevBypass(true);
     const devUser = {
@@ -126,6 +142,7 @@ export function AuthProvider({ children }) {
   };
 
   const signOutUser = async () => {
+    clearProxyUserId();
     localStorage.removeItem("dev_bypass_auth");
     setIsDevBypass(false);
     try {
@@ -139,6 +156,18 @@ export function AuthProvider({ children }) {
     setUserProfile(null);
   };
 
+  const startProxy = async (targetUser) => {
+    if (!targetUser) return;
+    const targetId = targetUser.id || targetUser.uid || targetUser.email;
+    setProxyUserId(targetId);
+    await syncUserProfile(currentUser);
+  };
+
+  const stopProxy = async () => {
+    clearProxyUserId();
+    await syncUserProfile(currentUser);
+  };
+
   const refreshUserProfile = async () => {
     await syncUserProfile(currentUser);
   };
@@ -149,17 +178,24 @@ export function AuthProvider({ children }) {
     return currentUser.getIdToken ? currentUser.getIdToken() : "local_dev_token";
   };
 
+  const isProxying = Boolean(userProfile?.is_proxy);
+  const proxyUser = isProxying ? userProfile : null;
+
   const value = {
     currentUser,
     userProfile,
     loading,
     isDevBypass,
+    isProxying,
+    proxyUser,
     signInWithGoogle,
     signInWithEmail,
     signUpWithEmail,
     signOutUser,
     quickDevLogin,
     refreshUserProfile,
+    startProxy,
+    stopProxy,
     getIdToken,
   };
 

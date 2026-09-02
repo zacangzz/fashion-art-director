@@ -12,6 +12,8 @@ import {
   Loader2,
   RefreshCw,
   AlertCircle,
+  VenetianMask,
+  LogOut,
 } from 'lucide-react';
 import {
   fetchAdminUsersList,
@@ -19,9 +21,11 @@ import {
   updateUserStatus,
   deleteUser,
 } from '../services/apiClient';
+import { useAuth } from '../contexts/AuthContext';
 import { formatSpendSGD } from '../utils/formatters';
 
 export default function AdminPortalModal({ isOpen, onClose }) {
+  const { userProfile, startProxy, stopProxy } = useAuth();
   const [users, setUsers] = useState([]);
   const [summary, setSummary] = useState({
     total_users: 0,
@@ -300,74 +304,124 @@ export default function AdminPortalModal({ isOpen, onClose }) {
                       </td>
                     </tr>
                   ) : (
-                    filteredUsers.map((u) => (
-                      <tr key={u.id || u.email}>
-                        {/* Member */}
-                        <td>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-                            {u.photo_url ? (
-                              <img src={u.photo_url} alt="" style={{ width: '28px', height: '28px', borderRadius: '50%', objectFit: 'cover' }} />
-                            ) : (
-                              <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'rgba(99, 102, 241, 0.2)', border: '1px solid rgba(99, 102, 241, 0.4)', display: 'flex', alignItems: 'center', justifyCenter: 'center', color: '#818cf8', fontFamily: 'var(--font-mono)', fontSize: '0.75rem', fontWeight: 700 }}>
-                                {(u.email || 'U')[0].toUpperCase()}
+                    filteredUsers.map((u) => {
+                      const isCurrentProxy = Boolean(userProfile?.is_proxy && (userProfile.id === u.id || userProfile.uid === u.id || userProfile.email === u.email));
+                      const realAdminId = userProfile?.real_user?.id || userProfile?.real_user?.uid || (!userProfile?.is_proxy ? (userProfile?.id || userProfile?.uid) : null);
+                      const realAdminEmail = userProfile?.real_user?.email || (!userProfile?.is_proxy ? userProfile?.email : null);
+                      const isOwnAdminAccount = Boolean((realAdminId && (realAdminId === u.id || realAdminId === u.uid)) || (realAdminEmail && realAdminEmail === u.email));
+
+                      return (
+                        <tr key={u.id || u.email} className={isCurrentProxy ? "admin-row-active-proxy" : ""}>
+                          {/* Member */}
+                          <td>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                              {u.photo_url ? (
+                                <img src={u.photo_url} alt="" style={{ width: '28px', height: '28px', borderRadius: '50%', objectFit: 'cover' }} />
+                              ) : (
+                                <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'rgba(99, 102, 241, 0.2)', border: '1px solid rgba(99, 102, 241, 0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#818cf8', fontFamily: 'var(--font-mono)', fontSize: '0.75rem', fontWeight: 700 }}>
+                                  {(u.email || 'U')[0].toUpperCase()}
+                                </div>
+                              )}
+                              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                  <span style={{ fontWeight: 600, color: '#ffffff' }}>{u.display_name || u.email}</span>
+                                  {isCurrentProxy && (
+                                    <span className="admin-badge admin-badge-active-proxy">
+                                      <VenetianMask size={10} /> Active Proxy
+                                    </span>
+                                  )}
+                                </div>
+                                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{u.email}</span>
                               </div>
-                            )}
-                            <div style={{ display: 'flex', flexDirection: 'column' }}>
-                              <span style={{ fontWeight: 600, color: '#ffffff' }}>{u.display_name || u.email}</span>
-                              <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{u.email}</span>
                             </div>
-                          </div>
-                        </td>
+                          </td>
 
-                        {/* Role */}
-                        <td>
-                          <span className="admin-badge" style={u.role === 'admin' ? { background: 'rgba(168, 85, 247, 0.12)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.3)' } : { background: 'rgba(255, 255, 255, 0.06)', color: 'var(--text-secondary)', border: '1px solid var(--border-color)' }}>
-                            {u.role === 'admin' && <Shield size={10} />}
-                            {u.role}
-                          </span>
-                        </td>
+                          {/* Role */}
+                          <td>
+                            <span className="admin-badge" style={u.role === 'admin' ? { background: 'rgba(168, 85, 247, 0.12)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.3)' } : { background: 'rgba(255, 255, 255, 0.06)', color: 'var(--text-secondary)', border: '1px solid var(--border-color)' }}>
+                              {u.role === 'admin' && <Shield size={10} />}
+                              {u.role}
+                            </span>
+                          </td>
 
-                        {/* Status */}
-                        <td>
-                          <span className={`admin-badge ${u.status === 'approved' ? 'admin-badge-approved' : u.status === 'pending_invite' ? 'admin-badge-pending' : 'admin-badge-disabled'}`}>
-                            {u.status === 'approved' && <CheckCircle2 size={10} />}
-                            {u.status === 'pending_invite' && <Clock size={10} />}
-                            {u.status === 'disabled' && <Ban size={10} />}
-                            {u.status}
-                          </span>
-                        </td>
+                          {/* Status */}
+                          <td>
+                            <span className={`admin-badge ${u.status === 'approved' ? 'admin-badge-approved' : u.status === 'pending_invite' ? 'admin-badge-pending' : 'admin-badge-disabled'}`}>
+                              {u.status === 'approved' && <CheckCircle2 size={10} />}
+                              {u.status === 'pending_invite' && <Clock size={10} />}
+                              {u.status === 'disabled' && <Ban size={10} />}
+                              {u.status}
+                            </span>
+                          </td>
 
-                        {/* Spend */}
-                        <td style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>
-                          {formatSpendSGD(u.total_spend_sgd, u.total_spend_usd)}
-                        </td>
+                          {/* Spend */}
+                          <td style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>
+                            {formatSpendSGD(u.total_spend_sgd, u.total_spend_usd)}
+                          </td>
 
-                        {/* Actions */}
-                        <td style={{ textAlign: 'right' }}>
-                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
-                            <button
-                              type="button"
-                              onClick={() => handleToggleStatus(u)}
-                              className="admin-action-btn"
-                              style={u.status === 'approved' ? { background: 'rgba(245, 158, 11, 0.12)', color: '#f59e0b', borderColor: 'rgba(245, 158, 11, 0.3)' } : { background: 'rgba(16, 185, 129, 0.12)', color: '#10b981', borderColor: 'rgba(16, 185, 129, 0.3)' }}
-                              title={u.status === 'approved' ? 'Disable Account' : 'Approve Account'}
-                            >
-                              {u.status === 'approved' ? 'Disable' : 'Approve'}
-                            </button>
+                          {/* Actions */}
+                          <td style={{ textAlign: 'right' }}>
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+                              {/* Act as User / Exit Proxy button */}
+                              {isCurrentProxy ? (
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    await stopProxy();
+                                    onClose();
+                                  }}
+                                  className="admin-action-btn admin-btn-active-proxy"
+                                  title="Active proxy session — click to exit proxy"
+                                >
+                                  <LogOut size={12} />
+                                  <span>Exit Proxy</span>
+                                </button>
+                              ) : isOwnAdminAccount ? (
+                                <span className="admin-badge admin-badge-current-admin" title="Your authentic administrator account">
+                                  <Shield size={10} />
+                                  <span>You</span>
+                                </span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    await startProxy(u);
+                                    onClose();
+                                  }}
+                                  className="admin-action-btn admin-btn-proxy"
+                                  title={`Proxy into ${u.email} and act on their behalf`}
+                                >
+                                  <VenetianMask size={12} />
+                                  <span>Act as User</span>
+                                </button>
+                              )}
 
-                            <button
-                              type="button"
-                              onClick={() => handleDelete(u)}
-                              className="admin-action-btn"
-                              style={{ background: 'rgba(239, 68, 68, 0.12)', color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.3)' }}
-                              title="Delete / Revoke Member"
-                            >
-                              <Trash2 size={12} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))
+                              <button
+                                type="button"
+                                onClick={() => handleToggleStatus(u)}
+                                disabled={isOwnAdminAccount}
+                                className="admin-action-btn"
+                                style={u.status === 'approved' ? { background: 'rgba(245, 158, 11, 0.12)', color: '#f59e0b', borderColor: 'rgba(245, 158, 11, 0.3)' } : { background: 'rgba(16, 185, 129, 0.12)', color: '#10b981', borderColor: 'rgba(16, 185, 129, 0.3)' }}
+                                title={u.status === 'approved' ? 'Disable Account' : 'Approve Account'}
+                              >
+                                {u.status === 'approved' ? 'Disable' : 'Approve'}
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => handleDelete(u)}
+                                disabled={isOwnAdminAccount}
+                                className="admin-action-btn"
+                                style={{ background: 'rgba(239, 68, 68, 0.12)', color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.3)' }}
+                                title="Delete / Revoke Member"
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
