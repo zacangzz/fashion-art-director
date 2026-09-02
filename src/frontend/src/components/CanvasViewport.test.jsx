@@ -89,19 +89,16 @@ describe('CanvasViewport', () => {
     expect(onGenerate).toHaveBeenCalled();
   });
 
-  it('triggers onExportBundle when download zip button is clicked', () => {
-    const onExport = vi.fn();
+  it('does not render download single or 5-preset zip buttons in viewport', () => {
     render(
       <CanvasViewport
         imageUrl="/api/images/test.png"
         generationResult={{ generation_id: 'gen_123' }}
-        onExportBundle={onExport}
       />
     );
 
-    const zipBtn = screen.getByRole('button', { name: /Download 5-Preset ZIP/i });
-    fireEvent.click(zipBtn);
-    expect(onExport).toHaveBeenCalledWith('gen_123');
+    expect(screen.queryByRole('button', { name: /Single PNG/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Download 5-Preset ZIP/i })).not.toBeInTheDocument();
   });
 
   it('renders Full Prompt Submitted to API inspector with copy and expand buttons', async () => {

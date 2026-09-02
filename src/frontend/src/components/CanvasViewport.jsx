@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Eye,
   Wand2,
-  Download,
   Loader2,
   Image as ImageIcon,
   History,
@@ -11,7 +10,6 @@ import {
   Maximize2,
   ZoomIn,
   ZoomOut,
-  Package,
   Split,
   Columns,
   RotateCcw,
@@ -35,13 +33,11 @@ export default function CanvasViewport({
   beforeLabel = 'Baseline',
   afterLabel = 'Regenerated',
   isGenerating = false,
-  isExporting = false,
   generationResult = null,
   previousGenerationResult = null,
   activeSeed = 4289102,
   seedMode = 'locked',
   onGenerate,
-  onExportBundle,
   onOpenHistory,
   canGenerate = true,
   isInpaintMode = false,
@@ -139,17 +135,6 @@ export default function CanvasViewport({
     : viewMode === 'before' && hasComparison
     ? effectiveBeforeUrl
     : imageUrl;
-
-
-  const handleDownloadSingle = () => {
-    if (!activeDisplayUrl) return;
-    const link = document.createElement('a');
-    link.href = activeDisplayUrl;
-    link.download = `artwork_${generationResult?.generation_id || 'master'}.png`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
 
   const handleDragOver = (e) => {
     if (!isWardrobeMode) return;
@@ -756,8 +741,8 @@ export default function CanvasViewport({
           {mode === 'canvas' && <span className="shortcut-hint">Live Inpaint Preview</span>}
         </div>
 
-        <div className="action-buttons-row">
-          {mode === 'tag' && (
+        {mode === 'tag' && (
+          <div className="action-buttons-row">
             <button
               type="button"
               className="btn-primary flex-1"
@@ -776,42 +761,8 @@ export default function CanvasViewport({
                 </>
               )}
             </button>
-          )}
-
-          {activeDisplayUrl && (
-            <>
-              <button
-                type="button"
-                className="btn-secondary"
-                onClick={handleDownloadSingle}
-                title="Download single high-res PNG"
-              >
-                <Download size={15} />
-                <span>Single PNG</span>
-              </button>
-
-              <button
-                type="button"
-                className="btn-success"
-                disabled={!generationResult?.generation_id || isGenerating || isExporting}
-                onClick={() => generationResult?.generation_id && onExportBundle(generationResult.generation_id)}
-                title="Export 5-Preset ZIP Archive"
-              >
-                {isExporting ? (
-                  <>
-                    <Loader2 className="spin-animation" size={15} />
-                    <span>Bundling...</span>
-                  </>
-                ) : (
-                  <>
-                    <Package size={15} />
-                    <span>Download 5-Preset ZIP</span>
-                  </>
-                )}
-              </button>
-            </>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   );

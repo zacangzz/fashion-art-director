@@ -554,12 +554,10 @@ export default function App() {
                   }
                   afterLabel="Refined Output"
                   isGenerating={refinement.isGenerating}
-                  isExporting={refinement.isExporting}
                   generationResult={refinement.generationResult}
                   previousGenerationResult={refinement.previousGenerationResult}
                   activeSeed={refinement.activeSeed}
                   seedMode={refinement.seedMode}
-                  onExportBundle={refinement.handleExportBundle}
                   onOpenHistory={() => historyHook.setIsHistoryOpen(true)}
                   canGenerate={false}
                   mode="refinement"
@@ -605,12 +603,10 @@ export default function App() {
                   afterLabel="Inpainted Output"
                   isGenerating={refinement.isInpainting}
                   isInpaintMode={true}
-                  isExporting={refinement.isExporting}
                   generationResult={refinement.generationResult}
                   previousGenerationResult={refinement.previousGenerationResult}
                   activeSeed={refinement.activeSeed}
                   seedMode={refinement.seedMode}
-                  onExportBundle={refinement.handleExportBundle}
                   onOpenHistory={() => historyHook.setIsHistoryOpen(true)}
                   canGenerate={false}
                   mode="canvas"
@@ -651,12 +647,10 @@ export default function App() {
                   }
                   afterLabel="Wardrobe Output"
                   isGenerating={wardrobe.isComposingWardrobe}
-                  isExporting={refinement.isExporting}
                   generationResult={refinement.generationResult}
                   previousGenerationResult={refinement.previousGenerationResult}
                   activeSeed={refinement.activeSeed}
                   seedMode={refinement.seedMode}
-                  onExportBundle={refinement.handleExportBundle}
                   onOpenHistory={() => historyHook.setIsHistoryOpen(true)}
                   canGenerate={false}
                   mode="wardrobe"
