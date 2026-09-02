@@ -35,6 +35,7 @@ describe('AdminPortalModal Component', () => {
         pending_count: 1,
         disabled_count: 0,
         total_spend_usd: 12.5,
+        total_spend_sgd: 16.88,
       },
     });
   });
@@ -49,7 +50,7 @@ describe('AdminPortalModal Component', () => {
       expect(screen.getByText('designer@fashionstudio.com')).toBeInTheDocument();
     });
 
-    expect(screen.getAllByText('$12.50').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('S$16.88').length).toBeGreaterThanOrEqual(1);
   });
 
   it('submits pre-authorization invite form', async () => {

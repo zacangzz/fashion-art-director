@@ -192,8 +192,10 @@ describe('HistoryDrawer', () => {
         compiled_prompt: 'baseline prompt',
         created_at: '2026-08-24T00:00:00Z',
         cost_usd: 0.04,
+        cost_sgd: 0.054,
         tokens: 120,
         accumulated_cost_usd: 0.04,
+        accumulated_cost_sgd: 0.054,
         accumulated_tokens: 120,
         model_name: 'gemini-3-pro-image',
       },
@@ -205,8 +207,10 @@ describe('HistoryDrawer', () => {
         compiled_prompt: 'iteration prompt',
         created_at: '2026-08-24T00:05:00Z',
         cost_usd: 0.0402,
+        cost_sgd: 0.055,
         tokens: 150,
         accumulated_cost_usd: 0.0802,
+        accumulated_cost_sgd: 0.109,
         accumulated_tokens: 270,
         model_name: 'gemini-3-pro-image',
       },
@@ -221,9 +225,9 @@ describe('HistoryDrawer', () => {
       />
     );
 
-    expect(screen.getByText('$0.0400')).toBeInTheDocument();
-    expect(screen.getByText('$0.0802')).toBeInTheDocument();
-    expect(screen.getByText('(+$0.0402)')).toBeInTheDocument();
+    expect(screen.getByText('S$0.06')).toBeInTheDocument();
+    expect(screen.getByText('S$0.11')).toBeInTheDocument();
+    expect(screen.getByText('(+S$0.06)')).toBeInTheDocument();
   });
 });
 

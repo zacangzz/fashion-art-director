@@ -1,6 +1,6 @@
 import os
 import pytest
-from app.utils.pricing import extract_usage_metadata, calculate_cost, MODEL_PRICING
+from app.utils.pricing import extract_usage_metadata, calculate_cost, MODEL_PRICING, round_up_cost
 from app.db.database import FirestoreManager
 from fake_firestore import FakeFirestoreClient
 
@@ -40,9 +40,12 @@ def test_calculate_cost_text_model():
         prompt_tokens=1000,
         candidates_tokens=1000,
     )
-    assert cost_info["breakdown"]["prompt_cost_usd"] == 0.00075
-    assert cost_info["breakdown"]["candidates_cost_usd"] == 0.00375
-    assert cost_info["cost_usd"] == 0.0045
+    # Ceiling rounded to 3 decimal places in backend/db
+    assert cost_info["breakdown"]["prompt_cost_usd"] == 0.001
+    assert cost_info["breakdown"]["candidates_cost_usd"] == 0.004
+    assert cost_info["cost_usd"] == 0.005
+    assert cost_info["cost_sgd"] > 0
+    assert cost_info["exchange_rate"] > 0
     assert cost_info["total_tokens"] == 2000
 
 
@@ -56,6 +59,16 @@ def test_calculate_cost_image_model():
     )
     assert cost_info_4k["breakdown"]["images_cost_usd"] == 0.24
     assert cost_info_4k["cost_usd"] >= 0.24
+    assert cost_info_4k["cost_sgd"] >= cost_info_4k["cost_usd"]
+    assert cost_info_4k["exchange_rate"] > 1.0
+
+
+def test_round_up_cost_ceiling_rule():
+    # Micro-cent costs must strictly round up
+    assert round_up_cost(0.0001, 3) == 0.001
+    assert round_up_cost(0.0401, 3) == 0.041
+    assert round_up_cost(0.0400, 3) == 0.040
+    assert round_up_cost(0.0, 3) == 0.0
 
 
 def test_lineage_cost_accumulation():
@@ -88,6 +101,7 @@ def test_lineage_cost_accumulation():
 
     rec_child_1 = db.get_generation("gen_child_01")
     assert rec_child_1["accumulated_cost_usd"] == 0.08
+    assert rec_child_1["accumulated_cost_sgd"] > 0
     assert rec_child_1["accumulated_tokens"] == 3100
 
     # 3. Child generation 2 (refinement of child 1)

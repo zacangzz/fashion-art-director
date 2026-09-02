@@ -164,6 +164,8 @@ class PrepareExportResponse(BaseModel):
     height: Optional[int] = None
     created_at: Optional[str] = None
     cost_usd: Optional[float] = 0.0
+    cost_sgd: Optional[float] = 0.0
+    exchange_rate: Optional[float] = None
     tokens: Optional[int] = 0
 
 
@@ -186,8 +188,11 @@ class GenerationRecordResponse(BaseModel):
     resolution_height: int = 3840
     model_name: Optional[str] = None
     cost_usd: float = 0.0
+    cost_sgd: float = 0.0
+    exchange_rate: Optional[float] = None
     tokens: int = 0
     accumulated_cost_usd: float = 0.0
+    accumulated_cost_sgd: float = 0.0
     accumulated_tokens: int = 0
 
 
@@ -204,8 +209,11 @@ class InpaintResponse(BaseModel):
     aspect_ratio: Optional[str] = None
     resolution: Optional[Dict[str, int]] = None
     cost_usd: Optional[float] = 0.0
+    cost_sgd: Optional[float] = 0.0
+    exchange_rate: Optional[float] = None
     tokens: Optional[int] = 0
     accumulated_cost_usd: Optional[float] = 0.0
+    accumulated_cost_sgd: Optional[float] = 0.0
     accumulated_tokens: Optional[int] = 0
 
 
@@ -295,8 +303,11 @@ class RefinementResponse(BaseModel):
     background_reference_id: Optional[str] = None
     background_harmonization_meta: Optional[Dict[str, Any]] = None
     cost_usd: Optional[float] = 0.0
+    cost_sgd: Optional[float] = 0.0
+    exchange_rate: Optional[float] = None
     tokens: Optional[int] = 0
     accumulated_cost_usd: Optional[float] = 0.0
+    accumulated_cost_sgd: Optional[float] = 0.0
     accumulated_tokens: Optional[int] = 0
 
 
@@ -433,8 +444,11 @@ class GenerationResponse(BaseModel):
     master_image_url: str
     resolution: Resolution
     cost_usd: Optional[float] = 0.0
+    cost_sgd: Optional[float] = 0.0
+    exchange_rate: Optional[float] = None
     tokens: Optional[int] = 0
     accumulated_cost_usd: Optional[float] = 0.0
+    accumulated_cost_sgd: Optional[float] = 0.0
     accumulated_tokens: Optional[int] = 0
 
 
@@ -477,6 +491,8 @@ class ClothingRegionDetectionResult(BaseModel):
 
 
 class GarmentExtractedDetails(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     garment_type: Optional[str] = Field(default=None, description="Specific clothing type (e.g. T-Shirt, Hoodie, Jeans)")
     primary_color: Optional[str] = Field(default=None, description="Dominant primary color hue")
     secondary_colors: List[str] = Field(default_factory=list, description="Secondary accent colors or trim colors")
@@ -487,15 +503,20 @@ class GarmentExtractedDetails(BaseModel):
     graphic_description: Optional[str] = Field(default=None, description="Detailed description of graphic art, symbols, illustrations, or distressed print effects")
     logo_and_print_placement: Optional[str] = Field(default=None, description="Anatomical placement (e.g. Center chest, Left breast pocket, Full back)")
     hardware_and_details: Optional[str] = Field(default=None, description="Hardware details such as buttons, zippers, drawstrings, distress, stitching")
+    fabric: Optional[str] = Field(default=None, description="Fabric material and texture")
+    colors: List[str] = Field(default_factory=list, description="Dominant colors")
+    patterns: Optional[str] = Field(default=None, description="Pattern type e.g. striped, plaid, solid")
+    text_logos: Optional[str] = Field(default=None, description="Visible text, lettering, or branding")
+    design_elements: List[str] = Field(default_factory=list, description="Zippers, pockets, buttons, collars, cut details")
+    style_silhouette: Optional[str] = Field(default=None, description="Fit, silhouette, cut, and vibe")
 
 
 class GarmentCard(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
     id: str
+    user_id: Optional[str] = None
     label: str
-    category: Optional[str] = "tops"
-    image_url: Optional[str] = ""
+    category: Literal["outerwear", "tops", "bottoms", "footwear", "accessories", "full_outfit"] = "tops"
+    image_url: str = ""
     upscaled_image_url: Optional[str] = None
     source_image_url: Optional[str] = None
     cropped_image_path: Optional[str] = None
@@ -509,6 +530,8 @@ class GarmentCard(BaseModel):
     upscale_status: Optional[str] = "pending"
     is_upscaled: bool = False
     cost_usd: float = 0.0
+    cost_sgd: float = 0.0
+    exchange_rate: Optional[float] = None
     tokens: int = 0
 
     @model_validator(mode="before")
@@ -558,8 +581,8 @@ class WardrobeListResponse(BaseModel):
 class ClothingRegion(BaseModel):
     id: str
     label: str
-    category: Optional[str] = None
-    bbox: List[float] = Field(default_factory=list)
+    category: Literal["outerwear", "tops", "bottoms", "footwear", "accessories", "full_outfit"] = "tops"
+    bbox: List[float]
 
 
 class DetectRegionsRequest(BaseModel):
@@ -573,17 +596,16 @@ class DetectRegionsResponse(BaseModel):
 
 class CompositionPinAssignment(BaseModel):
     wardrobe_item_id: str
-    pin_number: int
-    drop_position: Optional[Dict[str, float]] = None
-    target_description: Optional[str] = None
+    pin_number: int = 1
+    drop_position: Dict[str, float] = Field(default_factory=lambda: {"x": 0.5, "y": 0.5})
+    target_description: Optional[str] = ""
     region_bbox: Optional[List[float]] = None
-    grounded_subject: Optional[str] = None
     item_label: Optional[str] = None
-    category: Optional[str] = None
+    category: Optional[str] = "tops"
 
 
 class WardrobeComposeRequest(BaseModel):
-    parent_id: str
+    parent_id: Optional[str] = None
     assignments: List[CompositionPinAssignment] = Field(default_factory=list)
     seed_mode: str = "locked"
     seed: int = 4289102
@@ -608,8 +630,11 @@ class WardrobeComposeResponse(BaseModel):
     conversation_id: Optional[str] = None
     assignments: List[CompositionPinAssignment] = Field(default_factory=list)
     cost_usd: Optional[float] = 0.0
+    cost_sgd: Optional[float] = 0.0
+    exchange_rate: Optional[float] = None
     tokens: Optional[int] = 0
     accumulated_cost_usd: Optional[float] = 0.0
+    accumulated_cost_sgd: Optional[float] = 0.0
     accumulated_tokens: Optional[int] = 0
 
 
@@ -626,5 +651,6 @@ class UpscaleGarmentResponse(BaseModel):
     upscale_status: str = "completed"
     is_upscaled: bool = True
     cost_usd: float = 0.0
+    cost_sgd: float = 0.0
+    exchange_rate: Optional[float] = None
     tokens: int = 0
-

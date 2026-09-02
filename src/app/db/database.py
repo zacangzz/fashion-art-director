@@ -2,6 +2,8 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Union
 from google.cloud.firestore import Client, Increment
 from app.utils.logger import get_logger
+from app.utils.pricing import round_up_cost, OFFICIAL_MODEL_PRICING_SEEDS
+from app.utils.currency_service import get_daily_exchange_rate, get_today_iso_date
 
 logger = get_logger("database")
 
@@ -15,6 +17,8 @@ ALLOWED_COLLECTIONS = [
     "composition_assignments",
     "telemetry_events",
     "usage_daily",
+    "model_pricing",
+    "currency_rates",
 ]
 
 
@@ -22,6 +26,7 @@ class FirestoreManager:
     """
     Unified synchronous Firestore Native database manager.
     Enforces multi-tenancy with user_id, native maps/arrays,
+    time-based model pricing, dual-currency (USD/SGD) spend tracking,
     pre-computed lineage costs, and zero circular dependencies.
     """
     def __init__(self, db: Client):
@@ -52,6 +57,74 @@ class FirestoreManager:
         return str(obj)
 
     # -------------------------------------------------------------------------
+    # 0. MODEL PRICING & CURRENCY RATES
+    # -------------------------------------------------------------------------
+    def seed_model_pricing(self) -> int:
+        """
+        Seeds official Google Gemini API model pricing tiers into the `model_pricing` collection
+        if the collection is currently uninitialized.
+        """
+        try:
+            coll = self.db.collection("model_pricing")
+            existing = list(coll.limit(1).stream())
+            if existing:
+                return 0
+            count = 0
+            for seed in OFFICIAL_MODEL_PRICING_SEEDS:
+                doc_id = f"{seed['model_name']}_{seed['effective_date']}"
+                data = dict(seed)
+                data["id"] = doc_id
+                data["created_at"] = self._now_iso()
+                coll.document(doc_id).set(data)
+                count += 1
+            logger.info(f"Seeded {count} official model pricing tiers into Firestore")
+            return count
+        except Exception as err:
+            logger.warning(f"Could not seed model pricing tiers: {err}")
+            return 0
+
+    def get_effective_model_pricing(
+        self,
+        model_name: str,
+        target_date: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Queries the active model pricing tier for a model as of target_date."""
+        date_key = target_date or get_today_iso_date()
+        m_key = model_name.lower().strip()
+        try:
+            docs = list(
+                self.db.collection("model_pricing")
+                .where("model_name", "==", m_key)
+                .where("effective_date", "<=", date_key)
+                .order_by("effective_date", direction="DESCENDING")
+                .limit(1)
+                .stream()
+            )
+            if docs:
+                return docs[0].to_dict()
+        except Exception as err:
+            logger.debug(f"Model pricing query note for {model_name}: {err}")
+        return None
+
+    def save_exchange_rate(self, date_str: str, rate: float, source: str = "yahoo_finance") -> Dict[str, Any]:
+        """Saves a daily USD/SGD currency conversion rate to Firestore."""
+        doc_data = {
+            "id": date_str,
+            "date": date_str,
+            "from_currency": "USD",
+            "to_currency": "SGD",
+            "rate": round(rate, 4),
+            "source": source,
+            "fetched_at": self._now_iso(),
+        }
+        self.db.collection("currency_rates").document(date_str).set(doc_data)
+        return doc_data
+
+    def get_exchange_rate(self, date_str: Optional[str] = None) -> float:
+        """Retrieves the effective USD/SGD exchange rate for a given date."""
+        return get_daily_exchange_rate(target_date=date_str, db=self.db)
+
+    # -------------------------------------------------------------------------
     # 1. MOODBOARDS
     # -------------------------------------------------------------------------
     def create_moodboard(self, user_id: str, moodboard_id: str, image_paths: List[str]) -> Dict[str, Any]:
@@ -62,8 +135,10 @@ class FirestoreManager:
             "user_id": user_id,
             "image_paths": image_paths,
             "cost_usd": 0.0,
+            "cost_sgd": 0.0,
             "tokens": 0,
             "accumulated_cost_usd": 0.0,
+            "accumulated_cost_sgd": 0.0,
             "accumulated_tokens": 0,
             "created_at": self._now_iso(),
         }
@@ -71,13 +146,25 @@ class FirestoreManager:
         return data
 
     def add_moodboard_cost(self, moodboard_id: str, cost_usd: float, tokens: int = 0) -> None:
+        c_usd = round_up_cost(cost_usd, 3)
+        eff_rate = get_daily_exchange_rate(db=self.db)
+        c_sgd = round_up_cost(cost_usd * eff_rate, 3)
+
         doc_ref = self.db.collection("moodboards").document(moodboard_id)
+        doc = doc_ref.get()
         doc_ref.update({
-            "cost_usd": Increment(cost_usd),
+            "cost_usd": Increment(c_usd),
+            "cost_sgd": Increment(c_sgd),
             "tokens": Increment(tokens),
-            "accumulated_cost_usd": Increment(cost_usd),
+            "accumulated_cost_usd": Increment(c_usd),
+            "accumulated_cost_sgd": Increment(c_sgd),
             "accumulated_tokens": Increment(tokens),
         })
+
+        if doc.exists:
+            user_id = doc.to_dict().get("user_id")
+            if user_id:
+                self.add_user_spend(user_id=user_id, cost_usd=c_usd, cost_sgd=c_sgd, tokens=tokens)
 
     def get_moodboard(self, moodboard_id: str) -> Optional[Dict[str, Any]]:
         doc = self.db.collection("moodboards").document(moodboard_id).get()
@@ -113,11 +200,16 @@ class FirestoreManager:
         if not data.get("model_name") and isinstance(schema, dict):
             data["model_name"] = schema.get("imagen_model") or schema.get("model_name")
 
-        data["cost_usd"] = float(data.get("cost_usd") or 0.0)
+        eff_rate = float(data.get("exchange_rate") or get_daily_exchange_rate(db=self.db))
+        data["cost_usd"] = round_up_cost(float(data.get("cost_usd") or 0.0), 3)
+        data["cost_sgd"] = round_up_cost(float(data.get("cost_sgd") or (data["cost_usd"] * eff_rate)), 3)
         data["tokens"] = int(data.get("tokens") or 0)
-        data["accumulated_cost_usd"] = float(data.get("accumulated_cost_usd") or 0.0)
+        data["accumulated_cost_usd"] = round_up_cost(float(data.get("accumulated_cost_usd") or data["cost_usd"]), 3)
+        data["accumulated_cost_sgd"] = round_up_cost(float(data.get("accumulated_cost_sgd") or (data["accumulated_cost_usd"] * eff_rate)), 3)
         data["accumulated_tokens"] = int(data.get("accumulated_tokens") or 0)
+        data["exchange_rate"] = eff_rate
         data["is_baseline"] = bool(data.get("is_baseline", False))
+
         if data.get("background_reference_id"):
             data["background_reference_id"] = str(data["background_reference_id"])
             if not data.get("background_reference_url"):
@@ -131,20 +223,27 @@ class FirestoreManager:
     def create_generation(self, user_id: str, gen_data: Dict[str, Any]) -> Dict[str, Any]:
         gen_id = gen_data["id"]
         parent_id = gen_data.get("parent_id")
-        cost_usd = float(gen_data.get("cost_usd") or 0.0)
+        cost_usd = round_up_cost(float(gen_data.get("cost_usd") or 0.0), 3)
+        eff_rate = float(gen_data.get("exchange_rate") or get_daily_exchange_rate(db=self.db))
+        cost_sgd = round_up_cost(float(gen_data.get("cost_sgd") or (cost_usd * eff_rate)), 3)
         tokens = int(gen_data.get("tokens") or 0)
 
         # Pre-compute lineage accumulation from parent if not already set
         if "accumulated_cost_usd" in gen_data:
-            accum_cost = float(gen_data["accumulated_cost_usd"])
+            accum_cost_usd = round_up_cost(float(gen_data["accumulated_cost_usd"]), 3)
+            accum_cost_sgd = round_up_cost(float(gen_data.get("accumulated_cost_sgd") or (accum_cost_usd * eff_rate)), 3)
             accum_tokens = int(gen_data.get("accumulated_tokens", tokens))
         else:
-            accum_cost = cost_usd
+            accum_cost_usd = cost_usd
+            accum_cost_sgd = cost_sgd
             accum_tokens = tokens
             if parent_id:
                 parent = self.get_generation(parent_id)
                 if parent:
-                    accum_cost += float(parent.get("accumulated_cost_usd") or parent.get("cost_usd", 0.0))
+                    p_accum_usd = float(parent.get("accumulated_cost_usd") or parent.get("cost_usd", 0.0))
+                    p_accum_sgd = float(parent.get("accumulated_cost_sgd") or (p_accum_usd * eff_rate))
+                    accum_cost_usd = round_up_cost(p_accum_usd + cost_usd, 3)
+                    accum_cost_sgd = round_up_cost(p_accum_sgd + cost_sgd, 3)
                     accum_tokens += int(parent.get("accumulated_tokens") or parent.get("tokens", 0))
 
         schema_val = gen_data.get("schema_json") or gen_data.get("tags_snapshot") or {}
@@ -159,6 +258,9 @@ class FirestoreManager:
         bg_meta = gen_data.get("background_harmonization_meta")
         if bg_meta is not None:
             bg_meta = self._to_firestore_safe(bg_meta)
+
+        created_at_val = gen_data.get("created_at") or self._now_iso()
+        rate_date = gen_data.get("exchange_rate_date") or created_at_val[:10]
 
         doc_data = {
             "id": gen_id,
@@ -180,17 +282,26 @@ class FirestoreManager:
             "background_reference_id": bg_ref_id,
             "background_harmonization_meta": bg_meta,
             "cost_usd": cost_usd,
+            "cost_sgd": cost_sgd,
+            "exchange_rate": eff_rate,
+            "exchange_rate_date": rate_date,
             "tokens": tokens,
-            "accumulated_cost_usd": round(accum_cost, 6),
+            "accumulated_cost_usd": accum_cost_usd,
+            "accumulated_cost_sgd": accum_cost_sgd,
             "accumulated_tokens": accum_tokens,
-            "created_at": gen_data.get("created_at") or self._now_iso(),
+            "created_at": created_at_val,
         }
 
         logger.info(
             f"Creating generation {gen_id} for user {user_id} (is_baseline={doc_data['is_baseline']}, "
-            f"cost=${cost_usd:.4f}, accum_cost=${accum_cost:.4f})"
+            f"cost_usd=${cost_usd:.3f}, cost_sgd=S${cost_sgd:.3f})"
         )
         self.db.collection("generations").document(gen_id).set(doc_data)
+
+        # Increment user spend in Firestore
+        if user_id and (cost_usd > 0 or cost_sgd > 0 or tokens > 0):
+            self.add_user_spend(user_id=user_id, cost_usd=cost_usd, cost_sgd=cost_sgd, tokens=tokens)
+
         return self._normalize_generation_doc(doc_data)
 
     def get_generation(self, generation_id: str) -> Optional[Dict[str, Any]]:
@@ -208,45 +319,57 @@ class FirestoreManager:
         query = self.db.collection("generations").where("user_id", "==", user_id)
         if is_baseline is not None:
             query = query.where("is_baseline", "==", is_baseline)
-        
-        # Order by created_at desc
-        query = query.order_by("created_at", direction="DESCENDING").limit(limit)
-        docs = query.stream()
-        return [self._normalize_generation_doc(d.to_dict()) for d in docs]
+        docs = list(query.stream())
+        docs.sort(key=lambda d: d.to_dict().get("created_at", ""), reverse=True)
+        return [self._normalize_generation_doc(d.to_dict()) for d in docs[:limit]]
 
     def get_lineage(self, generation_id: str) -> Dict[str, Any]:
         """
-        Traces ancestor chain up to the root baseline, and finds direct descendants.
+        Traverses upward to root ancestor via parent_id.
+        Returns dictionary containing:
+        - current: Dict
+        - ancestors: List[Dict] in chronological order from root to immediate parent
+        - descendants: List[Dict] direct children of current generation
+        - root_id: str
+        - total_chain_cost_usd: float (ceil 3 decimals)
+        - total_chain_cost_sgd: float (ceil 3 decimals)
+        - total_chain_tokens: int
         """
-        target = self.get_generation(generation_id)
-        if not target:
-            return {"root_id": generation_id, "ancestors": [], "descendants": []}
+        current = self.get_generation(generation_id)
+        if not current:
+            return {"current": None, "ancestors": [], "descendants": [], "root_id": None, "total_chain_cost_usd": 0.0, "total_chain_cost_sgd": 0.0, "total_chain_tokens": 0}
 
-        # 1. Traverse parent chain
         ancestors = []
-        curr_parent_id = target.get("parent_id")
-        while curr_parent_id:
-            parent_doc = self.get_generation(curr_parent_id)
-            if not parent_doc:
+        visited = {generation_id}
+        curr_parent_id = current.get("parent_id")
+
+        while curr_parent_id and curr_parent_id not in visited:
+            visited.add(curr_parent_id)
+            parent = self.get_generation(curr_parent_id)
+            if not parent:
                 break
-            ancestors.append(parent_doc)
-            curr_parent_id = parent_doc.get("parent_id")
+            ancestors.append(parent)
+            curr_parent_id = parent.get("parent_id")
 
-        ancestors.reverse()  # chronological root -> parent
-        root_id = ancestors[0]["id"] if ancestors else generation_id
+        ancestors.reverse()
+        root_id = ancestors[0]["id"] if ancestors else current["id"]
 
-        # 2. Find direct descendants
-        descendant_docs = (
-            self.db.collection("generations")
-            .where("parent_id", "==", generation_id)
-            .stream()
-        )
-        descendants = [self._normalize_generation_doc(d.to_dict()) for d in descendant_docs]
+        # Find direct descendants
+        desc_docs = list(self.db.collection("generations").where("parent_id", "==", generation_id).stream())
+        descendants = [self._normalize_generation_doc(d.to_dict()) for d in desc_docs]
+
+        total_cost_usd = current.get("accumulated_cost_usd") or current.get("cost_usd", 0.0)
+        total_cost_sgd = current.get("accumulated_cost_sgd") or current.get("cost_sgd", 0.0)
+        total_tokens = current.get("accumulated_tokens") or current.get("tokens", 0)
 
         return {
-            "root_id": root_id,
+            "current": current,
             "ancestors": ancestors,
             "descendants": descendants,
+            "root_id": root_id,
+            "total_chain_cost_usd": round_up_cost(float(total_cost_usd), 3),
+            "total_chain_cost_sgd": round_up_cost(float(total_cost_sgd), 3),
+            "total_chain_tokens": int(total_tokens),
         }
 
     # -------------------------------------------------------------------------
@@ -260,6 +383,7 @@ class FirestoreManager:
         moodboard_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         logger.info(f"Creating conversation {conv_id} for user {user_id}")
+        doc_ref = self.db.collection("conversations").document(conv_id)
         data = {
             "id": conv_id,
             "user_id": user_id,
@@ -267,7 +391,7 @@ class FirestoreManager:
             "moodboard_id": moodboard_id,
             "created_at": self._now_iso(),
         }
-        self.db.collection("conversations").document(conv_id).set(data)
+        doc_ref.set(data)
         return data
 
     def get_conversation(self, conv_id: str) -> Optional[Dict[str, Any]]:
@@ -276,86 +400,71 @@ class FirestoreManager:
             return doc.to_dict()
         return None
 
-    def list_conversation_messages(self, conv_id: str) -> List[Dict[str, Any]]:
-        docs = (
-            self.db.collection("generations")
-            .where("conversation_id", "==", conv_id)
-            .order_by("created_at", direction="ASCENDING")
-            .stream()
-        )
-        return [self._normalize_generation_doc(d.to_dict()) for d in docs]
+    def get_conversation_history(self, conv_id: str) -> List[Dict[str, Any]]:
+        gens = list(self.db.collection("generations").where("conversation_id", "==", conv_id).stream())
+        if not gens:
+            return []
+        items = [self._normalize_generation_doc(g.to_dict()) for g in gens]
+        items.sort(key=lambda x: x.get("created_at", ""))
+        return items
 
     # -------------------------------------------------------------------------
-    # 3.5 BACKGROUND REFERENCES
+    # 4. BACKGROUND REFERENCES
     # -------------------------------------------------------------------------
+    def _normalize_bg_doc(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        data = dict(data)
+        img_path = data.get("image_path", "")
+        thumb_path = data.get("thumbnail_path") or img_path
+        data["image_url"] = f"/api/images/{img_path.lstrip('/')}" if img_path else ""
+        data["thumbnail_url"] = f"/api/images/{thumb_path.lstrip('/')}" if thumb_path else ""
+        return data
+
     def create_background_reference(self, user_id: str, bg_data: Dict[str, Any]) -> Dict[str, Any]:
         bg_id = bg_data["id"]
         doc_data = {
             "id": bg_id,
             "user_id": user_id,
             "original_filename": bg_data.get("original_filename", ""),
-            "image_path": bg_data["image_path"],
+            "image_path": bg_data.get("image_path", ""),
             "thumbnail_path": bg_data.get("thumbnail_path"),
             "aspect_ratio": bg_data.get("aspect_ratio", "16:9"),
-            "tags": bg_data.get("tags", []),
+            "tags": bg_data.get("tags") or [],
             "created_at": bg_data.get("created_at") or self._now_iso(),
             "deleted_at": None,
         }
         logger.info(f"Creating background reference {bg_id} for user {user_id}")
         self.db.collection("background_references").document(bg_id).set(doc_data)
-
-        data = dict(doc_data)
-        data["image_url"] = f"/api/images/{doc_data['image_path'].lstrip('/')}"
-        if doc_data.get("thumbnail_path"):
-            data["thumbnail_url"] = f"/api/images/{doc_data['thumbnail_path'].lstrip('/')}"
-        else:
-            data["thumbnail_url"] = data["image_url"]
-        return data
+        return self._normalize_bg_doc(doc_data)
 
     def get_background_reference(self, bg_id: str) -> Optional[Dict[str, Any]]:
         doc = self.db.collection("background_references").document(bg_id).get()
         if doc.exists:
             data = doc.to_dict()
-            if data.get("deleted_at") is not None:
-                return None
-            data["image_url"] = f"/api/images/{data['image_path'].lstrip('/')}"
-            if data.get("thumbnail_path"):
-                data["thumbnail_url"] = f"/api/images/{data['thumbnail_path'].lstrip('/')}"
-            else:
-                data["thumbnail_url"] = data["image_url"]
-            return data
+            if data.get("deleted_at") is None:
+                return self._normalize_bg_doc(data)
         return None
 
     def list_background_references(self, user_id: str, limit: int = 50) -> List[Dict[str, Any]]:
         try:
-            query = (
+            docs = list(
                 self.db.collection("background_references")
                 .where("user_id", "==", user_id)
+                .where("deleted_at", "==", None)
                 .order_by("created_at", direction="DESCENDING")
                 .limit(limit)
+                .stream()
             )
-            docs = list(query.stream())
         except Exception:
-            # Fallback if compound index is pending
-            query = (
+            docs = list(
                 self.db.collection("background_references")
                 .where("user_id", "==", user_id)
                 .limit(limit)
+                .stream()
             )
-            docs = list(query.stream())
+            docs = [d for d in docs if d.to_dict().get("deleted_at") is None]
+            docs.sort(key=lambda d: d.to_dict().get("created_at", ""), reverse=True)
 
-        results = []
-        for doc in docs:
-            d = doc.to_dict()
-            if d.get("deleted_at") is not None:
-                continue
-            d["image_url"] = f"/api/images/{d['image_path'].lstrip('/')}"
-            if d.get("thumbnail_path"):
-                d["thumbnail_url"] = f"/api/images/{d['thumbnail_path'].lstrip('/')}"
-            else:
-                d["thumbnail_url"] = d["image_url"]
-            results.append(d)
-        return results
+        return [self._normalize_bg_doc(d.to_dict()) for d in docs]
 
     def delete_background_reference(self, user_id: str, bg_id: str) -> bool:
         doc_ref = self.db.collection("background_references").document(bg_id)
@@ -368,72 +477,20 @@ class FirestoreManager:
         return False
 
     # -------------------------------------------------------------------------
-    # 4. WARDROBE ITEMS
+    # 5. WARDROBE & COMPOSITION
     # -------------------------------------------------------------------------
     def _normalize_wardrobe_doc(self, data: Dict[str, Any]) -> Dict[str, Any]:
         data = dict(data)
-        item_id = data.get("id", "")
-        bbox = data.get("bbox_json") or data.get("bbox")
-        if isinstance(bbox, str):
-            import json
-            try:
-                bbox = json.loads(bbox)
-            except Exception:
-                bbox = None
-        data["bbox"] = bbox
-        data["bbox_json"] = bbox
-
-        details = data.get("extracted_details_json") or data.get("extracted_details")
-        if isinstance(details, str):
-            import json
-            try:
-                details = json.loads(details)
-            except Exception:
-                details = None
-        data["extracted_details"] = details
-        data["extracted_details_json"] = details
-
-        if not data.get("upscale_status"):
-            data["upscale_status"] = "completed" if data.get("upscaled_image_path") else "pending"
-        data["is_upscaled"] = bool(data.get("upscaled_image_path") and data.get("upscale_status") == "completed")
-        data["cost_usd"] = float(data.get("cost_usd") or 0.0)
+        crop_path = data.get("cropped_image_path", "")
+        upscale_path = data.get("upscaled_image_path")
+        data["image_url"] = f"/api/images/{crop_path.lstrip('/')}" if crop_path else ""
+        data["upscaled_image_url"] = f"/api/images/{upscale_path.lstrip('/')}" if upscale_path else None
+        data["bbox"] = data.get("bbox_json") or data.get("bbox") or []
+        data["extracted_details"] = data.get("extracted_details_json") or data.get("extracted_details") or {}
+        eff_rate = float(data.get("exchange_rate") or get_daily_exchange_rate(db=self.db))
+        data["cost_usd"] = round_up_cost(float(data.get("cost_usd") or 0.0), 3)
+        data["cost_sgd"] = round_up_cost(float(data.get("cost_sgd") or (data["cost_usd"] * eff_rate)), 3)
         data["tokens"] = int(data.get("tokens") or 0)
-
-        # Ensure image URLs are populated for clients
-        cropped_path = data.get("cropped_image_path")
-        if not data.get("image_url"):
-            if cropped_path:
-                if cropped_path.startswith("http://") or cropped_path.startswith("https://") or cropped_path.startswith("/api/"):
-                    data["image_url"] = cropped_path
-                else:
-                    data["image_url"] = f"/api/images/{cropped_path.lstrip('/')}"
-            elif item_id:
-                data["image_url"] = f"/api/wardrobe/items/{item_id}/image"
-            else:
-                data["image_url"] = ""
-
-        upscaled_path = data.get("upscaled_image_path")
-        if not data.get("upscaled_image_url"):
-            if upscaled_path:
-                if upscaled_path.startswith("http://") or upscaled_path.startswith("https://") or upscaled_path.startswith("/api/"):
-                    data["upscaled_image_url"] = upscaled_path
-                else:
-                    data["upscaled_image_url"] = f"/api/images/{upscaled_path.lstrip('/')}"
-            elif item_id and data.get("is_upscaled"):
-                data["upscaled_image_url"] = f"/api/wardrobe/items/{item_id}/upscaled-image"
-            else:
-                data["upscaled_image_url"] = None
-
-        source_path = data.get("source_image_path")
-        if not data.get("source_image_url"):
-            if source_path:
-                if source_path.startswith("http://") or source_path.startswith("https://") or source_path.startswith("/api/"):
-                    data["source_image_url"] = source_path
-                else:
-                    data["source_image_url"] = f"/api/images/{source_path.lstrip('/')}"
-            else:
-                data["source_image_url"] = None
-
         return data
 
     def create_wardrobe_item(self, user_id: str, item_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -442,6 +499,11 @@ class FirestoreManager:
 
         bbox = item_data.get("bbox") or item_data.get("bbox_json")
         details = item_data.get("extracted_details") or item_data.get("extracted_details_json")
+
+        c_usd = round_up_cost(float(item_data.get("cost_usd") or 0.0), 3)
+        eff_rate = get_daily_exchange_rate(db=self.db)
+        c_sgd = round_up_cost(float(item_data.get("cost_sgd") or (c_usd * eff_rate)), 3)
+        toks = int(item_data.get("tokens") or 0)
 
         doc_data = {
             "id": item_id,
@@ -455,12 +517,17 @@ class FirestoreManager:
             "upscale_error": item_data.get("upscale_error"),
             "bbox_json": self._to_firestore_safe(bbox),
             "extracted_details_json": self._to_firestore_safe(details),
-            "cost_usd": float(item_data.get("cost_usd") or 0.0),
-            "tokens": int(item_data.get("tokens") or 0),
+            "cost_usd": c_usd,
+            "cost_sgd": c_sgd,
+            "tokens": toks,
             "created_at": item_data.get("created_at") or self._now_iso(),
             "deleted_at": None,
         }
         self.db.collection("wardrobe_items").document(item_id).set(doc_data)
+
+        if user_id and (c_usd > 0 or c_sgd > 0 or toks > 0):
+            self.add_user_spend(user_id=user_id, cost_usd=c_usd, cost_sgd=c_sgd, tokens=toks)
+
         return self._normalize_wardrobe_doc(doc_data)
 
     def update_wardrobe_item_details(
@@ -477,8 +544,18 @@ class FirestoreManager:
 
         update_data: Dict[str, Any] = {"extracted_details_json": self._to_firestore_safe(extracted_details)}
         if cost_usd is not None and cost_usd > 0:
-            update_data["cost_usd"] = Increment(cost_usd)
-        if tokens is not None and tokens > 0:
+            c_usd = round_up_cost(cost_usd, 3)
+            eff_rate = get_daily_exchange_rate(db=self.db)
+            c_sgd = round_up_cost(cost_usd * eff_rate, 3)
+            update_data["cost_usd"] = Increment(c_usd)
+            update_data["cost_sgd"] = Increment(c_sgd)
+            toks = tokens or 0
+            if toks > 0:
+                update_data["tokens"] = Increment(toks)
+            user_id = doc.to_dict().get("user_id")
+            if user_id:
+                self.add_user_spend(user_id=user_id, cost_usd=c_usd, cost_sgd=c_sgd, tokens=toks)
+        elif tokens is not None and tokens > 0:
             update_data["tokens"] = Increment(tokens)
 
         doc_ref.update(update_data)
@@ -505,8 +582,18 @@ class FirestoreManager:
         if upscaled_image_path:
             update_data["upscaled_image_path"] = upscaled_image_path
         if cost_usd is not None and cost_usd > 0:
-            update_data["cost_usd"] = Increment(cost_usd)
-        if tokens is not None and tokens > 0:
+            c_usd = round_up_cost(cost_usd, 3)
+            eff_rate = get_daily_exchange_rate(db=self.db)
+            c_sgd = round_up_cost(cost_usd * eff_rate, 3)
+            update_data["cost_usd"] = Increment(c_usd)
+            update_data["cost_sgd"] = Increment(c_sgd)
+            toks = tokens or 0
+            if toks > 0:
+                update_data["tokens"] = Increment(toks)
+            user_id = doc.to_dict().get("user_id")
+            if user_id:
+                self.add_user_spend(user_id=user_id, cost_usd=c_usd, cost_sgd=c_sgd, tokens=toks)
+        elif tokens is not None and tokens > 0:
             update_data["tokens"] = Increment(tokens)
 
         doc_ref.update(update_data)
@@ -521,178 +608,103 @@ class FirestoreManager:
         return None
 
     def list_wardrobe_items(self, user_id: str) -> List[Dict[str, Any]]:
-        docs = (
+        docs = list(
             self.db.collection("wardrobe_items")
             .where("user_id", "==", user_id)
-            .where("deleted_at", "==", None)
-            .order_by("created_at", direction="DESCENDING")
             .stream()
         )
-        return [self._normalize_wardrobe_doc(d.to_dict()) for d in docs]
+        active = [d.to_dict() for d in docs if d.to_dict().get("deleted_at") is None]
+        active.sort(key=lambda d: d.get("created_at", ""), reverse=True)
+        return [self._normalize_wardrobe_doc(d) for d in active]
 
-    def delete_wardrobe_item(self, item_id: str) -> Optional[Dict[str, Any]]:
-        doc_ref = self.db.collection("wardrobe_items").document(item_id)
+    def delete_wardrobe_item(self, item_id_or_user: str, item_id: Optional[str] = None) -> bool:
+        """
+        Soft deletes a wardrobe item.
+        Supports both signatures: delete_wardrobe_item(item_id) or delete_wardrobe_item(user_id, item_id).
+        """
+        target_item_id = item_id if item_id is not None else item_id_or_user
+        expected_user_id = item_id_or_user if item_id is not None else None
+
+        doc_ref = self.db.collection("wardrobe_items").document(target_item_id)
         doc = doc_ref.get()
-        if not doc.exists:
-            return None
-        data = doc.to_dict()
-        if data.get("deleted_at") is not None:
-            return None
-
-        # Soft delete
-        doc_ref.update({"deleted_at": self._now_iso()})
-
-        # Remove associated composition assignments
-        assignments = (
-            self.db.collection("composition_assignments")
-            .where("wardrobe_item_id", "==", item_id)
-            .stream()
-        )
-        batch = self.db.batch()
-        for a in assignments:
-            batch.delete(a.reference)
-        batch.commit()
-
-        return self._normalize_wardrobe_doc(data)
+        if doc.exists:
+            d = doc.to_dict()
+            if expected_user_id and d.get("user_id") != expected_user_id:
+                return False
+            if d.get("deleted_at") is None:
+                doc_ref.update({"deleted_at": self._now_iso()})
+                assignments = self.db.collection("composition_assignments").where("wardrobe_item_id", "==", target_item_id).stream()
+                for a in assignments:
+                    self.db.collection("composition_assignments").document(a.id).delete()
+                return True
+        return False
 
     def delete_all_wardrobe_items(self, user_id: str) -> List[Dict[str, Any]]:
         docs = list(
             self.db.collection("wardrobe_items")
             .where("user_id", "==", user_id)
-            .where("deleted_at", "==", None)
             .stream()
         )
-        if not docs:
-            return []
+        active = [d.to_dict() for d in docs if d.to_dict().get("deleted_at") is None]
+        now_ts = self._now_iso()
+        for d in active:
+            item_id = d["id"]
+            self.db.collection("wardrobe_items").document(item_id).update({"deleted_at": now_ts})
+            assignments = self.db.collection("composition_assignments").where("wardrobe_item_id", "==", item_id).stream()
+            for a in assignments:
+                self.db.collection("composition_assignments").document(a.id).delete()
 
-        now_str = self._now_iso()
-        batch = self.db.batch()
-        deleted_items = []
-        for d in docs:
-            batch.update(d.reference, {"deleted_at": now_str})
-            deleted_items.append(self._normalize_wardrobe_doc(d.to_dict()))
-
-        # Remove assignments
         assignments = self.db.collection("composition_assignments").where("user_id", "==", user_id).stream()
         for a in assignments:
-            batch.delete(a.reference)
+            self.db.collection("composition_assignments").document(a.id).delete()
 
-        batch.commit()
-        return deleted_items
+        return [self._normalize_wardrobe_doc(d) for d in active]
 
-    # -------------------------------------------------------------------------
-    # 5. COMPOSITION ASSIGNMENTS
-    # -------------------------------------------------------------------------
     def create_composition_assignment(self, user_id: str, assignment_data: Dict[str, Any]) -> Dict[str, Any]:
-        assign_id = assignment_data["id"]
+        assignment_id = assignment_data["id"]
         doc_data = {
-            "id": assign_id,
+            "id": assignment_id,
             "user_id": user_id,
-            "generation_id": assignment_data["generation_id"],
-            "wardrobe_item_id": assignment_data["wardrobe_item_id"],
-            "pin_number": int(assignment_data["pin_number"]),
-            "drop_position_json": self._to_firestore_safe(assignment_data.get("drop_position") or assignment_data.get("drop_position_json")),
-            "target_description": assignment_data.get("target_description"),
-            "region_bbox_json": self._to_firestore_safe(assignment_data.get("region_bbox") or assignment_data.get("region_bbox_json")),
+            "generation_id": assignment_data.get("generation_id"),
+            "wardrobe_item_id": assignment_data.get("wardrobe_item_id"),
+            "pin_number": int(assignment_data.get("pin_number", 1)),
+            "drop_position": self._to_firestore_safe(assignment_data.get("drop_position") or {"x": 0.5, "y": 0.5}),
+            "target_description": assignment_data.get("target_description", ""),
+            "region_bbox": self._to_firestore_safe(assignment_data.get("region_bbox") or []),
             "created_at": assignment_data.get("created_at") or self._now_iso(),
         }
-        self.db.collection("composition_assignments").document(assign_id).set(doc_data)
+        self.db.collection("composition_assignments").document(assignment_id).set(doc_data)
         return doc_data
 
     def list_composition_assignments(self, generation_id: str) -> List[Dict[str, Any]]:
-        docs = list(
-            self.db.collection("composition_assignments")
-            .where("generation_id", "==", generation_id)
-            .order_by("pin_number", direction="ASCENDING")
-            .stream()
-        )
-        if not docs:
-            return []
+        docs = list(self.db.collection("composition_assignments").where("generation_id", "==", generation_id).stream())
+        items = [d.to_dict() for d in docs]
+        items.sort(key=lambda x: x.get("pin_number", 0))
 
-        assignments = [d.to_dict() for d in docs]
-        
-        # Batch fetch wardrobe item labels and cropped paths
-        wardrobe_item_ids = list({a["wardrobe_item_id"] for a in assignments if a.get("wardrobe_item_id")})
-        wardrobe_map = {}
-        for wid in wardrobe_item_ids:
-            w_doc = self.db.collection("wardrobe_items").document(wid).get()
-            if w_doc.exists:
-                w_data = w_doc.to_dict()
-                wardrobe_map[wid] = {
-                    "wardrobe_label": w_data.get("label"),
-                    "cropped_image_path": w_data.get("cropped_image_path"),
-                }
-
-        results = []
-        for a in assignments:
-            item_info = wardrobe_map.get(a.get("wardrobe_item_id"), {})
-            res = dict(a)
-            res["wardrobe_label"] = item_info.get("wardrobe_label")
-            res["cropped_image_path"] = item_info.get("cropped_image_path")
-            res["drop_position"] = a.get("drop_position_json")
-            res["region_bbox"] = a.get("region_bbox_json")
-            results.append(res)
-
-        return results
+        # Enrich assignments with wardrobe label & crop path if available
+        for a in items:
+            w_id = a.get("wardrobe_item_id")
+            if w_id:
+                w_item = self.get_wardrobe_item(w_id)
+                if w_item:
+                    a["wardrobe_label"] = w_item.get("label")
+                    a["cropped_image_path"] = w_item.get("cropped_image_path")
+                    a["cropped_image_url"] = w_item.get("image_url")
+                    a["category"] = w_item.get("category")
+        return items
 
     # -------------------------------------------------------------------------
-    # 6. OBSERVABILITY & INSPECTOR SUMMARY
-    # -------------------------------------------------------------------------
-    def get_tables_summary(self) -> Dict[str, Any]:
-        summary = {}
-        for coll_name in ALLOWED_COLLECTIONS:
-            try:
-                # Count documents using aggregation or stream
-                docs = list(self.db.collection(coll_name).limit(1000).stream())
-                count = len(docs)
-                summary[coll_name] = {"row_count": count, "columns": []}
-            except Exception as err:
-                logger.warning(f"Failed to inspect collection {coll_name}: {err}")
-                summary[coll_name] = {"row_count": 0, "columns": []}
-        return summary
-
-    def get_table_records(
-        self,
-        table_name: str,
-        limit: int = 50,
-        offset: int = 0,
-        start_after_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        if table_name not in ALLOWED_COLLECTIONS:
-            raise ValueError(f"Invalid or unauthorized collection name '{table_name}'.")
-
-        coll = self.db.collection(table_name)
-        # Order by created_at desc if field exists, else document ID
-        query = coll
-        if start_after_id:
-            start_doc = coll.document(start_after_id).get()
-            if start_doc.exists:
-                query = query.start_after(start_doc)
-        elif offset > 0:
-            query = query.offset(offset)
-
-        query = query.limit(limit)
-        docs = list(query.stream())
-        rows = [d.to_dict() for d in docs]
-        next_cursor = docs[-1].id if len(docs) == limit else None
-
-        return {
-            "table": table_name,
-            "total": len(rows),
-            "limit": limit,
-            "offset": offset,
-            "next_cursor": next_cursor,
-            "rows": rows,
-        }
-
-    # -------------------------------------------------------------------------
-    # 7. USER & PERMISSIONS MANAGEMENT
+    # 6. USERS, WHITELIST & AUTHENTICATION
     # -------------------------------------------------------------------------
     def get_user(self, user_id: str) -> Optional[Dict[str, Any]]:
         """Retrieve user document by ID (UID or invite document ID)."""
         doc = self.db.collection("users").document(user_id).get()
         if doc.exists:
-            return doc.to_dict()
+            d = doc.to_dict()
+            eff_rate = get_daily_exchange_rate(db=self.db)
+            d["total_spend_usd"] = round_up_cost(float(d.get("total_spend_usd") or 0.0), 3)
+            d["total_spend_sgd"] = round_up_cost(float(d.get("total_spend_sgd") or (d["total_spend_usd"] * eff_rate)), 3)
+            return d
         return None
 
     def get_user_by_email(self, email: str) -> Optional[Dict[str, Any]]:
@@ -702,7 +714,11 @@ class FirestoreManager:
         norm_email = email.strip().lower()
         docs = list(self.db.collection("users").where("email", "==", norm_email).limit(1).stream())
         if docs:
-            return docs[0].to_dict()
+            d = docs[0].to_dict()
+            eff_rate = get_daily_exchange_rate(db=self.db)
+            d["total_spend_usd"] = round_up_cost(float(d.get("total_spend_usd") or 0.0), 3)
+            d["total_spend_sgd"] = round_up_cost(float(d.get("total_spend_sgd") or (d["total_spend_usd"] * eff_rate)), 3)
+            return d
         return None
 
     def create_user_invite(self, email: str, role: str = "user", invited_by: str = "admin") -> Dict[str, Any]:
@@ -728,6 +744,7 @@ class FirestoreManager:
             "approved_at": None,
             "last_login_at": None,
             "total_spend_usd": 0.0,
+            "total_spend_sgd": 0.0,
             "total_tokens": 0,
         }
         self.db.collection("users").document(invite_id).set(doc_data)
@@ -751,6 +768,7 @@ class FirestoreManager:
         """
         norm_email = (email or "").strip().lower()
         now_ts = self._now_iso()
+        eff_rate = get_daily_exchange_rate(db=self.db)
 
         # Check existing doc by UID
         user_doc_ref = self.db.collection("users").document(uid)
@@ -770,8 +788,14 @@ class FirestoreManager:
                 updates["status"] = "approved"
                 if not user_data.get("approved_at"):
                     updates["approved_at"] = now_ts
+            if "total_spend_sgd" not in user_data:
+                usd = float(user_data.get("total_spend_usd") or 0.0)
+                updates["total_spend_sgd"] = round_up_cost(usd * eff_rate, 3)
+
             user_doc_ref.update(updates)
             user_data.update(updates)
+            user_data["total_spend_usd"] = round_up_cost(float(user_data.get("total_spend_usd") or 0.0), 3)
+            user_data["total_spend_sgd"] = round_up_cost(float(user_data.get("total_spend_sgd") or (user_data["total_spend_usd"] * eff_rate)), 3)
             return user_data
 
         # Check if an invite doc exists for this email
@@ -788,6 +812,9 @@ class FirestoreManager:
             except Exception as err:
                 logger.warning(f"Could not delete old invite doc {invite_record['id']}: {err}")
 
+        init_usd = round_up_cost(invite_record.get("total_spend_usd", 0.0) if invite_record else 0.0, 3)
+        init_sgd = round_up_cost(invite_record.get("total_spend_sgd", init_usd * eff_rate) if invite_record else (init_usd * eff_rate), 3)
+
         user_data = {
             "id": uid,
             "email": norm_email,
@@ -799,7 +826,8 @@ class FirestoreManager:
             "created_at": created_at,
             "approved_at": now_ts if status == "approved" else None,
             "last_login_at": now_ts,
-            "total_spend_usd": invite_record.get("total_spend_usd", 0.0) if invite_record else 0.0,
+            "total_spend_usd": init_usd,
+            "total_spend_sgd": init_sgd,
             "total_tokens": invite_record.get("total_tokens", 0) if invite_record else 0,
         }
         user_doc_ref.set(user_data)
@@ -807,9 +835,91 @@ class FirestoreManager:
         return user_data
 
     def list_users(self, limit: int = 100) -> List[Dict[str, Any]]:
-        """List all registered and invited users."""
+        """
+        List all registered and invited users, dynamically aggregating real-time spend
+        across generations, wardrobe items, and moodboard analysis in both USD and SGD
+        (rounded up to 3 decimals).
+        """
         docs = list(self.db.collection("users").order_by("created_at", direction="DESCENDING").limit(limit).stream())
-        return [d.to_dict() for d in docs]
+        users_list = [d.to_dict() for d in docs]
+
+        eff_rate = get_daily_exchange_rate(db=self.db)
+
+        # Aggregate generations compute spend by user_id
+        spend_usd_by_uid: Dict[str, float] = {}
+        spend_sgd_by_uid: Dict[str, float] = {}
+        tokens_by_uid: Dict[str, int] = {}
+
+        try:
+            for g_doc in self.db.collection("generations").stream():
+                g_dict = g_doc.to_dict()
+                u_id = g_dict.get("user_id")
+                if not u_id:
+                    continue
+                c_usd = float(g_dict.get("cost_usd") or 0.0)
+                c_sgd = float(g_dict.get("cost_sgd") or (c_usd * eff_rate))
+                t_toks = int(g_dict.get("tokens") or 0)
+                if c_usd > 0:
+                    spend_usd_by_uid[u_id] = spend_usd_by_uid.get(u_id, 0.0) + c_usd
+                if c_sgd > 0:
+                    spend_sgd_by_uid[u_id] = spend_sgd_by_uid.get(u_id, 0.0) + c_sgd
+                if t_toks > 0:
+                    tokens_by_uid[u_id] = tokens_by_uid.get(u_id, 0) + t_toks
+        except Exception as err:
+            logger.debug(f"Generation spend aggregation note: {err}")
+
+        # Aggregate wardrobe items
+        try:
+            for w_doc in self.db.collection("wardrobe_items").stream():
+                w_dict = w_doc.to_dict()
+                u_id = w_dict.get("user_id")
+                if not u_id or w_dict.get("deleted_at") is not None:
+                    continue
+                c_usd = float(w_dict.get("cost_usd") or 0.0)
+                c_sgd = float(w_dict.get("cost_sgd") or (c_usd * eff_rate))
+                t_toks = int(w_dict.get("tokens") or 0)
+                if c_usd > 0:
+                    spend_usd_by_uid[u_id] = spend_usd_by_uid.get(u_id, 0.0) + c_usd
+                if c_sgd > 0:
+                    spend_sgd_by_uid[u_id] = spend_sgd_by_uid.get(u_id, 0.0) + c_sgd
+                if t_toks > 0:
+                    tokens_by_uid[u_id] = tokens_by_uid.get(u_id, 0) + t_toks
+        except Exception as err:
+            logger.debug(f"Wardrobe spend aggregation note: {err}")
+
+        # Update each user with accurate, ceiling-rounded spend
+        for u in users_list:
+            keys = {u.get("id"), u.get("uid"), u.get("email")}
+            keys.discard(None)
+
+            computed_usd = sum(spend_usd_by_uid.get(k, 0.0) for k in keys)
+            computed_sgd = sum(spend_sgd_by_uid.get(k, 0.0) for k in keys)
+            computed_toks = sum(tokens_by_uid.get(k, 0) for k in keys)
+
+            stored_usd = float(u.get("total_spend_usd") or 0.0)
+            stored_sgd = float(u.get("total_spend_sgd") or (stored_usd * eff_rate))
+            stored_toks = int(u.get("total_tokens") or 0)
+
+            final_usd = round_up_cost(max(stored_usd, computed_usd), 3)
+            final_sgd = round_up_cost(max(stored_sgd, computed_sgd, final_usd * eff_rate), 3)
+            final_toks = max(stored_toks, computed_toks)
+
+            u["total_spend_usd"] = final_usd
+            u["total_spend_sgd"] = final_sgd
+            u["total_tokens"] = final_toks
+
+            # If Firestore doc had lower/missing spend, update it
+            if u.get("id") and (final_usd > stored_usd or "total_spend_sgd" not in u):
+                try:
+                    self.db.collection("users").document(u["id"]).update({
+                        "total_spend_usd": final_usd,
+                        "total_spend_sgd": final_sgd,
+                        "total_tokens": final_toks,
+                    })
+                except Exception:
+                    pass
+
+        return users_list
 
     def update_user_status(
         self,
@@ -846,19 +956,109 @@ class FirestoreManager:
             return True
         return False
 
-    def add_user_spend(self, user_id: str, cost_usd: float, tokens: int = 0) -> None:
-        """Increment cumulative spend and tokens for a user."""
+    def add_user_spend(
+        self,
+        user_id: str,
+        cost_usd: float,
+        cost_sgd: Optional[float] = None,
+        tokens: int = 0,
+    ) -> None:
+        """
+        Increment cumulative spend (USD and SGD, ceil rounded to 3 decimals) and tokens for a user.
+        """
+        if not user_id or user_id in ("anonymous", "public_anonymous"):
+            return
+
+        eff_rate = get_daily_exchange_rate(db=self.db)
+        c_usd = round_up_cost(cost_usd, 3)
+        c_sgd = round_up_cost(cost_sgd if cost_sgd is not None else (cost_usd * eff_rate), 3)
+
+        if c_usd <= 0 and c_sgd <= 0 and tokens <= 0:
+            return
+
         try:
             doc_ref = self.db.collection("users").document(user_id)
             if doc_ref.get().exists:
                 doc_ref.update({
-                    "total_spend_usd": Increment(cost_usd),
+                    "total_spend_usd": Increment(c_usd),
+                    "total_spend_sgd": Increment(c_sgd),
                     "total_tokens": Increment(tokens),
                 })
+                return
+
+            # Check if user_id is an email address
+            norm_email = user_id.strip().lower() if "@" in user_id else None
+            if norm_email:
+                existing = self.get_user_by_email(norm_email)
+                if existing and existing.get("id"):
+                    self.db.collection("users").document(existing["id"]).update({
+                        "total_spend_usd": Increment(c_usd),
+                        "total_spend_sgd": Increment(c_sgd),
+                        "total_tokens": Increment(tokens),
+                    })
         except Exception as err:
             logger.warning(f"Failed to update spend for user {user_id}: {err}")
+
+    # -------------------------------------------------------------------------
+    # 7. OBSERVABILITY & DATABASE INSPECTOR
+    # -------------------------------------------------------------------------
+    def get_tables_summary(self) -> Dict[str, Any]:
+        """Returns row counts and schema overview for all allowed collections."""
+        summary = {}
+        for coll_name in ALLOWED_COLLECTIONS:
+            try:
+                docs = list(self.db.collection(coll_name).stream())
+                sample_fields = list(docs[0].to_dict().keys()) if docs else []
+                summary[coll_name] = {
+                    "table_name": coll_name,
+                    "row_count": len(docs),
+                    "columns": sample_fields,
+                }
+            except Exception as err:
+                summary[coll_name] = {"table_name": coll_name, "row_count": 0, "columns": [], "error": str(err)}
+        return summary
+
+    def get_table_records(
+        self,
+        table_name: str,
+        limit: int = 50,
+        offset: int = 0,
+        start_after_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Returns paginated records for a collection."""
+        if table_name not in ALLOWED_COLLECTIONS:
+            raise ValueError(f"Table '{table_name}' is not an accessible collection.")
+
+        all_docs = list(self.db.collection(table_name).stream())
+        total_count = len(all_docs)
+
+        # If start_after_id is provided, find start index
+        start_idx = offset
+        if start_after_id:
+            for idx, d in enumerate(all_docs):
+                doc_dict = d.to_dict() if hasattr(d, "to_dict") else {}
+                if d.id == start_after_id or doc_dict.get("id") == start_after_id:
+                    start_idx = idx + 1
+                    break
+
+        sliced_docs = all_docs[start_idx : start_idx + limit]
+        rows = [d.to_dict() if hasattr(d, "to_dict") else d for d in sliced_docs]
+
+        next_cursor = None
+        if start_idx + limit < total_count and sliced_docs:
+            last_item = sliced_docs[-1]
+            last_dict = last_item.to_dict() if hasattr(last_item, "to_dict") else {}
+            next_cursor = last_dict.get("id", getattr(last_item, "id", None))
+
+        return {
+            "table": table_name,
+            "total": total_count,
+            "limit": limit,
+            "offset": start_idx,
+            "next_cursor": next_cursor,
+            "rows": rows,
+        }
 
 
 # Alias for backward compatibility
 DatabaseManager = FirestoreManager
-

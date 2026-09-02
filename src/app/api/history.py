@@ -31,8 +31,11 @@ def _to_generation_response(r: dict) -> GenerationRecordResponse:
         resolution_height=r.get("resolution_height", 3840),
         model_name=r.get("model_name"),
         cost_usd=float(r.get("cost_usd") or 0.0),
+        cost_sgd=float(r.get("cost_sgd") or 0.0),
+        exchange_rate=r.get("exchange_rate"),
         tokens=int(r.get("tokens") or 0),
         accumulated_cost_usd=float(r.get("accumulated_cost_usd") or 0.0),
+        accumulated_cost_sgd=float(r.get("accumulated_cost_sgd") or 0.0),
         accumulated_tokens=int(r.get("accumulated_tokens") or 0),
     )
 

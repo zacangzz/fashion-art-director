@@ -109,21 +109,36 @@ def get_current_user_profile(request: Request) -> dict:
     name = raw_user.get("name")
     picture = raw_user.get("picture")
 
-    # Local dev user is always admin
+    # Local dev user is always admin, sync with DB for real-time spend tracking
     if uid == "local_dev_user":
-        return {
-            "id": "local_dev_user",
-            "uid": "local_dev_user",
-            "email": email,
-            "display_name": name or "Local Developer",
-            "photo_url": picture,
-            "role": "admin",
-            "status": "approved",
-            "is_approved": True,
-            "is_admin": True,
-            "total_spend_usd": 0.0,
-            "total_tokens": 0,
-        }
+        try:
+            db = get_db_manager()
+            user_record = db.activate_user_on_login(
+                uid="local_dev_user",
+                email=email,
+                display_name=name or "Local Developer",
+                photo_url=picture,
+                is_bootstrap_admin=True,
+            )
+            user_record["uid"] = "local_dev_user"
+            user_record["is_approved"] = True
+            user_record["is_admin"] = True
+            return user_record
+        except Exception:
+            return {
+                "id": "local_dev_user",
+                "uid": "local_dev_user",
+                "email": email,
+                "display_name": name or "Local Developer",
+                "photo_url": picture,
+                "role": "admin",
+                "status": "approved",
+                "is_approved": True,
+                "is_admin": True,
+                "total_spend_usd": 0.0,
+                "total_spend_sgd": 0.0,
+                "total_tokens": 0,
+            }
 
     try:
         db = get_db_manager()

@@ -33,6 +33,7 @@ class UserProfileResponse(BaseModel):
     is_approved: bool
     is_admin: bool
     total_spend_usd: float = 0.0
+    total_spend_sgd: float = 0.0
     total_tokens: int = 0
     created_at: Optional[str] = None
     approved_at: Optional[str] = None
@@ -57,6 +58,7 @@ def get_my_profile(request: Request):
         is_approved=profile.get("is_approved", False),
         is_admin=profile.get("is_admin", False),
         total_spend_usd=profile.get("total_spend_usd", 0.0),
+        total_spend_sgd=profile.get("total_spend_sgd", 0.0),
         total_tokens=profile.get("total_tokens", 0),
         created_at=profile.get("created_at"),
         approved_at=profile.get("approved_at"),
@@ -79,7 +81,8 @@ def list_authorized_users(
     approved_count = sum(1 for u in users if u.get("status") == "approved")
     pending_count = sum(1 for u in users if u.get("status") == "pending_invite")
     disabled_count = sum(1 for u in users if u.get("status") == "disabled")
-    total_spend = sum(u.get("total_spend_usd", 0.0) for u in users)
+    total_spend_usd = sum(u.get("total_spend_usd", 0.0) for u in users)
+    total_spend_sgd = sum(u.get("total_spend_sgd", 0.0) for u in users)
 
     return {
         "users": users,
@@ -88,7 +91,8 @@ def list_authorized_users(
             "approved_count": approved_count,
             "pending_count": pending_count,
             "disabled_count": disabled_count,
-            "total_spend_usd": round(total_spend, 4),
+            "total_spend_usd": round(total_spend_usd, 3),
+            "total_spend_sgd": round(total_spend_sgd, 3),
         }
     }
 

@@ -19,6 +19,7 @@ import {
   updateUserStatus,
   deleteUser,
 } from '../services/apiClient';
+import { formatSpendSGD } from '../utils/formatters';
 
 export default function AdminPortalModal({ isOpen, onClose }) {
   const [users, setUsers] = useState([]);
@@ -28,6 +29,7 @@ export default function AdminPortalModal({ isOpen, onClose }) {
     pending_count: 0,
     disabled_count: 0,
     total_spend_usd: 0.0,
+    total_spend_sgd: 0.0,
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -175,7 +177,7 @@ export default function AdminPortalModal({ isOpen, onClose }) {
             </div>
             <div className="admin-stat-card">
               <span className="admin-stat-label" style={{ color: '#818cf8' }}>Studio Spend</span>
-              <span className="admin-stat-value" style={{ color: '#818cf8' }}>${summary.total_spend_usd.toFixed(2)}</span>
+              <span className="admin-stat-value" style={{ color: '#818cf8' }}>{formatSpendSGD(summary.total_spend_sgd, summary.total_spend_usd)}</span>
             </div>
           </div>
 
@@ -337,7 +339,7 @@ export default function AdminPortalModal({ isOpen, onClose }) {
 
                         {/* Spend */}
                         <td style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>
-                          ${(u.total_spend_usd || 0).toFixed(2)}
+                          {formatSpendSGD(u.total_spend_sgd, u.total_spend_usd)}
                         </td>
 
                         {/* Actions */}

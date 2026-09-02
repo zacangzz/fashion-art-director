@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { uploadWardrobeSheet, fetchWardrobeItems, deleteWardrobeItem, deleteAllWardrobeItems } from '../services/apiClient';
 import WardrobePreviewModal from './WardrobePreviewModal';
+import { formatSpendSGD, formatTokens } from '../utils/formatters';
 
 const CATEGORY_COLORS = {
   tops: '#38bdf8',
@@ -344,9 +345,9 @@ export default function WardrobePanel({
                         <span>HD Lock</span>
                       </div>
                     )}
-                    {Number(item.cost_usd || 0) > 0 && (
-                      <div className="garment-cost-badge" title={`API Cost: $${Number(item.cost_usd).toFixed(4)} (${item.tokens || 0} tokens)`}>
-                        <span>${Number(item.cost_usd).toFixed(4)}</span>
+                    {(Number(item.cost_sgd || 0) > 0 || Number(item.cost_usd || 0) > 0) && (
+                      <div className="garment-cost-badge" title={`API Cost: ${formatSpendSGD(item.cost_sgd, item.cost_usd)} (${formatTokens(item.tokens || 0)} tokens)`}>
+                        <span>{formatSpendSGD(item.cost_sgd, item.cost_usd)}</span>
                       </div>
                     )}
                   </div>

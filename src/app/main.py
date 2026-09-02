@@ -33,10 +33,22 @@ class GetOnlyStaticFiles(StaticFiles):
         return await super().get_response(path, scope)
 
 
+from app.utils.currency_service import sync_daily_exchange_rate
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info(f"Starting Fashion Art Director backend (ENV={settings.ENVIRONMENT})...")
     initialize_firebase()
+
+    # Seed model pricing tiers and sync daily USD/SGD exchange rate
+    try:
+        db = get_db_manager()
+        db.seed_model_pricing()
+        sync_daily_exchange_rate(db=db.db)
+    except Exception as exc:
+        logger.warning(f"Startup initialization notice (pricing/currency): {exc}")
+
     logger.info(
         f"Studio backend ready. GCP Project: '{settings.GCP_PROJECT_ID}', "
         f"GCS Bucket: '{settings.GCS_BUCKET}', Vision model: '{settings.VISION_MODEL}', "

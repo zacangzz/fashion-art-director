@@ -16,7 +16,8 @@ Table users {
   created_at      timestamp [not null, default: `now()`]
   approved_at     timestamp [note: 'Timestamp when user was authorized/activated']
   last_login_at   timestamp [note: 'Most recent sign-in timestamp']
-  total_spend_usd number    [default: 0.0, note: 'Lifetime AI generation & vision spend']
+  total_spend_usd number    [default: 0.0, note: 'Lifetime AI generation & vision spend in USD (ceil 3 decimals)']
+  total_spend_sgd number    [default: 0.0, note: 'Lifetime AI generation & vision spend in SGD (ceil 3 decimals)']
   total_tokens    number    [default: 0, note: 'Lifetime token count']
 
   indexes {
@@ -31,9 +32,11 @@ Table moodboards {
   user_id        string    [not null, note: 'Firebase Auth UID']
   created_at     timestamp [not null, default: `now()`]
   image_paths    array     [not null, note: 'Array of GCS paths to uploaded reference images']
-  cost_usd       number    [default: 0.0, note: 'Cumulative vision extraction cost']
+  cost_usd       number    [default: 0.0, note: 'Cumulative vision extraction cost in USD (ceil 3 decimals)']
+  cost_sgd       number    [default: 0.0, note: 'Cumulative vision extraction cost in SGD (ceil 3 decimals)']
   tokens         number    [default: 0, note: 'Cumulative token usage']
   accumulated_cost_usd  number [default: 0.0]
+  accumulated_cost_sgd  number [default: 0.0]
   accumulated_tokens    number [default: 0]
 
   indexes {
@@ -61,9 +64,13 @@ Table generations {
   model_name          string    [note: 'Gemini model used for generation']
   background_reference_id string [note: 'FK to background_references.id']
   background_harmonization_meta map [note: 'Native Firestore map — perspective_mode, depth_of_field, lighting_mode, spatial_staging, vision_spatial_prompt, vision_cost_usd']
-  cost_usd            number    [default: 0.0, note: 'Cost of this individual generation']
+  cost_usd            number    [default: 0.0, note: 'Cost of this individual generation in USD (ceil 3 decimals)']
+  cost_sgd            number    [default: 0.0, note: 'Cost of this individual generation in SGD (ceil 3 decimals)']
+  exchange_rate       number    [note: 'USD-to-SGD daily conversion rate used']
+  exchange_rate_date  string    [note: 'Rate date YYYY-MM-DD']
   tokens              number    [default: 0, note: 'Tokens for this individual generation']
-  accumulated_cost_usd number   [default: 0.0, note: 'Pre-computed: sum of all ancestor costs + this cost']
+  accumulated_cost_usd number   [default: 0.0, note: 'Pre-computed: sum of all ancestor costs + this cost in USD']
+  accumulated_cost_sgd number   [default: 0.0, note: 'Pre-computed: sum of all ancestor costs + this cost in SGD']
   accumulated_tokens   number   [default: 0, note: 'Pre-computed: sum of all ancestor tokens + this tokens']
 
   indexes {
@@ -120,7 +127,8 @@ Table wardrobe_items {
   upscale_error         string
   bbox                  array     [note: 'Native Firestore array [ymin, xmin, ymax, xmax] on 0-1000 scale']
   extracted_details     map       [note: 'Native Firestore map — fabric, colors, logos, text']
-  cost_usd              number    [default: 0.0]
+  cost_usd              number    [default: 0.0, note: 'Cost in USD (ceil 3 decimals)']
+  cost_sgd              number    [default: 0.0, note: 'Cost in SGD (ceil 3 decimals)']
   tokens                number    [default: 0]
   created_at            timestamp [not null, default: `now()`]
   deleted_at            timestamp [note: 'Soft delete — null means active']
@@ -160,9 +168,12 @@ Table telemetry_events {
   status              string    [not null, note: 'success | error | started']
   duration_ms         number    [note: 'Operation duration in milliseconds']
   model               string    [note: 'Gemini model name if applicable']
-  cost_usd            number    [note: 'Cost of this specific operation']
-  cost_breakdown      map       [note: 'Detailed cost split: prompt, candidates, images']
-  cumulative_cost_usd number    [note: 'Running total cost for the request chain']
+  cost_usd            number    [note: 'Cost of this specific operation in USD']
+  cost_sgd            number    [note: 'Cost of this specific operation in SGD']
+  exchange_rate       number    [note: 'USD-to-SGD daily conversion rate used']
+  cost_breakdown      map       [note: 'Detailed cost split: prompt, candidates, images in USD and SGD']
+  cumulative_cost_usd number    [note: 'Running total cost for the request chain in USD']
+  cumulative_cost_sgd number    [note: 'Running total cost for the request chain in SGD']
   cumulative_tokens   number    [note: 'Running total tokens for the request chain']
   generation_id       string    [note: 'Associated generation ID if applicable']
   error               string    [note: 'Error message if status=error']
@@ -181,11 +192,42 @@ Table telemetry_events {
   }
 }
 
+Table model_pricing {
+  id                    string    [pk, note: 'Format: {model_name}_{effective_date}']
+  model_name            string    [not null, note: 'Model identifier e.g. gemini-3.1-flash-image']
+  effective_date        string    [not null, note: 'ISO date YYYY-MM-DD when rate took effect']
+  prompt_cost_per_m     number    [default: 0.0, note: 'USD per 1M prompt tokens']
+  candidates_cost_per_m number    [default: 0.0, note: 'USD per 1M candidate/output tokens']
+  per_image_cost        number    [default: 0.0, note: 'Default USD per generated image']
+  image_rates           map       [note: 'Resolution tier rates map: 4K, 2K, 1K, 512px, default']
+  source_url            string    [default: 'https://ai.google.dev/gemini-api/docs/pricing']
+  created_at            timestamp [not null, default: `now()`]
+
+  indexes {
+    (model_name, effective_date) [name: 'idx_pricing_model_date']
+  }
+}
+
+Table currency_rates {
+  id            string    [pk, note: 'Format: {YYYY-MM-DD}']
+  date          string    [not null, unique, note: 'ISO date YYYY-MM-DD']
+  from_currency string    [not null, default: 'USD']
+  to_currency   string    [not null, default: 'SGD']
+  rate          number    [not null, note: 'USD to SGD exchange rate e.g. 1.345']
+  source        string    [default: 'yahoo_finance', note: 'USDSGD=X']
+  fetched_at    timestamp [not null, default: `now()`]
+
+  indexes {
+    date [name: 'idx_currency_date']
+  }
+}
+
 Table usage_daily {
   id              string    [pk, note: 'Format: {user_id}_{YYYY-MM-DD}']
   user_id         string    [not null, note: 'Firebase Auth UID']
   date            string    [not null, note: 'ISO date YYYY-MM-DD']
-  total_cost_usd  number    [default: 0.0, note: 'Accumulated daily spend (Firestore Increment)']
+  total_cost_usd  number    [default: 0.0, note: 'Accumulated daily spend in USD']
+  total_cost_sgd  number    [default: 0.0, note: 'Accumulated daily spend in SGD']
   request_count   number    [default: 0, note: 'Number of billable API calls today']
 
   indexes {

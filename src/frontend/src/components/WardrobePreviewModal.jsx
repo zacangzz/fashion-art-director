@@ -19,8 +19,10 @@ import {
   Sliders,
   ShieldCheck,
   DollarSign,
+  Coins,
 } from 'lucide-react';
 import { upscaleGarment } from '../services/apiClient';
+import { formatSpendSGD, formatTokens } from '../utils/formatters';
 
 const CATEGORY_COLORS = {
   outerwear: '#f59e0b',
@@ -211,10 +213,10 @@ export default function WardrobePreviewModal({
                 <span>Original Crop</span>
               </span>
             )}
-            {Number(currentItem.cost_usd || 0) > 0 && (
-              <span className="garment-preview-cost-pill" title={`API Generation Cost: $${Number(currentItem.cost_usd).toFixed(4)} (${currentItem.tokens || 0} tokens)`}>
-                <DollarSign size={11} />
-                <span>${Number(currentItem.cost_usd).toFixed(4)}</span>
+            {(Number(currentItem.cost_sgd || 0) > 0 || Number(currentItem.cost_usd || 0) > 0) && (
+              <span className="garment-preview-cost-pill" title={`API Generation Cost: ${formatSpendSGD(currentItem.cost_sgd, currentItem.cost_usd)} (${formatTokens(currentItem.tokens || 0)} tokens)`}>
+                <Coins size={11} />
+                <span>{formatSpendSGD(currentItem.cost_sgd, currentItem.cost_usd)}</span>
               </span>
             )}
           </div>
@@ -625,13 +627,13 @@ export default function WardrobePreviewModal({
               </div>
 
               {/* API Cost & Token Metrics */}
-              {Number(currentItem.cost_usd || 0) > 0 && (
+              {(Number(currentItem.cost_sgd || 0) > 0 || Number(currentItem.cost_usd || 0) > 0) && (
                 <div className="inspector-spec-item highlight-emerald">
                   <span className="spec-label text-emerald-400">
-                    <DollarSign size={12} /> API Generation Cost
+                    <Coins size={12} /> API Generation Cost
                   </span>
                   <span className="spec-value text-emerald-300 font-mono">
-                    ${Number(currentItem.cost_usd).toFixed(4)} ({currentItem.tokens || 0} tokens)
+                    {formatSpendSGD(currentItem.cost_sgd, currentItem.cost_usd)} ({formatTokens(currentItem.tokens || 0)} tokens)
                   </span>
                 </div>
               )}

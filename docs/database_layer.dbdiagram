@@ -6,10 +6,183 @@
   "defaultView": {
     "detailLevel": "All",
     "relationshipMode": "All",
-    "tablePositions": [],
+    "tablePositions": [
+      {
+        "name": "users",
+        "schemaName": "public",
+        "x": 1004.46875,
+        "y": 12
+      },
+      {
+        "name": "moodboards",
+        "schemaName": "public",
+        "x": 12,
+        "y": 918
+      },
+      {
+        "name": "generations",
+        "schemaName": "public",
+        "x": 637.9716796875,
+        "y": 918
+      },
+      {
+        "name": "conversations",
+        "schemaName": "public",
+        "x": 12,
+        "y": 1316
+      },
+      {
+        "name": "background_references",
+        "schemaName": "public",
+        "x": 12,
+        "y": 1554
+      },
+      {
+        "name": "wardrobe_items",
+        "schemaName": "public",
+        "x": 12,
+        "y": 1920
+      },
+      {
+        "name": "composition_assignments",
+        "schemaName": "public",
+        "x": 1226.05810546875,
+        "y": 918
+      },
+      {
+        "name": "telemetry_events",
+        "schemaName": "public",
+        "x": 1329.97900390625,
+        "y": 12
+      },
+      {
+        "name": "model_pricing",
+        "schemaName": "public",
+        "x": 646.3828125,
+        "y": 12
+      },
+      {
+        "name": "currency_rates",
+        "schemaName": "public",
+        "x": 314.44873046875,
+        "y": 12
+      },
+      {
+        "name": "usage_daily",
+        "schemaName": "public",
+        "x": 12,
+        "y": 12
+      }
+    ],
     "tableGroupCollapseStates": [],
     "stickyNoteLayouts": [],
-    "referencePaths": []
+    "referencePaths": [
+      {
+        "firstFieldNames": [
+          "parent_id"
+        ],
+        "firstTableName": "generations",
+        "firstSchemaName": "public",
+        "firstRelation": "*",
+        "secondFieldNames": [
+          "id"
+        ],
+        "secondTableName": "generations",
+        "secondSchemaName": "public",
+        "secondRelation": "1",
+        "checkPoints": []
+      },
+      {
+        "firstFieldNames": [
+          "moodboard_id"
+        ],
+        "firstTableName": "generations",
+        "firstSchemaName": "public",
+        "firstRelation": "*",
+        "secondFieldNames": [
+          "id"
+        ],
+        "secondTableName": "moodboards",
+        "secondSchemaName": "public",
+        "secondRelation": "1",
+        "checkPoints": []
+      },
+      {
+        "firstFieldNames": [
+          "conversation_id"
+        ],
+        "firstTableName": "generations",
+        "firstSchemaName": "public",
+        "firstRelation": "*",
+        "secondFieldNames": [
+          "id"
+        ],
+        "secondTableName": "conversations",
+        "secondSchemaName": "public",
+        "secondRelation": "1",
+        "checkPoints": []
+      },
+      {
+        "firstFieldNames": [
+          "background_reference_id"
+        ],
+        "firstTableName": "generations",
+        "firstSchemaName": "public",
+        "firstRelation": "*",
+        "secondFieldNames": [
+          "id"
+        ],
+        "secondTableName": "background_references",
+        "secondSchemaName": "public",
+        "secondRelation": "1",
+        "checkPoints": []
+      },
+      {
+        "firstFieldNames": [
+          "baseline_generation_id"
+        ],
+        "firstTableName": "conversations",
+        "firstSchemaName": "public",
+        "firstRelation": "1",
+        "secondFieldNames": [
+          "id"
+        ],
+        "secondTableName": "generations",
+        "secondSchemaName": "public",
+        "secondRelation": "1",
+        "checkPoints": []
+      },
+      {
+        "firstFieldNames": [
+          "generation_id"
+        ],
+        "firstTableName": "composition_assignments",
+        "firstSchemaName": "public",
+        "firstRelation": "*",
+        "secondFieldNames": [
+          "id"
+        ],
+        "secondTableName": "generations",
+        "secondSchemaName": "public",
+        "secondRelation": "1",
+        "checkPoints": []
+      },
+      {
+        "firstFieldNames": [
+          "wardrobe_item_id"
+        ],
+        "firstTableName": "composition_assignments",
+        "firstSchemaName": "public",
+        "firstRelation": "*",
+        "secondFieldNames": [
+          "id"
+        ],
+        "secondTableName": "wardrobe_items",
+        "secondSchemaName": "public",
+        "secondRelation": "1",
+        "checkPoints": []
+      }
+    ]
   },
   "views": {}
 }

@@ -36,6 +36,7 @@ import {
   Hash,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { formatSpendSGD } from '../utils/formatters';
 import {
   fetchGenerationRuns,
   fetchTelemetryEvents,
@@ -478,7 +479,7 @@ export default function ObservabilityPage() {
                 </div>
                 <div className="obs-kpi-details">
                   <span className="obs-kpi-label">Total Estimated Cost</span>
-                  <span className="obs-kpi-val">${Number(stats.total_cost_usd || 0).toFixed(4)}</span>
+                  <span className="obs-kpi-val">{formatSpendSGD(stats.total_cost_sgd, stats.total_cost_usd)}</span>
                 </div>
               </div>
 
@@ -593,7 +594,7 @@ export default function ObservabilityPage() {
                           <span>{formatTimestamp(run.timestamp)}</span>
                           <div className="obs-run-metrics-mini">
                             {run.duration_ms > 0 && <span>{(run.duration_ms / 1000).toFixed(1)}s</span>}
-                            {run.cost_usd > 0 && <span>${run.cost_usd.toFixed(4)}</span>}
+                            {(run.cost_sgd > 0 || run.cost_usd > 0) && <span>{formatSpendSGD(run.cost_sgd, run.cost_usd)}</span>}
                             <span className="obs-badge obs-badge-api" style={{ padding: '0.1rem 0.4rem', fontSize: '0.62rem' }}>
                               {run.step_count || 1} steps
                             </span>
@@ -633,7 +634,7 @@ export default function ObservabilityPage() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
                       <span>Started: <strong style={{ color: '#fff' }}>{formatTimestamp(selectedRun.timestamp)}</strong></span>
                       <span>Total Time: <strong style={{ color: '#818cf8' }}>{(selectedRun.duration_ms / 1000).toFixed(2)}s</strong></span>
-                      <span>Est. Cost: <strong style={{ color: '#10b981' }}>${selectedRun.cost_usd ? selectedRun.cost_usd.toFixed(4) : '0.0400'}</strong></span>
+                      <span>Est. Cost: <strong style={{ color: '#10b981' }}>{formatSpendSGD(selectedRun.cost_sgd, selectedRun.cost_usd)}</strong></span>
                     </div>
                   </div>
 
@@ -911,7 +912,7 @@ export default function ObservabilityPage() {
                             {ev.duration_ms ? `${(ev.duration_ms / 1000).toFixed(2)}s` : '—'}
                           </td>
                           <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem', color: '#10b981' }}>
-                            {ev.cost_usd ? `$${Number(ev.cost_usd).toFixed(4)}` : '—'}
+                            {(ev.cost_sgd || ev.cost_usd) ? formatSpendSGD(ev.cost_sgd, ev.cost_usd) : '—'}
                           </td>
                           <td>
                             <button
