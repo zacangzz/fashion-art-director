@@ -279,7 +279,7 @@ class WardrobeService:
         image_part = to_image_part(image_bytes)
         contents = [image_part, WARDROBE_SEGMENTATION_PROMPT]
         config = types.GenerateContentConfig(
-            temperature=0.1,
+            temperature=0.0,
             response_mime_type="application/json",
             response_schema=WardrobeSegmentationResult,
         )
@@ -339,10 +339,17 @@ class WardrobeService:
                 norm_box = [0.0, 0.0, 1.0, 1.0]
 
             ymin, xmin, ymax, xmax = norm_box
-            left = max(0, int(xmin * img_w))
-            top = max(0, int(ymin * img_h))
-            right = min(img_w, int(xmax * img_w))
-            bottom = min(img_h, int(ymax * img_h))
+            pad_y = (ymax - ymin) * 0.025
+            pad_x = (xmax - xmin) * 0.025
+            crop_ymin = max(0.0, ymin - pad_y)
+            crop_xmin = max(0.0, xmin - pad_x)
+            crop_ymax = min(1.0, ymax + pad_y)
+            crop_xmax = min(1.0, xmax + pad_x)
+
+            left = max(0, int(crop_xmin * img_w))
+            top = max(0, int(crop_ymin * img_h))
+            right = min(img_w, int(crop_xmax * img_w))
+            bottom = min(img_h, int(crop_ymax * img_h))
 
             if right <= left or bottom <= top:
                 left, top, right, bottom = 0, 0, img_w, img_h
@@ -552,6 +559,52 @@ class WardrobeService:
             logger.warning(f"Clothing region detection failed: {e}")
             return []
 
+    def _heuristic_spatial_grounding(self, assignments: List[Dict[str, Any]]) -> Dict[str, Any]:
+        grounded_pins = []
+        for asgn in assignments:
+            pin_num = asgn.get("pin_number", 1)
+            drop_pos = asgn.get("drop_position") or {}
+            x = float(drop_pos.get("x", 0.5)) if isinstance(drop_pos, dict) else 0.5
+            y = float(drop_pos.get("y", 0.5)) if isinstance(drop_pos, dict) else 0.5
+            cat = (asgn.get("category") or "tops").lower()
+            label = asgn.get("item_label") or asgn.get("target_description") or "garment"
+
+            if x < 0.35:
+                h_desc = "on the left side of the frame"
+                quad_h = "left"
+            elif x > 0.65:
+                h_desc = "on the right side of the frame"
+                quad_h = "right"
+            else:
+                h_desc = "in the center of the frame"
+                quad_h = "center"
+
+            if y < 0.28 or any(w in label.lower() for w in ["hat", "cap", "beanie", "sunglass", "glasses"]):
+                body_loc = "head and hair region"
+                quad_v = "upper"
+            elif y > 0.68 or cat in ["bottoms", "footwear"]:
+                body_loc = "lower body and legs region"
+                quad_v = "lower"
+            else:
+                body_loc = "upper torso and chest region"
+                quad_v = "mid"
+
+            spatial_anchor = f"{quad_v}-{quad_h} quadrant (x: {round(x*100)}%, y: {round(y*100)}%)"
+            target_subject = f"The subject located {h_desc}"
+
+            grounded_pins.append({
+                "pin_number": pin_num,
+                "target_subject": target_subject,
+                "body_location": body_loc,
+                "spatial_anchor": spatial_anchor,
+                "current_attire": "the existing clothing/styling at this position",
+            })
+
+        return {
+            "grounded_pins": grounded_pins,
+            "unmodified_subjects_guardrail": "Strictly preserve all other subjects and non-targeted character features, clothing, and hairstyles in the scene exactly as shown in the reference image without any alterations.",
+        }
+
     def ground_wardrobe_pins(
         self,
         generation_id: str,
@@ -560,7 +613,8 @@ class WardrobeService:
         vision_model: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Coordinates spatial grounding pins (①②③) onto subject image and writes composition records.
+        Coordinates spatial grounding pins (①②③) onto subject image, runs vision/heuristic grounding,
+        and writes composition records to Firestore.
         """
         gen = self.db.get_generation(generation_id)
         if not gen:
@@ -568,6 +622,7 @@ class WardrobeService:
 
         active_model = vision_model or self.vision_model
         request_id = f"ground_{uuid.uuid4().hex[:8]}"
+        started = time.perf_counter()
 
         # Load master image
         img_path = gen.get("master_image_path")
@@ -613,8 +668,104 @@ class WardrobeService:
             self.db.create_composition_assignment(user_id=user_id, assignment_data=assign_data)
             created_assignments.append(assign_data)
 
-        return {
-            "generation_id": generation_id,
-            "assignments": created_assignments,
-            "total_pins": len(created_assignments),
-        }
+        # Execute Vision grounding with heuristic fallback
+        fallback_result = self._heuristic_spatial_grounding(assignments)
+        if not assignments:
+            return {
+                "generation_id": generation_id,
+                "assignments": [],
+                "grounded_pins": [],
+                "unmodified_subjects_guardrail": "Preserve all subjects and background elements exactly as shown.",
+                "cost_usd": 0.0,
+                "tokens": 0,
+            }
+
+        pin_lines = []
+        for asgn in assignments:
+            pin_num = asgn.get("pin_number", 1)
+            drop_pos = asgn.get("drop_position") or {}
+            x = float(drop_pos.get("x", 0.5)) if isinstance(drop_pos, dict) else 0.5
+            y = float(drop_pos.get("y", 0.5)) if isinstance(drop_pos, dict) else 0.5
+            label = asgn.get("item_label") or asgn.get("target_description") or "Garment"
+            cat = asgn.get("category") or "tops"
+            pin_lines.append(
+                f"- Pin #{pin_num}: coordinate x={round(x*100)}%, y={round(y*100)}% | Assigned Garment: \"{label}\" ({cat})"
+            )
+
+        pin_text = "DROPPED GARMENT PINS TO ANALYZE:\n" + "\n".join(pin_lines)
+        image_part = to_image_part(img_bytes)
+        contents = [
+            image_part,
+            pin_text,
+            SUBJECT_GROUNDING_PROMPT,
+        ]
+
+        self._audit(
+            "wardrobe_grounding_request",
+            request_id,
+            pins_count=len(assignments),
+            model=active_model,
+        )
+
+        try:
+            response = self._generate_content_sync(contents, vision_model=active_model)
+            usage_dict = extract_usage_metadata(response)
+            cost_info = calculate_cost(
+                model=active_model,
+                prompt_tokens=usage_dict["prompt_token_count"],
+                candidates_tokens=usage_dict["candidates_token_count"],
+            )
+            raw_text = getattr(response, "text", "") or ""
+            parsed = parse_json_safely(raw_text, default={})
+
+            grounded_list = parsed.get("grounded_pins", []) if isinstance(parsed, dict) else (parsed if isinstance(parsed, list) else [])
+            guardrail = (parsed.get("unmodified_subjects_guardrail") if isinstance(parsed, dict) else None) or fallback_result["unmodified_subjects_guardrail"]
+
+            grounded_by_pin = {g.get("pin_number"): g for g in grounded_list if isinstance(g, dict)}
+            final_grounded = []
+
+            for fallback_pin in fallback_result["grounded_pins"]:
+                p_num = fallback_pin["pin_number"]
+                if p_num in grounded_by_pin:
+                    v_pin = grounded_by_pin[p_num]
+                    final_grounded.append({
+                        "pin_number": p_num,
+                        "target_subject": v_pin.get("target_subject") or fallback_pin["target_subject"],
+                        "body_location": v_pin.get("body_location") or fallback_pin["body_location"],
+                        "spatial_anchor": v_pin.get("spatial_anchor") or fallback_pin["spatial_anchor"],
+                        "current_attire": v_pin.get("current_attire") or fallback_pin["current_attire"],
+                    })
+                else:
+                    final_grounded.append(fallback_pin)
+
+            duration_ms = round((time.perf_counter() - started) * 1000, 1)
+            self._audit(
+                "wardrobe_grounding_response",
+                request_id,
+                duration_ms=duration_ms,
+                pins_grounded=len(final_grounded),
+                tokens=usage_dict,
+                cost_usd=cost_info["cost_usd"],
+            )
+
+            return {
+                "generation_id": generation_id,
+                "assignments": created_assignments,
+                "grounded_pins": final_grounded,
+                "unmodified_subjects_guardrail": guardrail,
+                "cost_usd": float(cost_info["cost_usd"]),
+                "tokens": usage_dict,
+                "cost_breakdown": cost_info.get("breakdown", {}),
+            }
+        except Exception as exc:
+            logger.warning(f"Vision subject grounding pre-pass failed ({exc}); using fallback heuristic.", exc_info=True)
+            self._audit("wardrobe_grounding_error", request_id, error=str(exc))
+            return {
+                "generation_id": generation_id,
+                "assignments": created_assignments,
+                "grounded_pins": fallback_result["grounded_pins"],
+                "unmodified_subjects_guardrail": fallback_result["unmodified_subjects_guardrail"],
+                "cost_usd": 0.0,
+                "tokens": {"prompt_token_count": 0, "candidates_token_count": 0, "total_token_count": 0},
+                "cost_breakdown": {},
+            }

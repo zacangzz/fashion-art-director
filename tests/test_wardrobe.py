@@ -418,15 +418,119 @@ def test_wardrobe_composition_dual_reference_and_lineage_anchor(test_db, dummy_i
     assert res_turn2["generation_id"] is not None
     compiled_turn2 = res_turn2["compiled_prompt"]
     assert "PROGRESSIVE STYLING TURN #2 CHROMATIC ANCHOR" in compiled_turn2
-    assert "Image 1 is the PRISTINE ROOT SCENE" in compiled_turn2
-    assert "Image 2 is the CURRENT SCENE" in compiled_turn2
+    assert "Maintain absolute color temperature, neutral white balance" in compiled_turn2
     assert "Color Constancy & Calibrated White Balance Lock" in compiled_turn2
 
-    # Verify that mock_client.interactions.create was called with dual reference images for Turn 2
+    # Verify that mock_client.interactions.create was called with single parent scene + garment crop for Turn 2
     _, last_call_kwargs = mock_client.interactions.create.call_args
     api_input = last_call_kwargs.get("input", [])
     assert isinstance(api_input, list)
     image_inputs = [item for item in api_input if isinstance(item, dict) and item.get("type") == "image"]
-    # 1 root image + 1 parent image + 1 garment crop = 3 image references
-    assert len(image_inputs) == 3
+    # 1 parent image + 1 garment crop = 2 image references
+    assert len(image_inputs) == 2
+
+
+def test_ground_wardrobe_pins_vision_and_heuristic(test_db, dummy_image_bytes, tmp_path):
+    storage_dir = str(tmp_path / "storage")
+    fake_bucket = MagicMock()
+    fake_blob = MagicMock()
+    fake_blob.download_as_bytes.return_value = dummy_image_bytes
+    fake_bucket.blob.return_value = fake_blob
+    storage_service = StorageService(bucket=fake_bucket, environment="local", storage_dir=storage_dir)
+
+    # 1. Create a generation in DB
+    gen_path = storage_service.upload_bytes(
+        user_id="local_dev_user",
+        category="generations",
+        filename="gen_ground_test_master.png",
+        data=dummy_image_bytes,
+    )
+    test_db.create_generation(
+        user_id="local_dev_user",
+        gen_data={
+            "id": "gen_ground_001",
+            "parent_id": None,
+            "moodboard_id": None,
+            "is_baseline": True,
+            "created_at": "2026-09-01T10:00:00Z",
+            "schema_json": {},
+            "compiled_prompt": "Test ground scene",
+            "negative_prompt": "blurry",
+            "seed": 12345,
+            "master_image_path": gen_path,
+            "aspect_ratio": "2:3",
+            "resolution_width": 2560,
+            "resolution_height": 3840,
+            "model_name": "gemini-3-pro-image",
+            "cost_usd": 0.04,
+            "tokens": 1000,
+            "accumulated_cost_usd": 0.04,
+            "accumulated_tokens": 1000,
+        },
+    )
+
+    # Mock Vision grounding client
+    mock_client = MagicMock()
+    mock_response = MagicMock()
+    mock_response.text = json.dumps({
+        "grounded_pins": [
+            {
+                "pin_number": 1,
+                "target_subject": "Woman on the left with blonde hair",
+                "body_location": "upper torso / chest",
+                "spatial_anchor": "mid-left quadrant (x: 25%, y: 40%)",
+                "current_attire": "white linen blouse",
+            }
+        ],
+        "unmodified_subjects_guardrail": "Strictly preserve the man on the right with dark hair.",
+    })
+    mock_response.usage_metadata = MagicMock(prompt_token_count=120, candidates_token_count=80, total_token_count=200)
+    mock_client.models.generate_content.return_value = mock_response
+
+    service = WardrobeService(
+        db_manager=test_db,
+        storage_service=storage_service,
+        api_key="fake-key",
+        storage_dir=storage_dir,
+        client=mock_client,
+    )
+
+    # Test Vision Grounding
+    assignments = [
+        {
+            "pin_number": 1,
+            "wardrobe_item_id": "item_top_01",
+            "drop_position": {"x": 0.25, "y": 0.40},
+            "item_label": "Emerald Silk Shirt",
+            "category": "tops",
+        }
+    ]
+
+    res = service.ground_wardrobe_pins(
+        generation_id="gen_ground_001",
+        assignments=assignments,
+        user_id="local_dev_user",
+    )
+    assert res["generation_id"] == "gen_ground_001"
+    assert len(res["grounded_pins"]) == 1
+    pin1 = res["grounded_pins"][0]
+    assert pin1["target_subject"] == "Woman on the left with blonde hair"
+    assert pin1["body_location"] == "upper torso / chest"
+    assert "mid-left" in pin1["spatial_anchor"]
+    assert "Strictly preserve the man on the right" in res["unmodified_subjects_guardrail"]
+
+    # Test Heuristic Fallback
+    heuristic_res = service._heuristic_spatial_grounding([
+        {
+            "pin_number": 2,
+            "drop_position": {"x": 0.8, "y": 0.8},
+            "item_label": "Leather Boots",
+            "category": "footwear",
+        }
+    ])
+    assert len(heuristic_res["grounded_pins"]) == 1
+    h_pin = heuristic_res["grounded_pins"][0]
+    assert "right side" in h_pin["target_subject"]
+    assert "lower body and legs" in h_pin["body_location"]
+    assert "lower-right quadrant" in h_pin["spatial_anchor"]
 

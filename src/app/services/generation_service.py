@@ -682,18 +682,15 @@ class GenerationService:
                 negative_prompt=eff_neg_prompt,
                 audit_request_id=req_id,
             )
-        elif lineage_depth >= 1 and root_image_bytes:
+        elif lineage_depth >= 1:
             base_refine_instruction = self.prompt_compiler.format_refinement_prompt(prompt)
             turn_num = lineage_depth + 1
             chromatic_anchor = (
                 f"\n\nPROGRESSIVE REFINEMENT TURN #{turn_num} CHROMATIC ANCHOR:\n"
-                "- Image 1 is the PRISTINE ROOT BASELINE (Chromatic, lighting, and neutral white balance reference).\n"
-                "- Image 2 is the CURRENT IMAGE (to be refined).\n"
-                "- Strictly lock the overall scene Kelvin color temperature, neutral white balance, and authentic skin undertones to Image 1.\n"
-                "- Apply the refinement edits onto Image 2 without compounding warm ambient color bounce or introducing magenta/reddish color casts."
+                "- Maintain absolute color temperature, neutral white balance, and authentic skin undertones matching the original scene.\n"
+                "- Apply the refinement edits onto the current image without compounding warm ambient color bounce or introducing magenta/reddish color casts."
             )
             full_refine_prompt = base_refine_instruction + chromatic_anchor
-            all_refs = [root_image_bytes, parent_bytes]
 
             self._audit(
                 "refinement_request",
@@ -706,10 +703,11 @@ class GenerationService:
                 seed=seed,
             )
 
-            image_bytes = self._call_multi_image_model(
-                contents=all_refs + [full_refine_prompt],
+            image_bytes = self._call_image_model(
+                prompt=full_refine_prompt,
                 aspect_ratio=aspect_ratio,
                 model_name=active_model,
+                reference_image_bytes=parent_bytes,
                 seed=seed,
                 negative_prompt=eff_neg_prompt,
                 audit_request_id=req_id,
@@ -1087,39 +1085,21 @@ class GenerationService:
 
                 assignment_prompts.append(asgn_text)
 
-        # Trace lineage depth and root baseline for chromatic continuity
-        lineage_depth, root_gen = self._trace_lineage(parent_gen)
-        root_image_bytes = None
-        if root_gen and root_gen.get("master_image_path"):
-            try:
-                root_image_bytes = self._load_image_bytes(root_gen["master_image_path"])
-            except Exception as e:
-                logger.warning(f"Could not load root image bytes for chromatic grounding: {e}")
+        # Trace lineage depth for progressive turn numbering and chromatic continuity
+        lineage_depth, _ = self._trace_lineage(parent_gen)
 
         composition_parts = [
             WARDROBE_COMPOSITION_SYSTEM_PROMPT,
             f"MULTI-SUBJECT INVARIANCE GUARDRAIL:\n{guardrail_text}",
         ]
-        if lineage_depth >= 1 and root_image_bytes:
+        if lineage_depth >= 1:
             turn_num = lineage_depth + 1
             composition_parts.append(
                 f"PROGRESSIVE STYLING TURN #{turn_num} CHROMATIC ANCHOR:\n"
-                "- Image 1 is the PRISTINE ROOT SCENE (Chromatic, lighting, and neutral white balance baseline reference).\n"
-                "- Image 2 is the CURRENT SCENE (Immediate parent image with prior styling state to be modified).\n"
-                "- Remaining images are the NEW REFERENCE GARMENTS to be applied.\n"
-                "- Strictly lock the overall scene Kelvin color temperature, background chromaticity, neutral white balance, neutral grays, and authentic skin undertones to IMAGE 1 (Pristine Root Scene).\n"
-                "- Seamlessly swap the designated garments onto Image 2 WITHOUT accumulating or compounding warm ambient color bounce or introducing magenta/reddish color drift across non-targeted areas."
+                "- Maintain absolute color temperature, neutral white balance, and authentic skin undertones matching the original scene.\n"
+                "- Do NOT accumulate or amplify warm ambient color bounce from prior turns. Keep all background elements, neutral whites, sky tones, and un-targeted skin undertones strictly aligned with the base scene."
             )
-            all_refs = [root_image_bytes, parent_image_bytes] + garment_references
-        else:
-            if lineage_depth >= 1:
-                turn_num = lineage_depth + 1
-                composition_parts.append(
-                    f"PROGRESSIVE STYLING TURN #{turn_num} CHROMATIC ANCHOR:\n"
-                    "- Maintain absolute color temperature and neutral white balance fidelity matching the original root scene.\n"
-                    "- Do NOT accumulate or amplify warm ambient color bounce from prior turns. Keep all background elements, neutral whites, sky tones, and un-targeted skin undertones strictly aligned with the pristine base scene."
-                )
-            all_refs = [parent_image_bytes] + garment_references
+        all_refs = [parent_image_bytes] + garment_references
 
         composition_parts.append("ASSIGNED GARMENT MODIFICATIONS:\n" + "\n\n".join(assignment_prompts))
 
@@ -1129,10 +1109,10 @@ class GenerationService:
         composition_prompt = "\n\n".join(composition_parts)
 
         base_neg_prompt = negative_prompt or parent_gen.get("negative_prompt") or DEFAULT_NEGATIVE_PROMPT
+        extra_neg = ["magenta color cast", "warm color drift", "reddish tinting", "yellow-magenta shift"]
         if graphic_locks_required:
-            comp_neg_prompt = f"{base_neg_prompt}, scrambled text, altered logos, fake text, misspelled words, generic replacement graphics"
-        else:
-            comp_neg_prompt = base_neg_prompt
+            extra_neg.extend(["scrambled text", "altered logos", "fake text", "misspelled words", "generic replacement graphics"])
+        comp_neg_prompt = f"{base_neg_prompt}, {', '.join(extra_neg)}"
 
         image_bytes_out = self._call_multi_image_model(
             contents=all_refs + [composition_prompt],

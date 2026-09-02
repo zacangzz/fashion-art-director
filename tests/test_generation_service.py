@@ -394,15 +394,14 @@ def test_refinement_generation_lineage_and_color_anchor(tmp_path):
     assert "{USER_PROMPT}" not in res_t2["compiled_prompt"]
     assert "Adjust lighting to subtle rim light" in res_t2["compiled_prompt"]
     assert "PROGRESSIVE REFINEMENT TURN #2 CHROMATIC ANCHOR" in res_t2["compiled_prompt"]
-    assert "Image 1 is the PRISTINE ROOT BASELINE" in res_t2["compiled_prompt"]
-    assert "Image 2 is the CURRENT IMAGE" in res_t2["compiled_prompt"]
+    assert "Maintain absolute color temperature, neutral white balance" in res_t2["compiled_prompt"]
 
-    # Verify mock_client received dual reference images [root, parent] for Turn 2
+    # Verify mock_client received single reference image [parent] for Turn 2
     _, last_call_kwargs = mock_client.interactions.create.call_args
     api_input = last_call_kwargs.get("input", [])
     assert isinstance(api_input, list)
     image_inputs = [item for item in api_input if isinstance(item, dict) and item.get("type") == "image"]
-    assert len(image_inputs) == 2
+    assert len(image_inputs) == 1
 
 
 def test_compile_delta_prompt_color_constancy_lock():
