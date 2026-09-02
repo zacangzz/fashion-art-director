@@ -30,6 +30,7 @@ from app.utils.image_utils import (
     detect_closest_aspect_ratio,
     normalize_interaction_aspect_ratio,
     to_interaction_image_input,
+    standardize_image_to_srgb,
 )
 from app.utils.prompt_loader import (
     DEFAULT_NEGATIVE_PROMPT,
@@ -105,15 +106,17 @@ class GenerationService:
     ) -> tuple[str, int, int]:
         """
         Saves generation image via StorageService, returns (storage_path, width, height).
+        Standardizes output image to calibrated sRGB color space with embedded ICC profile.
         """
-        pil_img = Image.open(io.BytesIO(image_bytes))
+        standardized_bytes = standardize_image_to_srgb(image_bytes, target_format="PNG")
+        pil_img = Image.open(io.BytesIO(standardized_bytes))
         width, height = pil_img.size
 
         storage_path = self.storage_service.upload_bytes(
             user_id=user_id,
             category="generations",
             filename=filename,
-            data=image_bytes,
+            data=standardized_bytes,
             content_type="image/png",
         )
         return storage_path, width, height

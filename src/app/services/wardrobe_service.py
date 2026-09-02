@@ -29,6 +29,8 @@ from app.utils.image_utils import (
     to_interaction_image_input,
     prepare_interaction_input,
     normalize_bounding_box,
+    get_standard_srgb_profile_bytes,
+    standardize_image_to_srgb,
 )
 from app.utils.prompt_loader import (
     WARDROBE_SEGMENTATION_PROMPT,
@@ -356,7 +358,11 @@ class WardrobeService:
 
             cropped_pil = pil_img.crop((left, top, right, bottom))
             crop_buf = io.BytesIO()
-            cropped_pil.save(crop_buf, format="PNG")
+            save_kw: Dict[str, Any] = {"format": "PNG"}
+            srgb_bytes = get_standard_srgb_profile_bytes()
+            if srgb_bytes:
+                save_kw["icc_profile"] = srgb_bytes
+            cropped_pil.save(crop_buf, **save_kw)
             crop_bytes = crop_buf.getvalue()
 
             crop_filename = f"{item_id}_cropped.png"
@@ -471,6 +477,7 @@ class WardrobeService:
                 audit_request_id=request_id,
             )
 
+            upscaled_bytes = standardize_image_to_srgb(upscaled_bytes, target_format="PNG")
             upscale_filename = f"{item_id}_upscaled.png"
             upscaled_storage_path = self.storage_service.upload_bytes(
                 user_id=user_id,

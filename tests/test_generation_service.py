@@ -441,7 +441,7 @@ def test_inpaint_prompt_color_constancy_lock():
 
 
 def test_image_optimization_lossless_png_and_icc_retention():
-    from app.utils.image_utils import optimize_reference_image
+    from app.utils.image_utils import optimize_reference_image, get_standard_srgb_profile_bytes
 
     # Create image with specific distinct RGB values
     img = Image.new("RGB", (100, 100), color=(142, 88, 210))
@@ -452,8 +452,62 @@ def test_image_optimization_lossless_png_and_icc_retention():
     opt_bytes, mime = optimize_reference_image(original_bytes, max_dimension=2048, target_format="PNG")
     assert mime == "image/png"
 
-    # Re-open and verify pixel channel integrity
+    # Re-open and verify pixel channel integrity and ICC profile
     re_opened = Image.open(io.BytesIO(opt_bytes))
     pixel = re_opened.getpixel((50, 50))
     assert pixel == (142, 88, 210)
+    assert "icc_profile" in re_opened.info
+    assert len(re_opened.info["icc_profile"]) == len(get_standard_srgb_profile_bytes())
+
+
+def test_standardize_image_to_srgb_embeds_icc_profile():
+    from app.utils.image_utils import standardize_image_to_srgb, get_standard_srgb_profile_bytes
+
+    # Create untagged raw RGB image
+    img = Image.new("RGB", (50, 50), color=(200, 100, 50))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    raw_untagged = buf.getvalue()
+
+    # Verify initially untagged
+    initial = Image.open(io.BytesIO(raw_untagged))
+    assert initial.info.get("icc_profile") is None
+
+    # Standardize
+    std_bytes = standardize_image_to_srgb(raw_untagged, target_format="PNG")
+    re_opened = Image.open(io.BytesIO(std_bytes))
+    assert "icc_profile" in re_opened.info
+    assert len(re_opened.info["icc_profile"]) == len(get_standard_srgb_profile_bytes())
+
+
+def test_save_generation_image_embeds_srgb_profile(tmp_path):
+    storage_dir = str(tmp_path / "storage")
+    fake_bucket = MagicMock()
+    fake_blob = MagicMock()
+    fake_bucket.blob.return_value = fake_blob
+    storage_service = StorageService(bucket=fake_bucket, environment="local", storage_dir=storage_dir)
+
+    fake_db = FakeFirestoreClient()
+    db_mgr = FirestoreManager(fake_db)
+    service = GenerationService(
+        db_manager=db_mgr,
+        storage_service=storage_service,
+    )
+
+    # Raw untagged image from GenAI server
+    img = Image.new("RGB", (80, 120), color=(100, 150, 200))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    raw_bytes = buf.getvalue()
+
+    master_path, w, h = service._save_generation_image("user_123", "gen_test_01.png", raw_bytes, "2:3")
+    assert w == 80
+    assert h == 120
+
+    # Read back from storage
+    saved_bytes = storage_service.download_bytes(master_path)
+    saved_img = Image.open(io.BytesIO(saved_bytes))
+    assert "icc_profile" in saved_img.info
+    assert len(saved_img.info["icc_profile"]) > 0
+
 

@@ -2,8 +2,80 @@ import io
 import base64
 import hashlib
 from typing import Optional, Dict, Any, List, Union
-from PIL import Image
+from PIL import Image, ImageCms
 from google.genai import types
+
+_CACHED_SRGB_PROFILE_BYTES: Optional[bytes] = None
+
+
+def get_standard_srgb_profile_bytes() -> bytes:
+    """
+    Returns standard calibrated sRGB ICC profile bytes (cached).
+    """
+    global _CACHED_SRGB_PROFILE_BYTES
+    if _CACHED_SRGB_PROFILE_BYTES is None:
+        try:
+            srgb_profile = ImageCms.createProfile("sRGB")
+            _CACHED_SRGB_PROFILE_BYTES = ImageCms.ImageCmsProfile(srgb_profile).tobytes()
+        except Exception:
+            _CACHED_SRGB_PROFILE_BYTES = b""
+    return _CACHED_SRGB_PROFILE_BYTES
+
+
+def standardize_image_to_srgb(
+    image_bytes: bytes,
+    target_format: str = "PNG",
+) -> bytes:
+    """
+    Standardizes image bytes to calibrated sRGB color space with an explicit embedded ICC profile chunk.
+    If the image has an existing wide-gamut profile (e.g. Display P3, Adobe RGB), it transforms
+    the pixel channels accurately into sRGB without clipping or color distortion.
+    """
+    if not image_bytes or image_bytes.startswith(b"%PDF"):
+        return image_bytes
+
+    try:
+        pil_img = Image.open(io.BytesIO(image_bytes))
+        existing_icc = pil_img.info.get("icc_profile")
+        srgb_bytes = get_standard_srgb_profile_bytes()
+
+        # Convert non-standard modes to RGB/RGBA
+        if pil_img.mode not in ("RGB", "RGBA"):
+            pil_img = pil_img.convert("RGB")
+
+        # If image contains an embedded profile that differs from sRGB, transform color values
+        if existing_icc and srgb_bytes and existing_icc != srgb_bytes:
+            try:
+                in_profile = ImageCms.ImageCmsProfile(io.BytesIO(existing_icc))
+                out_profile = ImageCms.ImageCmsProfile(io.BytesIO(srgb_bytes))
+                transform = ImageCms.buildTransform(in_profile, out_profile, "RGB", "RGB")
+                if pil_img.mode == "RGBA":
+                    r, g, b, a = pil_img.split()
+                    rgb = Image.merge("RGB", (r, g, b))
+                    rgb = ImageCms.applyTransform(rgb, transform)
+                    r2, g2, b2 = rgb.split()
+                    pil_img = Image.merge("RGBA", (r2, g2, b2, a))
+                else:
+                    pil_img = ImageCms.applyTransform(pil_img, transform)
+            except Exception:
+                pass
+
+        eff_format = target_format.upper()
+        if eff_format not in ("PNG", "WEBP", "JPEG"):
+            eff_format = "PNG"
+
+        buf = io.BytesIO()
+        save_kwargs: Dict[str, Any] = {"format": eff_format}
+        if srgb_bytes:
+            save_kwargs["icc_profile"] = srgb_bytes
+
+        if eff_format == "WEBP":
+            save_kwargs["lossless"] = True
+
+        pil_img.save(buf, **save_kwargs)
+        return buf.getvalue()
+    except Exception:
+        return image_bytes
 
 ASPECT_RATIO_RESOLUTIONS: Dict[str, tuple[int, int]] = {
     "1:1": (3840, 3840),
@@ -110,7 +182,7 @@ def optimize_reference_image(
 ) -> tuple[bytes, str]:
     """
     Optimizes a conditioning reference image prior to network transmission.
-    Resizes oversized images to max_dimension and preserves full chromatic fidelity and ICC profile.
+    Resizes oversized images to max_dimension and preserves full chromatic fidelity and calibrated sRGB ICC profile.
     """
     if not image_bytes:
         return image_bytes, "image/png"
@@ -122,6 +194,8 @@ def optimize_reference_image(
         pil_img = Image.open(io.BytesIO(image_bytes))
         orig_w, orig_h = pil_img.size
         icc_profile = pil_img.info.get("icc_profile")
+        srgb_bytes = get_standard_srgb_profile_bytes()
+        eff_icc = icc_profile or srgb_bytes
 
         needs_resize = orig_w > max_dimension or orig_h > max_dimension
         if needs_resize:
@@ -137,8 +211,8 @@ def optimize_reference_image(
 
         buf = io.BytesIO()
         save_kwargs: Dict[str, Any] = {"format": eff_format}
-        if icc_profile:
-            save_kwargs["icc_profile"] = icc_profile
+        if eff_icc:
+            save_kwargs["icc_profile"] = eff_icc
 
         if eff_format == "WEBP":
             save_kwargs["lossless"] = True
@@ -151,7 +225,7 @@ def optimize_reference_image(
         optimized_bytes = buf.getvalue()
 
         # If image was resized or converted to a cleaner format, return optimized bytes
-        if len(optimized_bytes) < len(image_bytes) or needs_resize or icc_profile:
+        if len(optimized_bytes) < len(image_bytes) or needs_resize or eff_icc:
             mime = f"image/{eff_format.lower()}"
             return optimized_bytes, mime
         else:
