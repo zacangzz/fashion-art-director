@@ -26,6 +26,7 @@ import ComparisonModal from './components/ComparisonModal';
 import AuthPortal from './components/AuthPortal';
 import AdminPortalModal from './components/AdminPortalModal';
 import ProxyBanner from './components/ProxyBanner';
+import WorkflowToolbar from './components/WorkflowToolbar';
 import { useAuth } from './contexts/AuthContext';
 import { compileModularPrompt } from './utils/promptCompiler';
 
@@ -41,6 +42,7 @@ export default function App() {
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
   const [errorMessage, setErrorMessage] = useState(null);
+  const [activeAspectRatio, setActiveAspectRatio] = useState('1:1');
 
   // 1. Model Configuration Hook
   const {
@@ -55,7 +57,8 @@ export default function App() {
   // 2. Refinement & Viewport State Hook
   const refinement = useRefinementStudio({
     imagenModel,
-    aspectRatio: '1.8:1',
+    aspectRatio: activeAspectRatio,
+    onAspectRatioChange: setActiveAspectRatio,
     activeBaseline: null,
     onError: setErrorMessage,
     onHistoryRefresh: () => historyHook.loadHistoryList(),
@@ -63,6 +66,8 @@ export default function App() {
 
   // Direct photo upload callback
   const handleDirectPhotoReady = useCallback((response, effRatio) => {
+    const ratio = effRatio || response.aspect_ratio || activeAspectRatio || '1:1';
+    setActiveAspectRatio(ratio);
     refinement.setActiveSeed(response.seed);
     refinement.setPreviousGenerationResult(null);
 
@@ -71,8 +76,8 @@ export default function App() {
       master_image_url: response.image_url,
       seed: response.seed,
       compiled_prompt: response.compiled_prompt,
-      aspect_ratio: effRatio,
-      resolution: response.resolution || getBaseResolution(effRatio),
+      aspect_ratio: ratio,
+      resolution: response.resolution || getBaseResolution(ratio),
     };
     refinement.setGenerationResult(initialGen);
 
@@ -83,19 +88,27 @@ export default function App() {
       image_url: response.image_url,
       seed: response.seed,
       created_at: response.created_at || new Date().toISOString(),
+      aspect_ratio: ratio,
     };
     refinement.setConversationMessages([baseMsg]);
     refinement.setConversationId(`conv_${response.generation_id}`);
     setCurrentStep(2);
-  }, [refinement.setActiveSeed, refinement.setPreviousGenerationResult, refinement.setGenerationResult, refinement.setConversationMessages, refinement.setConversationId]);
+  }, [activeAspectRatio, refinement.setActiveSeed, refinement.setPreviousGenerationResult, refinement.setGenerationResult, refinement.setConversationMessages, refinement.setConversationId]);
 
   // 3. Moodboard Ingestion & 9-Category Levers Hook
   const moodboard = useMoodboardAnalysis({
     visionModel,
     imagenModel,
+    aspectRatio: activeAspectRatio,
+    onAspectRatioChange: setActiveAspectRatio,
     onError: setErrorMessage,
     onBaselineReady: (baseline) => {
-      if (baseline) refinement.setActiveSeed(baseline.seed);
+      if (baseline) {
+        refinement.setActiveSeed(baseline.seed);
+        if (baseline.aspect_ratio) {
+          setActiveAspectRatio(baseline.aspect_ratio);
+        }
+      }
     },
     onDirectPhotoReady: handleDirectPhotoReady,
     onHistoryRefresh: () => historyHook.loadHistoryList(),
@@ -103,7 +116,8 @@ export default function App() {
 
   // 4. Lineage History Hook
   const historyHook = useLineageHistory({
-    aspectRatio: refinement.generationResult?.aspect_ratio || '1.8:1',
+    aspectRatio: activeAspectRatio,
+    onAspectRatioChange: setActiveAspectRatio,
     setActiveSeed: refinement.setActiveSeed,
     setActiveBaseline: moodboard.setActiveBaseline,
     setPreviousGenerationResult: refinement.setPreviousGenerationResult,
@@ -124,7 +138,8 @@ export default function App() {
         baseline.compiled_prompt ||
         moodboard.masterPrompt ||
         compileModularPrompt(moodboard.tagState.categories);
-      const effRatio = baseline.aspect_ratio || moodboard.aspectRatio;
+      const effRatio = baseline.aspect_ratio || activeAspectRatio || '1:1';
+      setActiveAspectRatio(effRatio);
 
       const initialGen = {
         generation_id: baseline.id,
@@ -143,18 +158,20 @@ export default function App() {
         image_url: baseline.image_url,
         seed: baseline.seed,
         created_at: baseline.created_at || new Date().toISOString(),
+        aspect_ratio: effRatio,
       };
       refinement.setConversationMessages([baseMsg]);
       refinement.setConversationId(`conv_${baseline.id}`);
     }
     setCurrentStep(2);
-  }, [moodboard.setActiveBaseline, moodboard.masterPrompt, moodboard.tagState.categories, moodboard.aspectRatio, refinement.setActiveSeed, refinement.setPreviousGenerationResult, refinement.setGenerationResult, refinement.setConversationMessages, refinement.setConversationId]);
+  }, [activeAspectRatio, moodboard.setActiveBaseline, moodboard.masterPrompt, moodboard.tagState.categories, refinement.setActiveSeed, refinement.setPreviousGenerationResult, refinement.setGenerationResult, refinement.setConversationMessages, refinement.setConversationId]);
 
   // 5. Wardrobe Composition Hook
   const wardrobe = useWardrobeComposer({
     visionModel,
     imagenModel,
-    aspectRatio: moodboard.aspectRatio,
+    aspectRatio: activeAspectRatio,
+    onAspectRatioChange: setActiveAspectRatio,
     generationResult: refinement.generationResult,
     activeBaseline: moodboard.activeBaseline,
     activeSeed: refinement.activeSeed,
@@ -416,6 +433,16 @@ export default function App() {
 
       {/* Main Studio Views */}
       <main className="studio-main-container">
+        {/* Reusable Workflow Context & Aspect Ratio Toolbar */}
+        <WorkflowToolbar
+          aspectRatio={activeAspectRatio}
+          onAspectRatioChange={setActiveAspectRatio}
+          activeSeed={refinement.activeSeed}
+          seedMode={refinement.seedMode}
+          onSeedModeChange={refinement.setSeedMode}
+          disabled={refinement.isGenerating || moodboard.isGeneratingBaselines || moodboard.isAnalyzing || wardrobe.isComposingWardrobe}
+        />
+
         {currentStep === 1 && (
           <div className="step-1-layout">
             <MoodboardUploader
@@ -425,8 +452,8 @@ export default function App() {
               onPromptChange={moodboard.setBaselinePrompt}
               onAnalyze={moodboard.handleAnalyzeMoodboard}
               isAnalyzing={moodboard.isAnalyzing}
-              aspectRatio={moodboard.aspectRatio}
-              onAspectRatioChange={moodboard.setAspectRatio}
+              aspectRatio={activeAspectRatio}
+              onAspectRatioChange={setActiveAspectRatio}
               onDirectPhotoUpload={moodboard.handleDirectPhotoUpload}
               isDirectUploading={moodboard.isDirectUploading}
             />
@@ -554,7 +581,7 @@ export default function App() {
                 imageUrl={refinement.generationResult?.master_image_url || moodboard.activeBaseline?.image_url || null}
                 generationId={refinement.generationResult?.generation_id || moodboard.activeBaseline?.id}
                 activeSeed={refinement.activeSeed}
-                aspectRatio={refinement.generationResult?.aspect_ratio || moodboard.activeBaseline?.aspect_ratio || moodboard.aspectRatio}
+                aspectRatio={activeAspectRatio}
                 onEditComplete={refinement.handleInpaintComplete}
                 onSwitchToGraph={() => setCurrentStep(2)}
                 onOpenHistory={() => historyHook.setIsHistoryOpen(true)}
@@ -648,7 +675,7 @@ export default function App() {
           <ExportStudio
             generationResult={refinement.generationResult}
             activeBaseline={moodboard.activeBaseline}
-            globalAspectRatio={moodboard.aspectRatio}
+            globalAspectRatio={activeAspectRatio}
             history={historyHook.history}
             onExportMasterPrepared={(result) => {
               refinement.setGenerationResult(result);

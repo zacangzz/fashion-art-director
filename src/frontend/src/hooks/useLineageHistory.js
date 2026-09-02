@@ -7,6 +7,7 @@ import { fetchHistory, fetchConversation } from '../services/apiClient';
  */
 export function useLineageHistory({
   aspectRatio,
+  onAspectRatioChange,
   setActiveSeed,
   setActiveBaseline,
   setPreviousGenerationResult,
@@ -66,8 +67,12 @@ export function useLineageHistory({
         });
       }
 
-      const targetRatio = record.aspect_ratio || aspectRatio;
+      const targetRatio = record.aspect_ratio || aspectRatio || '1:1';
       const masterRes = getMasterResolution(targetRatio);
+
+      if (record.aspect_ratio && onAspectRatioChange) {
+        onAspectRatioChange(record.aspect_ratio);
+      }
 
       const parent = history.find((h) => h.id === record.parent_id);
       if (parent) {

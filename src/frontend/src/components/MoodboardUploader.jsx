@@ -15,47 +15,12 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 
-const ASPECT_RATIO_OPTIONS = [
-  { id: '1:1', label: '1:1', name: 'Square (1:1)', icon: 'square', desc: '3840×3840 4K Master Grid' },
-  { id: '16:9', label: '16:9', name: 'Widescreen (16:9)', icon: 'horizontal', desc: '3840×2160 4K UHD' },
-  { id: '9:16', label: '9:16', name: 'Vertical (9:16)', icon: 'vertical', desc: '2160×3840 4K Story / Reel' },
-  { id: '21:9', label: '21:9', name: 'Cinema (21:9)', icon: 'horizontal', desc: '3840×1645 4K Ultrawide' },
-  { id: '2:3', label: '2:3', name: 'Fashion (2:3)', icon: 'vertical', desc: '2560×3840 4K Editorial Portrait' },
-  { id: '3:2', label: '3:2', name: 'Photo (3:2)', icon: 'horizontal', desc: '3840×2560 4K Landscape' },
-  { id: '4:5', label: '4:5', name: 'Social (4:5)', icon: 'vertical', desc: '3072×3840 4K Social Portrait' },
-  { id: '5:4', label: '5:4', name: 'Large Format (5:4)', icon: 'horizontal', desc: '3840×3072 4K Print' },
-  { id: '3:4', label: '3:4', name: 'Portrait (3:4)', icon: 'vertical', desc: '2880×3840 4K Classic' },
-  { id: '4:3', label: '4:3', name: 'Standard (4:3)', icon: 'horizontal', desc: '3840×2880 4K Classic' },
-  { id: '1.8:1', label: '1.8:1', name: 'Cinematic (1.8:1)', icon: 'horizontal', desc: '3840×2133 4K Cinema' },
-];
+import {
+  ASPECT_RATIO_OPTIONS,
+  detectClosestRatio,
+} from '../constants/aspectRatios';
 
-export function detectClosestRatio(width, height) {
-  if (!width || !height || height <= 0) return '2:3';
-  const targetRatio = width / height;
-  const ratioValues = {
-    '1:1': 1.0,
-    '16:9': 16 / 9,
-    '9:16': 9 / 16,
-    '21:9': 21 / 9,
-    '2:3': 2 / 3,
-    '3:2': 3 / 2,
-    '4:5': 4 / 5,
-    '5:4': 5 / 4,
-    '3:4': 3 / 4,
-    '4:3': 4 / 3,
-    '1.8:1': 1.8,
-  };
-  let bestMatch = '2:3';
-  let minDiff = Infinity;
-  for (const [key, val] of Object.entries(ratioValues)) {
-    const diff = Math.abs(val - targetRatio);
-    if (diff < minDiff) {
-      minDiff = diff;
-      bestMatch = key;
-    }
-  }
-  return bestMatch;
-}
+export { detectClosestRatio };
 
 export default function MoodboardUploader({
   files = [],
@@ -64,7 +29,7 @@ export default function MoodboardUploader({
   onPromptChange,
   onAnalyze,
   isAnalyzing = false,
-  aspectRatio = '1.8:1',
+  aspectRatio = '1:1',
   onAspectRatioChange = null,
   onDirectPhotoUpload = null,
   isDirectUploading = false,
@@ -79,8 +44,8 @@ export default function MoodboardUploader({
   const [directFile, setDirectFile] = useState(null);
   const [directPreviewUrl, setDirectPreviewUrl] = useState(null);
   const [directDimensions, setDirectDimensions] = useState(null);
-  const [detectedRatio, setDetectedRatio] = useState('2:3');
-  const [chosenRatio, setChosenRatio] = useState('2:3');
+  const [detectedRatio, setDetectedRatio] = useState('1:1');
+  const [chosenRatio, setChosenRatio] = useState('1:1');
   const [directUploadError, setDirectUploadError] = useState(null);
 
   const handleDirectFileSelected = (file) => {
@@ -107,8 +72,8 @@ export default function MoodboardUploader({
     };
     img.onerror = () => {
       setDirectDimensions(null);
-      setDetectedRatio('2:3');
-      setChosenRatio('2:3');
+      setDetectedRatio('1:1');
+      setChosenRatio('1:1');
     };
     img.src = preview;
   };
@@ -188,41 +153,6 @@ export default function MoodboardUploader({
     <div className="step-1-uploader-column">
       {/* Primary Card: Moodboard Ingestion */}
       <div className="moodboard-uploader-card">
-        {/* Workflow Global Aspect Ratio Selection */}
-        <div className="aspect-ratio-selector-card">
-          <div className="aspect-ratio-header">
-            <div className="aspect-ratio-title-group">
-              <Ratio size={15} className="text-accent" />
-              <span className="aspect-ratio-title">Workflow Aspect Ratio</span>
-              <span className="aspect-ratio-tag">Global Default</span>
-            </div>
-            <span className="aspect-ratio-current-badge">{aspectRatio}</span>
-          </div>
-          <div className="aspect-ratio-options-grid" role="radiogroup" aria-label="Aspect Ratio Selection">
-            {ASPECT_RATIO_OPTIONS.map((opt) => {
-              const isSelected = aspectRatio === opt.id;
-              return (
-                <button
-                  key={opt.id}
-                  type="button"
-                  className={`aspect-ratio-btn ${isSelected ? 'active' : ''}`}
-                  onClick={() => onAspectRatioChange?.(opt.id)}
-                  title={`${opt.name} — ${opt.desc}`}
-                  aria-checked={isSelected}
-                  role="radio"
-                >
-                  <div className="aspect-ratio-icon-box">
-                    {opt.icon === 'horizontal' && <RectangleHorizontal size={14} />}
-                    {opt.icon === 'square' && <Square size={13} />}
-                    {opt.icon === 'vertical' && <RectangleVertical size={14} />}
-                  </div>
-                  <span className="aspect-ratio-label">{opt.label}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
         <div className="card-header">
           <div className="card-title-group">
             <Upload size={16} className="text-accent" />

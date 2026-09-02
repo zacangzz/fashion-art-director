@@ -5,7 +5,7 @@ import { refineGeneration, exportBundle } from '../services/apiClient';
 /**
  * Hook for managing Step 2: Conversational Refinement, generations lineage, and seeds.
  */
-export function useRefinementStudio({ imagenModel, aspectRatio, activeBaseline, onError, onHistoryRefresh }) {
+export function useRefinementStudio({ imagenModel, aspectRatio, onAspectRatioChange, activeBaseline, onError, onHistoryRefresh }) {
   const [conversationId, setConversationId] = useState(null);
   const [conversationMessages, setConversationMessages] = useState([]);
   const [generationResult, setGenerationResult] = useState(null);
@@ -25,6 +25,7 @@ export function useRefinementStudio({ imagenModel, aspectRatio, activeBaseline, 
 
     const parentId = generationResult?.generation_id || activeBaseline?.id;
     const effSeed = seedMode === 'locked' ? activeSeed : Math.floor(Math.random() * 9000000) + 1000000;
+    const effRatio = aspectRatio || generationResult?.aspect_ratio || activeBaseline?.aspect_ratio || '1:1';
 
     try {
       const payload = {
@@ -32,7 +33,7 @@ export function useRefinementStudio({ imagenModel, aspectRatio, activeBaseline, 
         prompt: promptText.trim(),
         seed: effSeed,
         seed_mode: seedMode,
-        aspect_ratio: aspectRatio,
+        aspect_ratio: effRatio,
         conversation_id: conversationId,
         imagen_model: imagenModel,
         background_reference_id: bgOptions.background_reference_id || undefined,
@@ -47,19 +48,23 @@ export function useRefinementStudio({ imagenModel, aspectRatio, activeBaseline, 
         setPreviousGenerationResult(generationResult);
       }
 
-      const effRatio = result.aspect_ratio || aspectRatio;
+      const resRatio = result.aspect_ratio || effRatio;
       const nextGen = {
         generation_id: result.generation_id,
         master_image_url: result.image_url,
         seed: result.seed,
         compiled_prompt: result.compiled_prompt,
-        aspect_ratio: effRatio,
-        resolution: result.resolution || getBaseResolution(effRatio),
+        aspect_ratio: resRatio,
+        resolution: result.resolution || getBaseResolution(resRatio),
         background_reference_id: result.background_reference_id,
         background_harmonization_meta: result.background_harmonization_meta,
       };
       setGenerationResult(nextGen);
       setActiveSeed(result.seed);
+
+      if (result.aspect_ratio && onAspectRatioChange) {
+        onAspectRatioChange(result.aspect_ratio);
+      }
 
       if (result.conversation_id && !conversationId) {
         setConversationId(result.conversation_id);
@@ -73,6 +78,7 @@ export function useRefinementStudio({ imagenModel, aspectRatio, activeBaseline, 
         image_url: result.image_url,
         seed: result.seed,
         created_at: result.created_at || new Date().toISOString(),
+        aspect_ratio: resRatio,
         background_reference_id: result.background_reference_id || bgOptions.background_reference_id,
         background_reference_url: bgOptions.background_reference_url,
         background_harmonization_meta: result.background_harmonization_meta || (bgOptions.background_reference_id ? {
@@ -89,7 +95,7 @@ export function useRefinementStudio({ imagenModel, aspectRatio, activeBaseline, 
     } finally {
       setIsGenerating(false);
     }
-  }, [generationResult, activeBaseline?.id, seedMode, activeSeed, aspectRatio, conversationId, imagenModel, onError, onHistoryRefresh]);
+  }, [generationResult, activeBaseline?.id, activeBaseline?.aspect_ratio, seedMode, activeSeed, aspectRatio, conversationId, imagenModel, onAspectRatioChange, onError, onHistoryRefresh]);
 
   // Select message in chat lineage thread
   const handleSelectMessage = useCallback((msg) => {
@@ -97,7 +103,7 @@ export function useRefinementStudio({ imagenModel, aspectRatio, activeBaseline, 
     if (generationResult && generationResult.generation_id !== msg.generation_id) {
       setPreviousGenerationResult(generationResult);
     }
-    const effRatio = msg.aspect_ratio || aspectRatio;
+    const effRatio = msg.aspect_ratio || generationResult?.aspect_ratio || aspectRatio || '1:1';
     setGenerationResult({
       generation_id: msg.generation_id,
       master_image_url: msg.image_url,
@@ -107,7 +113,10 @@ export function useRefinementStudio({ imagenModel, aspectRatio, activeBaseline, 
       resolution: msg.resolution || getBaseResolution(effRatio),
     });
     setActiveSeed(msg.seed);
-  }, [generationResult, aspectRatio]);
+    if (msg.aspect_ratio && onAspectRatioChange) {
+      onAspectRatioChange(msg.aspect_ratio);
+    }
+  }, [generationResult, aspectRatio, onAspectRatioChange]);
 
   // Inpaint completion handler
   const handleInpaintComplete = useCallback(async (result) => {
@@ -115,7 +124,7 @@ export function useRefinementStudio({ imagenModel, aspectRatio, activeBaseline, 
     if (generationResult) {
       setPreviousGenerationResult(generationResult);
     }
-    const effRatio = result.aspect_ratio || aspectRatio;
+    const effRatio = result.aspect_ratio || generationResult?.aspect_ratio || aspectRatio || '1:1';
     const nextGen = {
       generation_id: result.generation_id,
       master_image_url: result.image_url,
@@ -126,6 +135,10 @@ export function useRefinementStudio({ imagenModel, aspectRatio, activeBaseline, 
     };
     setGenerationResult(nextGen);
 
+    if (result.aspect_ratio && onAspectRatioChange) {
+      onAspectRatioChange(result.aspect_ratio);
+    }
+
     const inpaintMsg = {
       role: 'user',
       prompt: `[Inpaint Edit] ${result.compiled_prompt}`,
@@ -133,11 +146,12 @@ export function useRefinementStudio({ imagenModel, aspectRatio, activeBaseline, 
       image_url: result.image_url,
       seed: result.seed,
       created_at: result.created_at || new Date().toISOString(),
+      aspect_ratio: effRatio,
     };
     setConversationMessages((prev) => [...prev, inpaintMsg]);
 
     await onHistoryRefresh?.();
-  }, [generationResult, aspectRatio, onHistoryRefresh]);
+  }, [generationResult, aspectRatio, onAspectRatioChange, onHistoryRefresh]);
 
   // Export Bundle ZIP download
   const handleExportBundle = useCallback(async (genId) => {

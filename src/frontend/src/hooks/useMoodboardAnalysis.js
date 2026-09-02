@@ -12,10 +12,26 @@ import {
 /**
  * Hook for managing Step 1: Moodboard Ingestion, 9-category visual levers, and 4-baseline generation.
  */
-export function useMoodboardAnalysis({ visionModel, imagenModel, onError, onBaselineReady, onDirectPhotoReady, onHistoryRefresh }) {
+export function useMoodboardAnalysis({
+  visionModel,
+  imagenModel,
+  aspectRatio: externalAspectRatio,
+  onAspectRatioChange,
+  onError,
+  onBaselineReady,
+  onDirectPhotoReady,
+  onHistoryRefresh,
+}) {
   const [files, setFiles] = useState([]);
   const [baselinePrompt, setBaselinePrompt] = useState('');
-  const [aspectRatio, setAspectRatio] = useState('1.8:1');
+  const [internalAspectRatio, setInternalAspectRatio] = useState('1:1');
+  const aspectRatio = externalAspectRatio !== undefined ? externalAspectRatio : internalAspectRatio;
+
+  const setAspectRatio = useCallback((newRatio) => {
+    setInternalAspectRatio(newRatio);
+    onAspectRatioChange?.(newRatio);
+  }, [onAspectRatioChange]);
+
   const [temperature, setTemperature] = useState(1.0);
   const [promptConflicts, setPromptConflicts] = useState([]);
   const [isCheckingConflicts, setIsCheckingConflicts] = useState(false);
@@ -54,8 +70,8 @@ export function useMoodboardAnalysis({ visionModel, imagenModel, onError, onBase
       };
 
       setActiveBaseline(baselineObj);
-      if (response.aspect_ratio) {
-        setAspectRatio(response.aspect_ratio);
+      if (effRatio) {
+        setAspectRatio(effRatio);
       }
 
       onDirectPhotoReady?.(response, effRatio);
@@ -65,7 +81,7 @@ export function useMoodboardAnalysis({ visionModel, imagenModel, onError, onBase
     } finally {
       setIsDirectUploading(false);
     }
-  }, [aspectRatio, onError, onDirectPhotoReady, onHistoryRefresh]);
+  }, [aspectRatio, setAspectRatio, onError, onDirectPhotoReady, onHistoryRefresh]);
 
   // Step 1A: Analyze Moodboard References
   const handleAnalyzeMoodboard = useCallback(async (promptOverride) => {

@@ -40,11 +40,18 @@ describe('BaselineSelector', () => {
       label: '1.8:1',
     });
 
-    expect(parseAspectRatio(null)).toEqual({
+    expect(parseAspectRatio('2:3')).toEqual({
       cssRatio: '2 / 3',
       ratioValue: 2 / 3,
       orientation: 'vertical',
       label: '2:3',
+    });
+
+    expect(parseAspectRatio(null)).toEqual({
+      cssRatio: '1 / 1',
+      ratioValue: 1.0,
+      orientation: 'square',
+      label: '1:1',
     });
   });
 

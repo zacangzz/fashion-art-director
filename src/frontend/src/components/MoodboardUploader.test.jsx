@@ -62,26 +62,6 @@ describe('MoodboardUploader', () => {
     expect(screen.getByText(/Analyzing Moodboard & Synthesizing Levers.../i)).toBeInTheDocument();
   });
 
-  it('renders aspect ratio options defaulting to 1.8:1 and calls onAspectRatioChange', () => {
-    const onRatioChange = vi.fn();
-    render(
-      <MoodboardUploader
-        files={[]}
-        aspectRatio="1.8:1"
-        onAspectRatioChange={onRatioChange}
-        onFilesChange={() => {}}
-        onAnalyze={() => {}}
-      />
-    );
-
-    expect(screen.getByText('Workflow Aspect Ratio')).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: /1\.8:1/i })).toBeInTheDocument();
-
-    const squareBtn = screen.getByRole('radio', { name: /1:1/i });
-    fireEvent.click(squareBtn);
-    expect(onRatioChange).toHaveBeenCalledWith('1:1');
-  });
-
   it('renders direct photo ingestion card and handles direct photo selection', async () => {
     const onDirectUpload = vi.fn();
     render(

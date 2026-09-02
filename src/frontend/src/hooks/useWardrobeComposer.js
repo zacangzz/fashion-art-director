@@ -9,6 +9,7 @@ export function useWardrobeComposer({
   visionModel,
   imagenModel,
   aspectRatio,
+  onAspectRatioChange,
   generationResult,
   activeBaseline,
   activeSeed,
@@ -65,7 +66,7 @@ export function useWardrobeComposer({
 
     const parentId = generationResult?.generation_id || activeBaseline?.id;
     const effSeed = seedMode === 'locked' ? activeSeed : Math.floor(Math.random() * 9000000) + 1000000;
-    const effRatio = generationResult?.aspect_ratio || activeBaseline?.aspect_ratio || aspectRatio;
+    const effRatio = aspectRatio || generationResult?.aspect_ratio || activeBaseline?.aspect_ratio || '1:1';
 
     try {
       const payload = {
@@ -103,6 +104,10 @@ export function useWardrobeComposer({
       setGenerationResult(nextGen);
       setActiveSeed(result.seed);
 
+      if (result.aspect_ratio && onAspectRatioChange) {
+        onAspectRatioChange(result.aspect_ratio);
+      }
+
       if (result.conversation_id && !conversationId) {
         setConversationId(result.conversation_id);
       }
@@ -116,6 +121,7 @@ export function useWardrobeComposer({
         image_url: result.image_url,
         seed: result.seed,
         created_at: result.created_at || new Date().toISOString(),
+        aspect_ratio: resRatio,
       };
       setConversationMessages((prev) => [...prev, newMsg]);
 
@@ -129,10 +135,12 @@ export function useWardrobeComposer({
   }, [
     wardrobeAssignments,
     generationResult,
-    activeBaseline,
+    activeBaseline?.id,
+    activeBaseline?.aspect_ratio,
     seedMode,
     activeSeed,
     aspectRatio,
+    onAspectRatioChange,
     conversationId,
     imagenModel,
     visionModel,
