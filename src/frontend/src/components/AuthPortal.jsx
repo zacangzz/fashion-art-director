@@ -98,12 +98,12 @@ export default function AuthPortal() {
         {/* Brand Header */}
         <div className="auth-brand-header">
           <div className="auth-brand-badge">
-            <Sparkles size={14} />
-            <span>Haute Couture AI Platform</span>
+            <Sparkles size={13} />
+            <span>mise en scène &bull; Vision Studio</span>
           </div>
-          <h1 className="auth-brand-title">Fashion Art Director</h1>
+          <h1 className="auth-brand-title">mise en scène</h1>
           <p className="auth-brand-subtitle">
-            Autonomous multi-modal fashion intelligence, prompt architecture & high-resolution studio generation.
+            Autonomous multi-modal fashion intelligence, prompt architecture &amp; high-resolution exhibition generation.
           </p>
         </div>
 
@@ -290,7 +290,7 @@ export default function AuthPortal() {
 
       {/* Footer Branding */}
       <div className="auth-portal-footer">
-        Fashion Art Director Studio &bull; Powered by Gemini 3.5 & Imagen 3
+        mise en scène Studio &bull; Powered by Gemini 3.5 &amp; Imagen 3
       </div>
     </div>
   );

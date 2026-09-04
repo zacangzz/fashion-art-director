@@ -243,10 +243,10 @@ export default function App() {
       {/* Top Header */}
       <header className="header">
         <div className="header-brand">
-          <div className="header-logo">
-            <Sparkles size={18} />
+          <div className="header-logo" title="mise en scène">
+            <Sparkles size={16} />
           </div>
-          <span className="header-title">Fashion AI</span>
+          <span className="header-title">mise en scène</span>
         </div>
 
         {/* 5-Step Sequential Workflow Navigator */}
@@ -256,7 +256,7 @@ export default function App() {
             className={`step-nav-btn ${currentStep === 1 ? 'active' : ''}`}
             onClick={() => setCurrentStep(1)}
           >
-            <span className="step-num">1</span>
+            <span className="step-num">01</span>
             <span>Art Direction</span>
           </button>
 
@@ -266,7 +266,7 @@ export default function App() {
             onClick={() => setCurrentStep(2)}
             disabled={!hasActiveImage}
           >
-            <span className="step-num">2</span>
+            <span className="step-num">02</span>
             <span>Refinement</span>
           </button>
 
@@ -276,7 +276,7 @@ export default function App() {
             onClick={() => setCurrentStep(3)}
             disabled={!hasActiveImage}
           >
-            <span className="step-num">3</span>
+            <span className="step-num">03</span>
             <span>Canvas</span>
           </button>
 
@@ -286,7 +286,7 @@ export default function App() {
             onClick={() => setCurrentStep(4)}
             disabled={!hasActiveImage}
           >
-            <span className="step-num">4</span>
+            <span className="step-num">04</span>
             <span>Wardrobe</span>
           </button>
 
@@ -296,7 +296,7 @@ export default function App() {
             onClick={() => setCurrentStep(5)}
             disabled={!hasActiveImage}
           >
-            <span className="step-num">5</span>
+            <span className="step-num">05</span>
             <span>Export</span>
           </button>
         </nav>

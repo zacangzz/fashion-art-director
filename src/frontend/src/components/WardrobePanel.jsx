@@ -365,7 +365,7 @@ export default function WardrobePanel({
                         </span>
                         {item.extracted_details?.has_text_or_logo && item.extracted_details?.exact_text_content?.length > 0 && (
                           <span
-                            className="garment-feature-tag text-cyan-400 border-cyan-500/30 bg-cyan-950/40"
+                            className="garment-feature-tag tag-cyan"
                             title={`Exact Text: ${item.extracted_details.exact_text_content.join(', ')}`}
                           >
                             Text Lock
@@ -373,7 +373,7 @@ export default function WardrobePanel({
                         )}
                         {item.extracted_details?.has_graphic_or_print && (
                           <span
-                            className="garment-feature-tag text-purple-400 border-purple-500/30 bg-purple-950/40"
+                            className="garment-feature-tag tag-purple"
                             title={`Graphic Print: ${item.extracted_details.graphic_description || 'Artwork detected'}`}
                           >
                             Graphic

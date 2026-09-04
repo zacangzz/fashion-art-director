@@ -20,7 +20,7 @@ describe('AuthPortal Component', () => {
 
     render(<AuthPortal />);
 
-    expect(screen.getByText('Fashion Art Director')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: /mise en scène/i })).toBeInTheDocument();
     expect(screen.getByText(/Continue with Google/i)).toBeInTheDocument();
     expect(screen.getByPlaceholderText('director@fashionstudio.com')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Sign In to Studio/i })).toBeInTheDocument();

@@ -240,9 +240,9 @@ export default function MoodboardUploader({
             <span
               className="baseline-prompt-badge"
               style={{
-                background: !prompt.trim() ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.15)',
-                color: !prompt.trim() ? '#f87171' : '#10b981',
-                border: `1px solid ${!prompt.trim() ? 'rgba(239, 68, 68, 0.3)' : 'rgba(16, 185, 129, 0.3)'}`,
+                background: !prompt.trim() ? '#FEF2F2' : '#ECFDF5',
+                color: !prompt.trim() ? '#DC2626' : '#059669',
+                border: `1px solid ${!prompt.trim() ? '#FEE2E2' : '#A7F3D0'}`,
               }}
             >
               {!prompt.trim() ? 'Required' : 'Ready'}
@@ -260,7 +260,7 @@ export default function MoodboardUploader({
           />
           <div className="baseline-prompt-hint">
             {!prompt.trim() ? (
-              <span style={{ color: '#fb923c' }}>
+              <span style={{ color: '#D97706', fontWeight: 500 }}>
                 * Please provide a starting prompt. The vision model will analyze your uploaded references with this prompt to extract visual levers and synthesize the Master Prompt.
               </span>
             ) : (

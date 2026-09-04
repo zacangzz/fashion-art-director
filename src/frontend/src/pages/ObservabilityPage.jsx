@@ -415,24 +415,24 @@ export default function ObservabilityPage() {
             <div style={{
               margin: '0.75rem 0',
               padding: '0.6rem 0.9rem',
-              backgroundColor: 'rgba(239, 68, 68, 0.12)',
-              border: '1px solid rgba(239, 68, 68, 0.3)',
-              borderRadius: '8px',
+              backgroundColor: '#FEF2F2',
+              border: '1px solid #FEE2E2',
+              borderRadius: 'var(--radius-xs)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
               gap: '0.75rem',
-              color: '#fca5a5',
+              color: '#DC2626',
               fontSize: '0.78rem'
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <AlertCircle size={15} color="#ef4444" />
-                <span>{loadError}</span>
+                <AlertCircle size={15} color="#DC2626" />
+                <span style={{ fontWeight: 500 }}>{loadError}</span>
               </div>
               <button
                 type="button"
                 className="obs-copy-btn"
-                style={{ color: '#fff', borderColor: 'rgba(239, 68, 68, 0.4)' }}
+                style={{ color: '#DC2626', borderColor: '#FEE2E2', background: '#FFFFFF' }}
                 onClick={() => {
                   setLoadError(null);
                   loadStats();
@@ -632,9 +632,9 @@ export default function ObservabilityPage() {
                     </div>
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-                      <span>Started: <strong style={{ color: '#fff' }}>{formatTimestamp(selectedRun.timestamp)}</strong></span>
-                      <span>Total Time: <strong style={{ color: '#818cf8' }}>{(selectedRun.duration_ms / 1000).toFixed(2)}s</strong></span>
-                      <span>Est. Cost: <strong style={{ color: '#10b981' }}>{formatSpendSGD(selectedRun.cost_sgd, selectedRun.cost_usd)}</strong></span>
+                      <span>Started: <strong style={{ color: 'var(--text-primary)' }}>{formatTimestamp(selectedRun.timestamp)}</strong></span>
+                      <span>Total Time: <strong style={{ color: 'var(--accent-primary)' }}>{(selectedRun.duration_ms / 1000).toFixed(2)}s</strong></span>
+                      <span>Est. Cost: <strong style={{ color: '#059669' }}>{formatSpendSGD(selectedRun.cost_sgd, selectedRun.cost_usd)}</strong></span>
                     </div>
                   </div>
 
@@ -1097,9 +1097,9 @@ export default function ObservabilityPage() {
             <div className="obs-table-wrapper">
               <div className="obs-table-toolbar">
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <Database size={16} color="#818cf8" />
-                  <span style={{ fontWeight: 700, color: '#fff', fontSize: '0.85rem' }}>
-                    Collection: <code style={{ color: '#67e8f9' }}>{selectedTable}</code>
+                  <Database size={16} color="var(--accent-primary)" />
+                  <span style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: '0.85rem' }}>
+                    Collection: <code style={{ color: 'var(--accent-primary)' }}>{selectedTable}</code>
                   </span>
                 </div>
                 <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
@@ -1170,8 +1170,8 @@ export default function ObservabilityPage() {
           <div className="obs-drawer" onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.75rem' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <Code2 size={18} color="#818cf8" />
-                <span style={{ fontSize: '1rem', fontWeight: 700, color: '#fff' }}>
+                <Code2 size={18} color="var(--accent-primary)" />
+                <span style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)' }}>
                   {selectedEvent.event || selectedEvent.event_type}
                 </span>
               </div>
@@ -1231,8 +1231,8 @@ export default function ObservabilityPage() {
           <div className="obs-drawer" onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.75rem' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <Database size={18} color="#818cf8" />
-                <span style={{ fontSize: '1rem', fontWeight: 700, color: '#fff' }}>
+                <Database size={18} color="var(--accent-primary)" />
+                <span style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)' }}>
                   Document: {selectedDbRow.id || 'Record'}
                 </span>
               </div>

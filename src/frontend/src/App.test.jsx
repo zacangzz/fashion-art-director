@@ -26,9 +26,9 @@ describe('App Component Workflow & Locking', () => {
     });
 
     render(<App />);
-    expect(screen.getByText('Fashion Art Director')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: /mise en scène/i })).toBeInTheDocument();
     expect(screen.getByText(/Continue with Google/i)).toBeInTheDocument();
-    expect(screen.queryByText('Fashion AI')).not.toBeInTheDocument();
+    expect(screen.queryByRole('navigation', { name: /Studio Workflow Steps/i })).not.toBeInTheDocument();
   });
 
   it('renders Step 1 Art Direction layout when user is authenticated & approved', () => {
@@ -54,8 +54,8 @@ describe('App Component Workflow & Locking', () => {
     });
 
     render(<App />);
-    expect(screen.getByText('Fashion AI')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /1 Art Direction/i })).toBeInTheDocument();
+    expect(screen.getByText('mise en scène')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /(01|1) Art Direction/i })).toBeInTheDocument();
     expect(screen.getByText(/Moodboard Ingestion/i)).toBeInTheDocument();
     expect(screen.getByText(/Direct Photo Ingestion/i)).toBeInTheDocument();
     expect(screen.getByTitle(/Studio Whitelist & Team Management/i)).toBeInTheDocument();

@@ -144,19 +144,19 @@ export default function PromptInspector({ run, activeStep, onResetStep }) {
 
         {/* 3. Negative Prompt & Quality Constraints */}
         {activeNegPrompt && (
-          <div className="obs-prompt-block">
+          <div className="obs-prompt-block" style={{ background: '#FEF2F2', borderColor: '#FEE2E2' }}>
             <div className="obs-prompt-label-row">
-              <span className="obs-prompt-label">Negative Prompt / Artifact Avoidance Directives</span>
+              <span className="obs-prompt-label" style={{ color: '#991B1B' }}>Negative Prompt / Artifact Avoidance Directives</span>
               <Button
                 variant="outline"
                 size="xs"
-                icon={copiedKey === 'neg_prompt' ? <Check size={10} color="#10b981" /> : <Copy size={10} />}
+                icon={copiedKey === 'neg_prompt' ? <Check size={10} color="#059669" /> : <Copy size={10} />}
                 onClick={() => copyToClipboard(activeNegPrompt, 'neg_prompt')}
               >
                 Copy
               </Button>
             </div>
-            <div className="obs-prompt-text" style={{ color: '#fca5a5', fontSize: '0.76rem' }}>
+            <div className="obs-prompt-text obs-negative-prompt" style={{ fontSize: '0.76rem' }}>
               {activeNegPrompt}
             </div>
           </div>

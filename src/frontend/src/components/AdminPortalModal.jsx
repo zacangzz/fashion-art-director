@@ -143,7 +143,7 @@ export default function AdminPortalModal({ isOpen, onClose }) {
         {/* Header */}
         <div className="admin-modal-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <div style={{ padding: '0.5rem', borderRadius: '12px', background: 'rgba(99, 102, 241, 0.12)', border: '1px solid rgba(99, 102, 241, 0.3)', color: '#818cf8' }}>
+            <div className="admin-header-icon">
               <Users size={20} />
             </div>
             <div>
@@ -172,16 +172,16 @@ export default function AdminPortalModal({ isOpen, onClose }) {
               <span className="admin-stat-value">{summary.total_users}</span>
             </div>
             <div className="admin-stat-card">
-              <span className="admin-stat-label" style={{ color: '#10b981' }}>Approved</span>
-              <span className="admin-stat-value" style={{ color: '#10b981' }}>{summary.approved_count}</span>
+              <span className="admin-stat-label stat-approved">Approved</span>
+              <span className="admin-stat-value stat-approved">{summary.approved_count}</span>
             </div>
             <div className="admin-stat-card">
-              <span className="admin-stat-label" style={{ color: '#f59e0b' }}>Pending Invites</span>
-              <span className="admin-stat-value" style={{ color: '#f59e0b' }}>{summary.pending_count}</span>
+              <span className="admin-stat-label stat-pending">Pending Invites</span>
+              <span className="admin-stat-value stat-pending">{summary.pending_count}</span>
             </div>
             <div className="admin-stat-card">
-              <span className="admin-stat-label" style={{ color: '#818cf8' }}>Studio Spend</span>
-              <span className="admin-stat-value" style={{ color: '#818cf8' }}>{formatSpendSGD(summary.total_spend_sgd, summary.total_spend_usd)}</span>
+              <span className="admin-stat-label stat-spend">Studio Spend</span>
+              <span className="admin-stat-value stat-spend">{formatSpendSGD(summary.total_spend_sgd, summary.total_spend_usd)}</span>
             </div>
           </div>
 
@@ -194,7 +194,7 @@ export default function AdminPortalModal({ isOpen, onClose }) {
           )}
 
           {actionSuccess && (
-            <div style={{ padding: '0.75rem 1rem', borderRadius: '10px', background: 'rgba(16, 185, 129, 0.12)', border: '1px solid rgba(16, 185, 129, 0.3)', color: '#6ee7b7', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <div className="auth-alert-success">
               <CheckCircle2 size={16} style={{ flexShrink: 0 }} />
               <span>{actionSuccess}</span>
             </div>
@@ -203,7 +203,7 @@ export default function AdminPortalModal({ isOpen, onClose }) {
           {/* Invite Form */}
           <div className="admin-invite-form">
             <h3 style={{ fontSize: '0.72rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <UserPlus size={14} style={{ color: '#818cf8' }} />
+              <UserPlus size={14} style={{ color: 'var(--accent-primary, #2563eb)' }} />
               <span>Pre-authorize New Member</span>
             </h3>
 
@@ -238,7 +238,7 @@ export default function AdminPortalModal({ isOpen, onClose }) {
           </div>
 
           {/* Users Table Controls */}
-          <div style={{ display: 'flex', flexWrap: 'wrap', itemsCenter: 'center', justifyBetween: 'space-between', gap: '0.75rem' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem' }}>
             <div style={{ display: 'flex', alignItems: 'center', position: 'relative', flex: 1, minWidth: '220px', maxWidth: '360px' }}>
               <Search size={14} style={{ position: 'absolute', left: '0.75rem', color: 'var(--text-muted)', pointerEvents: 'none' }} />
               <input
@@ -268,7 +268,7 @@ export default function AdminPortalModal({ isOpen, onClose }) {
                 onClick={loadUsers}
                 disabled={loading}
                 className="admin-action-btn"
-                style={{ background: 'rgba(255, 255, 255, 0.06)', borderColor: 'var(--border-color)', color: 'var(--text-primary)' }}
+                style={{ background: 'var(--bg-inset, #f4f4f6)', borderColor: 'var(--border-static, #eeeef2)', color: 'var(--text-primary)' }}
                 title="Refresh user list"
               >
                 <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
@@ -293,7 +293,7 @@ export default function AdminPortalModal({ isOpen, onClose }) {
                   {loading && users.length === 0 ? (
                     <tr>
                       <td colSpan={5} style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
-                        <Loader2 size={20} className="animate-spin" style={{ margin: '0 auto 0.5rem auto', color: '#818cf8' }} />
+                        <Loader2 size={20} className="animate-spin" style={{ margin: '0 auto 0.5rem auto', color: 'var(--accent-primary, #2563eb)' }} />
                         Loading studio whitelist...
                       </td>
                     </tr>
@@ -318,27 +318,27 @@ export default function AdminPortalModal({ isOpen, onClose }) {
                               {u.photo_url ? (
                                 <img src={u.photo_url} alt="" style={{ width: '28px', height: '28px', borderRadius: '50%', objectFit: 'cover' }} />
                               ) : (
-                                <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'rgba(99, 102, 241, 0.2)', border: '1px solid rgba(99, 102, 241, 0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#818cf8', fontFamily: 'var(--font-mono)', fontSize: '0.75rem', fontWeight: 700 }}>
+                                <div className="admin-avatar-fallback">
                                   {(u.email || 'U')[0].toUpperCase()}
                                 </div>
                               )}
                               <div style={{ display: 'flex', flexDirection: 'column' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                                  <span style={{ fontWeight: 600, color: '#ffffff' }}>{u.display_name || u.email}</span>
+                                  <span style={{ fontWeight: 600, color: 'var(--text-primary, #18181b)' }}>{u.display_name || u.email}</span>
                                   {isCurrentProxy && (
                                     <span className="admin-badge admin-badge-active-proxy">
                                       <VenetianMask size={10} /> Active Proxy
                                     </span>
                                   )}
                                 </div>
-                                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{u.email}</span>
+                                <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary, #52525b)', fontFamily: 'var(--font-mono)' }}>{u.email}</span>
                               </div>
                             </div>
                           </td>
 
                           {/* Role */}
                           <td>
-                            <span className="admin-badge" style={u.role === 'admin' ? { background: 'rgba(168, 85, 247, 0.12)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.3)' } : { background: 'rgba(255, 255, 255, 0.06)', color: 'var(--text-secondary)', border: '1px solid var(--border-color)' }}>
+                            <span className={`admin-badge ${u.role === 'admin' ? 'admin-badge-role-admin' : 'admin-badge-role-user'}`}>
                               {u.role === 'admin' && <Shield size={10} />}
                               {u.role}
                             </span>
@@ -355,7 +355,7 @@ export default function AdminPortalModal({ isOpen, onClose }) {
                           </td>
 
                           {/* Spend */}
-                          <td style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>
+                          <td style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary, #52525b)' }}>
                             {formatSpendSGD(u.total_spend_sgd, u.total_spend_usd)}
                           </td>
 
@@ -400,8 +400,7 @@ export default function AdminPortalModal({ isOpen, onClose }) {
                                 type="button"
                                 onClick={() => handleToggleStatus(u)}
                                 disabled={isOwnAdminAccount}
-                                className="admin-action-btn"
-                                style={u.status === 'approved' ? { background: 'rgba(245, 158, 11, 0.12)', color: '#f59e0b', borderColor: 'rgba(245, 158, 11, 0.3)' } : { background: 'rgba(16, 185, 129, 0.12)', color: '#10b981', borderColor: 'rgba(16, 185, 129, 0.3)' }}
+                                className={`admin-action-btn ${u.status === 'approved' ? 'admin-btn-disable' : 'admin-btn-approve'}`}
                                 title={u.status === 'approved' ? 'Disable Account' : 'Approve Account'}
                               >
                                 {u.status === 'approved' ? 'Disable' : 'Approve'}
@@ -411,8 +410,7 @@ export default function AdminPortalModal({ isOpen, onClose }) {
                                 type="button"
                                 onClick={() => handleDelete(u)}
                                 disabled={isOwnAdminAccount}
-                                className="admin-action-btn"
-                                style={{ background: 'rgba(239, 68, 68, 0.12)', color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.3)' }}
+                                className="admin-action-btn admin-btn-delete"
                                 title="Delete / Revoke Member"
                               >
                                 <Trash2 size={12} />
@@ -430,7 +428,7 @@ export default function AdminPortalModal({ isOpen, onClose }) {
         </div>
 
         {/* Modal Footer */}
-        <div style={{ padding: '1rem 1.5rem', borderTop: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyBetween: 'space-between', background: 'rgba(9, 11, 16, 0.5)', fontSize: '0.75rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+        <div className="admin-modal-footer">
           <span>Whitelist synchronization is instant</span>
           <button
             onClick={onClose}

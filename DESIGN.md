@@ -1,125 +1,133 @@
-# Fashion Art Director Studio — Design System (`DESIGN.md`)
+# Gallery Lumina — Design System (`DESIGN.md`)
 
 ## 1. Brand Essence & Visual Language
-**Fashion Art Director Studio** is a high-end, generative AI creative suite built for creative directors, fashion houses, and editorial stylists. The visual language blends obsidian minimalism, editorial typography, and vibrant electric neon accents that evoke haute couture digital craft.
+**Gallery Lumina** embodies an immaculate, gallery-grade editorial light aesthetic tailored for premier fashion houses, creative directors, photographers, and luxury cultural institutions. The interface functions as an enlightened architectural pavilion: structural chrome recedes completely, offering an expansive, luminous white-cube stage where photography, textile texture, and visual curation command total prominence.
 
-### Core Visual Principles
-1. **Editorial Luxury**: Deep obsidian backdrops with subtle atmospheric glow radial gradients.
-2. **Glass & Depth**: Multi-layered backdrop blurs (`backdrop-filter: blur(14px)`), 1px semi-transparent borders, and soft glowing accent drop-shadows.
-3. **Information Hierarchy**: Crisp typographic contrast between UI labels (`Inter`) and technical metadata/seeds/aspect ratios (`JetBrains Mono`).
-4. **Fluid Responsiveness**: Resilient CSS grid and flex layouts adapting across 1024px to 1920px+ viewports with smooth micro-interactions.
+### Design Movement: Gallery-Grade Minimalist Editorial with Luminous Sky Accents
+Merging Scandinavian exhibition architecture, limited-edition art monographs, and Swiss rationalist typographic precision, this aesthetic eliminates visual dust and grays in favor of crisp, pure radiance.
+
+1. **Crisp Alabaster & Optic Whites**: Pure optic white cards and soft alabaster surfaces establish maximum luminosity and pristine chromatic fidelity for visual works.
+2. **Architectural Discipline**: Layouts align to hair-thin structural grids and generous negative space, cultivating restraint, quiet luxury, and deliberate pacing.
+3. **Luminous Sky Blue Accent**: A clean, fresh, radiant sky blue (`#2563EB`) brings crisp clarity, energy, and purity to key focal cues, status markers, and interactive states without muddying the canvas.
+4. **Editorial High-Contrast Typography**: High-contrast Didone serifs (`Bodoni Moda`) anchor collection titles with timeless luxury, balanced by clinical grotesque sans-serifs (`Hanken Grotesk`) and monospaced technical notation (`JetBrains Mono`).
+5. **Monograph Split Layout**: 5-column technical/curation panel on the left, 7-column luminous artwork stage on the right, keeping full focus and clarity on the hero image.
 
 ---
 
 ## 2. Color Palette & Design Tokens
 
 ### Surface & Neutral Tones
-- **`--bg-dark`**: `#07090e` (Deepest canvas background)
-- **`--bg-surface`**: `#10141e` (Primary card/panel surface)
-- **`--bg-surface-elevated`**: `#171d2b` (Elevated modals, toolbars, popovers)
-- **`--bg-surface-hover`**: `#20283b` (Interactive item hover state)
-- **`--bg-surface-active`**: `#2a344d` (Active/selected item state)
-- **`--border-color`**: `rgba(255, 255, 255, 0.08)` (Subtle divider border)
-- **`--border-color-hover`**: `rgba(255, 255, 255, 0.16)` (Elevated border on focus/hover)
-- **`--border-focus`**: `#6366f1` (Active focus ring border)
+- **`--bg-canvas` / `--bg-dark`**: `#F9F9FB` (Gallery Chalk — Base page canvas)
+- **`--bg-surface`**: `#FFFFFF` (Pure Optic White — Artwork mounts, cards, inspect panels)
+- **`--bg-surface-elevated`**: `#F4F4F6` (Subtle Card Inset — Nested trays, toolbar docks)
+- **`--bg-surface-hover`**: `#EBF3FE` (Sky Tint Light — Interactive hover wash)
+- **`--bg-surface-active`**: `#DBEAFE` (Sky Tint Soft — Selected rows, active tabs)
+- **`--border-color`**: `#EEEEF2` (Whisper Hairline — Static structural separations)
+- **`--border-color-hover`**: `#E2E4E9` (Interactive Hairline — Outlines, form boundaries)
+- **`--border-focus`**: `#2563EB` (Pure Sky Blue — Active focus rings and highlighted cards)
 
-### Typography Colors
-- **`--text-primary`**: `#f8fafc` (Headings, primary values, active labels)
-- **`--text-secondary`**: `#94a3b8` (Subtitles, metadata, secondary labels)
-- **`--text-muted`**: `#64748b` (Disabled text, hints, placeholders)
-- **`--text-inverse`**: `#07090e` (Text over high-contrast white/accent buttons)
+### Editorial Typography Scale
+- **`--text-primary`**: `#18181B` (Deep Graphite — Authoritative headlines, primary labels)
+- **`--text-secondary`**: `#71717A` (Editorial Neutral — Supportive body copy, subtitles)
+- **`--text-muted`**: `#9CA3AF` (Muted Stone — Inactive icons, placeholders, technical indices)
+- **`--text-inverse`**: `#FFFFFF` (Optic White — Text over solid graphite and sky blue buttons)
 
-### Accent & Semantic Ramps
-- **Brand Violet / Primary**:
-  - Main: `#6366f1` (Electric Indigo)
-  - Hover: `#4f46e5`
-  - Glow: `rgba(99, 102, 241, 0.35)`
-  - Soft Background: `rgba(99, 102, 241, 0.12)`
-- **Creative Magenta / Secondary**:
-  - Main: `#a855f7` (Fashion Purple)
-  - Hover: `#9333ea`
-  - Soft Background: `rgba(168, 85, 247, 0.12)`
-- **Cyan / Vision & Analysis**:
-  - Main: `#06b6d4`
-  - Soft Background: `rgba(6, 182, 212, 0.12)`
-- **Emerald / Direct & Success**:
-  - Main: `#10b981`
-  - Soft Background: `rgba(168, 85, 129, 0.12)`
-- **Amber / Warning & Seeds**:
-  - Main: `#f59e0b`
-  - Soft Background: `rgba(245, 158, 11, 0.12)`
-- **Rose / Danger & Conflicts**:
-  - Main: `#ef4444`
-  - Soft Background: `rgba(239, 68, 68, 0.12)`
+### Chromatic Accent Tokens (Luminous Sky Blue)
+- **`--color-primary` / `--sky-blue-clean`**: `#2563EB` (The core vibrant cerulean accent)
+- **`--color-primary-hover` / `--sky-blue-deep`**: `#1D4ED8` (High-contrast hover and active states)
+- **`--color-accent-vibrant` / `--sky-blue-vibrant`**: `#3B82F6` (Hover outlines, illuminated focus)
+- **`--sky-tint-light`**: `#EBF3FE` (Clean pastel blue wash for active backdrops)
+- **`--sky-tint-soft`**: `#DBEAFE` (Subtle boundary rings and capsule tag fills)
+- **`--sky-glow`**: `rgba(37, 99, 235, 0.16)` (Ambient focus halos and vitrine glints)
+
+### Semantic Functional Status Tints
+- **Success / Direct Ready**: `#10B981` (Emerald), soft fill: `rgba(16, 185, 129, 0.1)`
+- **Warning / Seed Mode**: `#F59E0B` (Warm Amber), soft fill: `rgba(245, 158, 11, 0.1)`
+- **Conflict / Danger**: `#BA1A1A` / `#EF4444` (Crimson Rose), soft fill: `rgba(239, 68, 68, 0.1)`
 
 ---
 
 ## 3. Typography Scale
 
-- **Font Sans**: `'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif`
-- **Font Mono**: `'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, monospace`
+- **Display & Collection Serifs (`font-serif`)**: `'Bodoni Moda', Georgia, 'Times New Roman', serif`
+- **Grotesque UI & Body (`font-sans`)**: `'Hanken Grotesk', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`
+- **Technical Indexing & Monospace (`font-mono`)**: `'JetBrains Mono', 'Fira Code', monospace`
 
-| Scale | Size | Line Height | Weight | Usage |
-|---|---|---|---|---|
-| **Display** | `1.5rem` (24px) | `1.2` | 700 / Bold | Page & Section Titles |
-| **Heading** | `1.15rem` (18.4px) | `1.3` | 600 / Semi-Bold | Card headers, Modal titles |
-| **Subheading** | `0.95rem` (15.2px) | `1.4` | 600 / Semi-Bold | Group titles, drawer headers |
-| **Body** | `0.85rem` (13.6px) | `1.5` | 400 / Regular | Chat messages, descriptions |
-| **Body Bold** | `0.85rem` (13.6px) | `1.5` | 600 / Semi-Bold | Active items, buttons |
-| **Caption** | `0.75rem` (12px) | `1.4` | 500 / Medium | Badges, step counters, input hints |
-| **Micro / Mono** | `0.68rem` (10.8px) | `1.3` | 600 / Bold | Generation IDs, resolutions, seeds |
+| Token / Role | Size | Line Height | Weight | Tracking | Usage |
+|---|---|---|---|---|---|
+| **`display-hero`** | `2.5rem` (40px) | `1.15` | 400 Regular (Serif) | `-0.02em` | Main Viewport Banners, Gallery Splash |
+| **`headline-lg`** | `1.75rem` (28px) | `1.2` | 500 Medium (Serif) | `-0.01em` | Major Stage Headers, Section Titles |
+| **`headline-md`** | `1.25rem` (20px) | `1.3` | 400 Regular (Serif) | `-0.01em` | Modal titles, Card Group Headers |
+| **`headline-sm`** | `1.05rem` (17px) | `1.4` | 600 SemiBold (Sans) | `0.01em` | Card titles, Inspector Headers |
+| **`body-lg`** | `1.0rem` (16px) | `1.6` | 400 Regular (Sans) | `0` | Editorial narrative, long descriptions |
+| **`body-md`** | `0.875rem` (14px) | `1.5` | 400 Regular (Sans) | `0` | UI copy, chat prompts, lever values |
+| **`body-sm`** | `0.75rem` (12px) | `1.4` | 400 Regular (Sans) | `0.01em` | Secondary metadata, helper labels |
+| **`label-caps`** | `0.6875rem` (11px)| `1.3` | 600 SemiBold (Sans) | `0.14em` | Category eyebrows, button caps, headers |
+| **`label-mono`** | `0.6875rem` (11px)| `1.3` | 500 Medium (Mono) | `0.04em` | Seeds, aspect ratios, model codes |
+| **`caption-micro`**| `0.5625rem` (9px) | `1.2` | 500 Medium (Mono) | `0.08em` | Micro badges, status indicators |
 
 ---
 
-## 4. Elevation, Radii & Shadows
+## 4. Elevation, Radii & Depth
 
-### Border Radii
-- `--radius-xs`: `4px` (Tags, micro-chips)
-- `--radius-sm`: `6px` (Buttons, inputs, small tooltips)
-- `--radius-md`: `10px` (Cards, image previews, panels)
-- `--radius-lg`: `16px` (Modals, drawers, main stage viewports)
-- `--radius-xl`: `24px` (Hero banners, containers)
-- `--radius-pill`: `9999px` (Pill buttons, status badges, step navigators)
+### Shape Language (Sharp Architectural Precision)
+- **Sharp Monograph Geometry (`0px`)**: Cards, image frame mounts, buttons, dialogs, dropdowns, inputs, and tabs strictly enforce `border-radius: 0px`. This geometry echoes trimmed exhibition monographs and architectural gallery plinths.
+- **Micro-Pills (`9999px`)**: Functional indicators (live availability status dots, artwork inspect pins, and curation filter capsules) use `border-radius: 9999px` to provide clear functional contrast against the surrounding rectilinear architecture.
 
-### Shadows & Atmosphere
-- `--shadow-card`: `0 8px 32px rgba(0, 0, 0, 0.45)`
-- `--shadow-modal`: `0 24px 64px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.08)`
-- `--shadow-glow-primary`: `0 0 20px rgba(99, 102, 241, 0.35)`
-- `--shadow-glow-cyan`: `0 0 20px rgba(6, 182, 212, 0.35)`
-- `--shadow-glow-emerald`: `0 0 20px rgba(16, 185, 129, 0.35)`
+### Vitrine Glass & Spatial Layering
+- **Vitrine Glass**: Sticky navigation headers and floating toolbars use an airy glass treatment:
+  ```css
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(20px) saturate(160%);
+  border-bottom: 1px solid rgba(238, 238, 242, 0.8);
+  ```
+- **Whisper Ambient Shadow**:
+  ```css
+  box-shadow: 0 24px 48px -12px rgba(24, 24, 27, 0.04), 0 4px 12px -2px rgba(24, 24, 27, 0.02);
+  ```
+- **Sky Blue Active Halos**:
+  ```css
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.16);
+  ```
 
 ---
 
 ## 5. UI Component Primitives Specs
 
 ### Buttons (`<Button>`)
-- **Primary**: Gradient `linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)`, white text, glow on hover, active depression.
-- **Secondary**: `var(--bg-surface-elevated)` background, 1px border `rgba(255,255,255,0.08)`, hover border `rgba(255,255,255,0.2)`.
-- **Accent Emerald / Direct**: Gradient `linear-gradient(135deg, #10b981 0%, #06b6d4 100%)`.
-- **Ghost**: Transparent background, text secondary, hover background `rgba(255,255,255,0.06)`.
-- **Danger**: Red soft background `rgba(239, 68, 68, 0.15)`, red border & text, hover solid red.
+- **Primary**: Solid deep graphite `#18181B` with pure white `#FFFFFF` text, `0px` radius, uppercase `label-caps` styling (`padding: 12px 24px`). On hover, surface shifts to `#27272A` with a crisp `2px` bottom accent in `#2563EB`.
+- **Accent (Clean Sky Blue)**: Solid pure sky blue `#2563EB` with white `#FFFFFF` text, `0px` radius. Hover: `#1D4ED8`. Used selectively for key curation actions, direct generation, and export.
+- **Secondary**: Optic white background (`#FFFFFF`), `1px solid #E2E4E9`, text in `#18181B`. On hover: background `#EBF3FE`, border shifts to `#3B82F6`, text shifts to `#2563EB`.
+- **Ghost**: Transparent background, text `#71717A`. On hover: `#18181B` text with an ultra-thin hairline underline in `#2563EB`.
+- **Danger**: Archival soft crimson wash (`#FEF2F2`), `1px solid #FECACA`, text `#DC2626`. On hover: `#DC2626` text with `#B91C1C` border.
+
+### Badges & Curation Capsules (`<Badge>`)
+- **Curation Capsule**: `border-radius: 9999px`, `1px solid #DBEAFE`, background `#EBF3FE`, typography in `caption-micro` (`#2563EB`). Houses a 5px status pip in `#2563EB`.
+- **Status Pills**: Muted stone or status color dot (Emerald for ready, Amber for processing, Rose for error) housed within a soft pill capsule.
+
+### Cards & Workspaces (`<Card>`)
+- Pure white `#FFFFFF` surface, `0px` radius, encased in `1px solid #EEEEF2`.
+- Active / Selected Card State: border sharpens to `1px solid #2563EB` with ambient halo.
+
+### Form Fields & Inputs (`<Input>`, `<Select>`, `<Slider>`)
+- **Text Inputs & Textareas**: Optic white `#FFFFFF`, `1px solid #E2E4E9`, text `#18181B`, placeholder `#9CA3AF`, `0px` radius. On focus: `1px solid #2563EB` with ambient halo (`box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.16)`).
+- **Range Sliders**: 1px hairline track in `#EEEEF2` with completed track filled in `#2563EB`. Scrubber is a crisp 10px square `#18181B` handle with an inner 2px dot in `#2563EB`.
 
 ### Modals (`<Modal>`)
-- Accessible dialog overlay (`position: fixed; inset: 0; background: rgba(0,0,0,0.7); backdrop-filter: blur(8px)`).
-- Esc key dismiss + backdrop click to close + body scroll lock.
-- Clean header with title, subtitle, icon, close button.
-- Flexible body with scroll overflow.
-- Optional action footer.
-
-### Badges & Chips (`<Badge>`)
-- Semantic colors with 1px border and pill shape.
-- Optional pulsing indicator dot for active/running status.
-
-### Form Inputs (`<Input>`, `<Select>`, `<Slider>`)
-- Dark inset backgrounds `rgba(15, 23, 42, 0.7)`.
-- Focused state: 2px ring with `var(--accent-primary)`.
-- Custom styled native select and range sliders with live readout labels.
+- Pure white container, `0px` radius, `1px solid #E2E4E9`, cast with whisper ambient shadow.
+- Backdrop: Archival frosted glass (`background: rgba(24, 24, 27, 0.25); backdrop-filter: blur(12px)`).
+- Header: Bodoni Moda editorial title, subtle close icon button.
 
 ---
 
-## 6. Layout & 5-Step Sequential Workflow
-1. **Step 1: Art Direction** (Split grid: Moodboard upload / Direct upload on left; Master Prompt review + 9-category levers + 4-baseline selector on right).
-2. **Step 2: Refinement** (Left: Multi-turn prompt conversation & seed locking; Right: Master viewport with split-slider before/after).
-3. **Step 3: Canvas / Inpaint** (Left: Dual-layer brush/mask tools, prompt guidance; Right: Master viewport before/after inpaint).
-4. **Step 4: Wardrobe** (Left: Garment wardrobe catalog & pinned layers; Right: Master viewport with interactive garment drop pins).
-5. **Step 5: Export** (Dedicated aspect ratio grid, upscale engine, ZIP bundle download).
+## 6. Monograph Split Layout & 5-Step Workflow
+The application layout centers on the **Monograph Split** architecture:
+- **Left Column (5 cols / ~38%)**: Technical & curatorial controls, prompt conversation, lever adjustments, inpaint tools, or wardrobe catalog.
+- **Right Column (7 cols / ~62%)**: Expansive archival image canvas viewport (`CanvasViewport`), featuring edge-to-edge mounting, floating minimal pills for zoom/comparison, and clinical diagnostic readouts.
+
+### Workflow Stages
+1. **Stage 01: Art Direction** (Left: Reference moodboard upload / Direct upload; Right: Master Prompt synthesis, 9 visual levers, 4-baseline exhibition grid).
+2. **Stage 02: Refinement** (Left: Multi-turn prompt conversation & seed locking; Right: Master picture mount with before/after split slider).
+3. **Stage 03: Canvas Studio / Inpaint** (Left: Dual-layer precision brush & prompt guidance; Right: Full canvas preview).
+4. **Stage 04: Wardrobe Catalog** (Left: Garment wardrobe catalog & pinned layers; Right: Interactive garment drop pins on canvas).
+5. **Stage 05: Master Export** (Left: Aspect ratio selector & resolution parameters; Right: Exhibition preview & high-resolution bundle download).
