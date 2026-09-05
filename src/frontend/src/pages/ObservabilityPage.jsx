@@ -1260,9 +1260,10 @@ export default function ObservabilityPage() {
               position: 'relative',
               maxWidth: '90vw',
               maxHeight: '90vh',
-              background: '#090b10',
-              border: '1px solid var(--border-color)',
-              borderRadius: 'var(--radius-lg)',
+              background: 'var(--bg-surface, #ffffff)',
+              border: '1px solid var(--border-interactive, #e2e4e9)',
+              borderRadius: 'var(--radius-xs, 0px)',
+              boxShadow: 'var(--shadow-modal)',
               overflow: 'hidden',
               padding: '0.5rem',
             }}

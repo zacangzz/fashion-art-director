@@ -339,17 +339,7 @@ export default function CanvasViewport({
 
             {/* Reference Target Switcher if multiple references exist */}
             {hasBaselineOption && (
-              <div
-                className="viewport-compare-source-toggle"
-                style={{
-                  display: 'inline-flex',
-                  marginLeft: '4px',
-                  background: 'rgba(0,0,0,0.3)',
-                  padding: '2px',
-                  borderRadius: 'var(--radius-pill)',
-                  border: '1px solid rgba(255,255,255,0.08)',
-                }}
-              >
+              <div className="viewport-compare-source-toggle">
                 <button
                   type="button"
                   className={`viewport-compare-tab ${compareSource === 'previous' ? 'active' : ''}`}

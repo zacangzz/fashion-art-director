@@ -23,6 +23,8 @@ import {
 } from '../services/apiClient';
 import { useAuth } from '../contexts/AuthContext';
 import { formatSpendSGD } from '../utils/formatters';
+import Modal from './ui/Modal';
+import Button from './ui/Button';
 
 export default function AdminPortalModal({ isOpen, onClose }) {
   const { userProfile, startProxy, stopProxy } = useAuth();
@@ -137,33 +139,28 @@ export default function AdminPortalModal({ isOpen, onClose }) {
   });
 
   return (
-    <div className="admin-modal-backdrop">
-      <div className="admin-modal-container animate-fade-in">
-        
-        {/* Header */}
-        <div className="admin-modal-header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <div className="admin-header-icon">
-              <Users size={20} />
-            </div>
-            <div>
-              <h2 className="admin-modal-title">Studio Whitelist & Team Management</h2>
-              <p className="admin-modal-subtitle">
-                Pre-authorize team members, manage permissions, and monitor compute spend.
-              </p>
-            </div>
-          </div>
-          <button
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title="Studio Whitelist & Team Management"
+      subtitle="Pre-authorize team members, manage permissions, and monitor compute spend."
+      icon={<Users size={20} />}
+      size="xl"
+      className="admin-modal-window"
+      footer={
+        <div className="admin-modal-footer-content">
+          <span>Whitelist synchronization is instant</span>
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={onClose}
-            className="modal-close-btn"
-            title="Close modal"
           >
-            <X size={18} />
-          </button>
+            Close
+          </Button>
         </div>
-
-        {/* Scrollable Content */}
-        <div className="admin-modal-body">
+      }
+    >
+      <div className="admin-modal-inner">
           
           {/* Summary Stats Grid */}
           <div className="admin-stats-grid">
@@ -426,19 +423,6 @@ export default function AdminPortalModal({ isOpen, onClose }) {
             </div>
           </div>
         </div>
-
-        {/* Modal Footer */}
-        <div className="admin-modal-footer">
-          <span>Whitelist synchronization is instant</span>
-          <button
-            onClick={onClose}
-            className="auth-btn-secondary"
-            style={{ width: 'auto', padding: '0.4rem 1rem' }}
-          >
-            Close
-          </button>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

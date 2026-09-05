@@ -19,12 +19,12 @@ import WardrobePreviewModal from './WardrobePreviewModal';
 import { formatSpendSGD, formatTokens } from '../utils/formatters';
 
 const CATEGORY_COLORS = {
-  tops: '#38bdf8',
-  bottoms: '#fb923c',
-  outerwear: '#a78bfa',
-  footwear: '#34d399',
-  accessories: '#f472b6',
-  full_outfit: '#facc15',
+  tops: '#0284c7',
+  bottoms: '#c2410c',
+  outerwear: '#6d28d9',
+  footwear: '#047857',
+  accessories: '#be185d',
+  full_outfit: '#a16207',
 };
 
 export default function WardrobePanel({

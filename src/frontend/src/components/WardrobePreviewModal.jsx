@@ -25,11 +25,11 @@ import { upscaleGarment } from '../services/apiClient';
 import { formatSpendSGD, formatTokens } from '../utils/formatters';
 
 const CATEGORY_COLORS = {
-  outerwear: '#f59e0b',
-  tops: '#3b82f6',
-  bottoms: '#10b981',
-  footwear: '#8b5cf6',
-  accessories: '#ec4899',
+  outerwear: '#6d28d9',
+  tops: '#0284c7',
+  bottoms: '#c2410c',
+  footwear: '#047857',
+  accessories: '#be185d',
 };
 
 export default function WardrobePreviewModal({
