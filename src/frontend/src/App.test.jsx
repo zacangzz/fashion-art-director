@@ -56,6 +56,9 @@ describe('App Component Workflow & Locking', () => {
     render(<App />);
     expect(screen.getByText('mise en scène')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /(01|1) Art Direction/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /(02|2) Adjust/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /(03|3) Scene/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /(04|4) Export/i })).toBeInTheDocument();
     expect(screen.getByText(/Moodboard Ingestion/i)).toBeInTheDocument();
     expect(screen.getByText(/Direct Photo Ingestion/i)).toBeInTheDocument();
     expect(screen.getByTitle(/Studio Whitelist & Team Management/i)).toBeInTheDocument();

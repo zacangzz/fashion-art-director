@@ -127,7 +127,6 @@ The application layout centers on the **Monograph Split** architecture:
 
 ### Workflow Stages
 1. **Stage 01: Art Direction** (Left: Reference moodboard upload / Direct upload; Right: Master Prompt synthesis, 9 visual levers, 4-baseline exhibition grid).
-2. **Stage 02: Refinement** (Left: Multi-turn prompt conversation & seed locking; Right: Master picture mount with before/after split slider).
-3. **Stage 03: Canvas Studio / Inpaint** (Left: Dual-layer precision brush & prompt guidance; Right: Full canvas preview).
-4. **Stage 04: Wardrobe Catalog** (Left: Garment wardrobe catalog & pinned layers; Right: Interactive garment drop pins on canvas).
-5. **Stage 05: Master Export** (Left: Aspect ratio selector & resolution parameters; Right: Exhibition preview & high-resolution bundle download).
+2. **Stage 02: Adjust** (Toolbar submodes: `Refinement` prompt conversation & `Adjust` precision canvas brush inpaint; Right: Master picture mount with before/after split slider).
+3. **Stage 03: Scene** (Toolbar submodes: `Wardrobe` garment catalog & `Props` object staging; Right: Interactive spatial pins/boxes on canvas).
+4. **Stage 04: Master Export** (Left: Aspect ratio selector & resolution parameters; Right: Exhibition preview & high-resolution bundle download).

@@ -71,13 +71,13 @@ export default function RefinementChat({
 
     const bgOptions = bg.activeBackground
       ? {
-          background_reference_id: bg.activeBackground.id,
-          background_reference_url: bg.activeBackground.image_url,
-          perspective_mode: bg.perspectiveMode,
-          depth_of_field: bg.depthOfField,
-          lighting_mode: bg.lightingMode,
-          spatial_staging: bg.spatialStaging,
-        }
+        background_reference_id: bg.activeBackground.id,
+        background_reference_url: bg.activeBackground.image_url,
+        perspective_mode: bg.perspectiveMode,
+        depth_of_field: bg.depthOfField,
+        lighting_mode: bg.lightingMode,
+        spatial_staging: bg.spatialStaging,
+      }
       : {};
 
     onSendRefinement(promptInput.trim(), bgOptions);
@@ -224,14 +224,14 @@ export default function RefinementChat({
                     {isBase
                       ? 'Anchor Baseline'
                       : activeMsg.is_inpaint
-                      ? 'Active Inpaint Anchor'
-                      : activeMsg.is_wardrobe
-                      ? 'Active Wardrobe Anchor'
-                      : activeMsg.is_prop
-                      ? 'Active Prop Anchor'
-                      : activeMsg.background_reference_id
-                      ? 'Active Background Harmonization'
-                      : 'Active Refinement Anchor'}
+                        ? 'Active Inpaint Anchor'
+                        : activeMsg.is_wardrobe
+                          ? 'Active Wardrobe Anchor'
+                          : activeMsg.is_prop
+                            ? 'Active Prop Anchor'
+                            : activeMsg.background_reference_id
+                              ? 'Active Background Harmonization'
+                              : 'Active Refinement Anchor'}
                   </span>
                   <span className="anchor-seed-pill">Seed #{activeMsg.seed || activeSeed}</span>
                 </div>
@@ -280,12 +280,12 @@ export default function RefinementChat({
                       {isBaseline
                         ? 'Anchor Baseline'
                         : msg.is_inpaint
-                        ? 'Inpaint Edit'
-                        : msg.is_wardrobe
-                        ? 'Wardrobe Swap'
-                        : msg.is_prop
-                        ? 'Prop Placement'
-                        : `Iteration ${index}`}
+                          ? 'Inpaint Edit'
+                          : msg.is_wardrobe
+                            ? 'Wardrobe Swap'
+                            : msg.is_prop
+                              ? 'Prop Placement'
+                              : `Iteration ${index}`}
                     </span>
 
                     {hasBgRef && (

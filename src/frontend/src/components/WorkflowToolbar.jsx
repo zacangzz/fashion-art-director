@@ -12,6 +12,8 @@ import {
   ChevronDown,
   Shirt,
   Box,
+  Sparkles,
+  Paintbrush,
 } from 'lucide-react';
 import {
   ASPECT_RATIO_OPTIONS,
@@ -21,11 +23,15 @@ import {
 
 /**
  * Reusable Workflow Toolbar rendered across all pipeline stages.
- * Provides a synchronized Aspect Ratio dropdown, Scene submode toggle (Wardrobe / Props), and Active Seed status badge.
+ * Provides a synchronized Aspect Ratio dropdown, Adjust submode toggle (Refinement / Adjust),
+ * Scene submode toggle (Wardrobe / Props), and Active Seed status badge.
  * 
  * @param {Object} props
  * @param {string} props.aspectRatio - Current active aspect ratio (e.g., '1:1', '4:5', '16:9')
  * @param {Function} props.onAspectRatioChange - Callback when aspect ratio is changed
+ * @param {'refinement' | 'canvas_inpaint' | 'adjust'} [props.adjustSubMode='refinement'] - Current adjust studio sub-mode
+ * @param {Function} [props.onAdjustSubModeChange] - Callback to toggle adjust submode
+ * @param {boolean} [props.showAdjustSubMode=false] - Whether to display the Refinement / Canvas Inpaint toggle
  * @param {'wardrobe' | 'props'} [props.sceneSubMode='wardrobe'] - Current scene studio sub-mode
  * @param {Function} [props.onSceneSubModeChange] - Callback to toggle scene submode
  * @param {boolean} [props.showSceneSubMode=false] - Whether to display the Wardrobe / Props toggle
@@ -38,6 +44,9 @@ import {
 export default function WorkflowToolbar({
   aspectRatio = '1:1',
   onAspectRatioChange,
+  adjustSubMode = 'refinement',
+  onAdjustSubModeChange,
+  showAdjustSubMode = false,
   sceneSubMode = 'wardrobe',
   onSceneSubModeChange,
   showSceneSubMode = false,
@@ -114,6 +123,38 @@ export default function WorkflowToolbar({
             </span>
           </div>
         </div>
+
+        {/* Immediately adjacent: Adjust Studio Mode Toggle [ ✨ Refinement | 🖌️ Adjust ] */}
+        {showAdjustSubMode && (
+          <div className="workflow-toolbar-group workflow-toolbar-adjust-submode">
+            <div className="workflow-toolbar-divider" aria-hidden="true" />
+            <span className="workflow-toolbar-label">Adjust Studio:</span>
+            <div className="scene-submode-pill-toggle" role="group" aria-label="Adjust Studio Mode">
+              <button
+                type="button"
+                className={`scene-submode-btn ${adjustSubMode === 'refinement' ? 'active' : ''}`}
+                onClick={() => onAdjustSubModeChange?.('refinement')}
+                disabled={disabled}
+                aria-pressed={adjustSubMode === 'refinement'}
+                title="Switch to Conversational Refinement"
+              >
+                <Sparkles size={14} className="scene-submode-icon" />
+                <span>Refinement</span>
+              </button>
+              <button
+                type="button"
+                className={`scene-submode-btn ${adjustSubMode === 'adjust' || adjustSubMode === 'canvas_inpaint' ? 'active' : ''}`}
+                onClick={() => onAdjustSubModeChange?.('canvas_inpaint')}
+                disabled={disabled}
+                aria-pressed={adjustSubMode === 'adjust' || adjustSubMode === 'canvas_inpaint'}
+                title="Switch to Canvas Inpainting & Targeted Adjustments"
+              >
+                <Paintbrush size={14} className="scene-submode-icon" />
+                <span>Canvas Inpaint</span>
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Immediately adjacent: Scene Studio Mode Toggle [ 👔 Wardrobe | 📦 Props ] */}
         {showSceneSubMode && (

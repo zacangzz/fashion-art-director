@@ -6383,8 +6383,9 @@ body {
   border-color: #14b8a6;
 }
 
-/* Workflow Toolbar Scene Submode */
-.workflow-toolbar-scene-submode {
+/* Workflow Toolbar Scene & Adjust Submode */
+.workflow-toolbar-scene-submode,
+.workflow-toolbar-adjust-submode {
   display: flex;
   align-items: center;
   gap: 10px;

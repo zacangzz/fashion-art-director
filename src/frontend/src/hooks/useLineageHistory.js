@@ -143,7 +143,7 @@ export function useLineageHistory({
       }
 
       setIsHistoryOpen(false);
-      setCurrentStep((prev) => (prev === 1 || prev === 5 ? 2 : prev));
+      setCurrentStep((prev) => (prev === 1 || prev === 4 ? 2 : prev));
     },
     [
       history,

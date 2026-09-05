@@ -43,6 +43,7 @@ export default function App() {
   const { currentUser, userProfile, loading, signOutUser } = useAuth();
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
+  const [adjustSubMode, setAdjustSubMode] = useState('refinement'); // 'refinement' | 'canvas_inpaint'
   const [sceneSubMode, setSceneSubMode] = useState('wardrobe'); // 'wardrobe' | 'props'
   const [errorMessage, setErrorMessage] = useState(null);
   const [activeAspectRatio, setActiveAspectRatio] = useState('1:1');
@@ -272,7 +273,7 @@ export default function App() {
           <span className="header-title">mise en scène</span>
         </div>
 
-        {/* 5-Step Sequential Workflow Navigator */}
+        {/* 4-Step Sequential Workflow Navigator */}
         <nav className="step-nav-bar" aria-label="Studio Workflow Steps">
           <button
             type="button"
@@ -290,7 +291,7 @@ export default function App() {
             disabled={!hasActiveImage}
           >
             <span className="step-num">02</span>
-            <span>Refinement</span>
+            <span>Adjust</span>
           </button>
 
           <button
@@ -300,7 +301,7 @@ export default function App() {
             disabled={!hasActiveImage}
           >
             <span className="step-num">03</span>
-            <span>Canvas</span>
+            <span>Scene</span>
           </button>
 
           <button
@@ -310,16 +311,6 @@ export default function App() {
             disabled={!hasActiveImage}
           >
             <span className="step-num">04</span>
-            <span>Scene</span>
-          </button>
-
-          <button
-            type="button"
-            className={`step-nav-btn ${currentStep === 5 ? 'active' : ''}`}
-            onClick={() => setCurrentStep(5)}
-            disabled={!hasActiveImage}
-          >
-            <span className="step-num">05</span>
             <span>Export</span>
           </button>
         </nav>
@@ -460,13 +451,23 @@ export default function App() {
         <WorkflowToolbar
           aspectRatio={activeAspectRatio}
           onAspectRatioChange={setActiveAspectRatio}
-          showSceneSubMode={currentStep === 4}
+          showAdjustSubMode={currentStep === 2}
+          adjustSubMode={adjustSubMode}
+          onAdjustSubModeChange={setAdjustSubMode}
+          showSceneSubMode={currentStep === 3}
           sceneSubMode={sceneSubMode}
           onSceneSubModeChange={setSceneSubMode}
           activeSeed={refinement.activeSeed}
           seedMode={refinement.seedMode}
           onSeedModeChange={refinement.setSeedMode}
-          disabled={refinement.isGenerating || moodboard.isGeneratingBaselines || moodboard.isAnalyzing || wardrobe.isComposingWardrobe || propsHook.isComposingProps}
+          disabled={
+            refinement.isGenerating ||
+            moodboard.isGeneratingBaselines ||
+            moodboard.isAnalyzing ||
+            wardrobe.isComposingWardrobe ||
+            propsHook.isComposingProps ||
+            refinement.isInpainting
+          }
         />
 
         {currentStep === 1 && (
@@ -486,8 +487,8 @@ export default function App() {
 
             <div className="step-1-right-column">
               {moodboard.moodboardId ||
-              moodboard.masterPrompt ||
-              (moodboard.tagState?.categories && Object.keys(moodboard.tagState.categories).length > 0) ? (
+                moodboard.masterPrompt ||
+                (moodboard.tagState?.categories && Object.keys(moodboard.tagState.categories).length > 0) ? (
                 <>
                   <PromptReviewSection
                     tagState={moodboard.tagState}
@@ -548,102 +549,102 @@ export default function App() {
         )}
 
         {currentStep === 2 && (
-          <div className="workspace-grid">
-            <div className="workspace-left-column">
-              <RefinementChat
-                conversationMessages={refinement.conversationMessages}
-                onSendRefinement={refinement.handleSendRefinement}
-                isGenerating={refinement.isGenerating}
-                activeSeed={refinement.activeSeed}
-                seedMode={refinement.seedMode}
-                onSeedModeChange={refinement.setSeedMode}
-                onSeedChange={refinement.setActiveSeed}
-                activeGenerationId={refinement.generationResult?.generation_id}
-                onSelectMessage={refinement.handleSelectMessage}
-                onToggleWardrobe={() => setCurrentStep(4)}
-                isWardrobeOpen={false}
-                assignmentCount={wardrobe.wardrobeAssignments.length + propsHook.propAssignments.length}
-                sceneLabel={sceneSubMode === 'props' ? 'Props' : 'Wardrobe'}
-              />
-            </div>
-
-            <div className="workspace-right-column">
-              <div className="workspace-viewport-wrapper">
-                <CanvasViewport
+          (adjustSubMode === 'canvas_inpaint' || adjustSubMode === 'adjust') ? (
+            <div className="workspace-grid inpaint-workspace-grid">
+              <div className="workspace-left-column">
+                <CanvasStudio
                   imageUrl={refinement.generationResult?.master_image_url || moodboard.activeBaseline?.image_url || null}
-                  beforeImageUrl={refinement.previousGenerationResult?.master_image_url || moodboard.activeBaseline?.image_url || null}
-                  baselineImageUrl={moodboard.activeBaseline?.image_url || null}
-                  beforeLabel={
-                    refinement.previousGenerationResult &&
-                    refinement.previousGenerationResult.generation_id !== moodboard.activeBaseline?.id
-                      ? 'Previous Iteration'
-                      : 'Baseline'
-                  }
-                  afterLabel="Refined Output"
-                  isGenerating={refinement.isGenerating}
-                  generationResult={refinement.generationResult}
-                  previousGenerationResult={refinement.previousGenerationResult}
+                  generationId={refinement.generationResult?.generation_id || moodboard.activeBaseline?.id}
                   activeSeed={refinement.activeSeed}
-                  seedMode={refinement.seedMode}
+                  aspectRatio={activeAspectRatio}
+                  onEditComplete={refinement.handleInpaintComplete}
+                  onSwitchToGraph={() => setAdjustSubMode('refinement')}
                   onOpenHistory={() => historyHook.setIsHistoryOpen(true)}
-                  canGenerate={false}
-                  mode="refinement"
-                  wardrobeAssignments={wardrobe.wardrobeAssignments}
-                  onDropGarment={wardrobe.handleAddWardrobeAssignment}
-                  onRemovePin={wardrobe.handleRemoveWardrobeAssignment}
-                  onUpdatePinPosition={wardrobe.handleUpdateWardrobePosition}
-                  isWardrobeMode={false}
+                  isInpainting={refinement.isInpainting}
+                  setIsInpainting={refinement.setIsInpainting}
                 />
               </div>
+
+              <div className="workspace-right-column">
+                <div className="workspace-viewport-wrapper">
+                  <CanvasViewport
+                    imageUrl={refinement.generationResult?.master_image_url || moodboard.activeBaseline?.image_url || null}
+                    beforeImageUrl={refinement.previousGenerationResult?.master_image_url || moodboard.activeBaseline?.image_url || null}
+                    baselineImageUrl={moodboard.activeBaseline?.image_url || null}
+                    beforeLabel={
+                      refinement.previousGenerationResult &&
+                        refinement.previousGenerationResult.generation_id !== moodboard.activeBaseline?.id
+                        ? 'Before Inpaint'
+                        : 'Baseline'
+                    }
+                    afterLabel="Inpainted Output"
+                    isGenerating={refinement.isInpainting}
+                    isInpaintMode={true}
+                    generationResult={refinement.generationResult}
+                    previousGenerationResult={refinement.previousGenerationResult}
+                    activeSeed={refinement.activeSeed}
+                    seedMode={refinement.seedMode}
+                    onOpenHistory={() => historyHook.setIsHistoryOpen(true)}
+                    canGenerate={false}
+                    mode="canvas"
+                  />
+                </div>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="workspace-grid">
+              <div className="workspace-left-column">
+                <RefinementChat
+                  conversationMessages={refinement.conversationMessages}
+                  onSendRefinement={refinement.handleSendRefinement}
+                  isGenerating={refinement.isGenerating}
+                  activeSeed={refinement.activeSeed}
+                  seedMode={refinement.seedMode}
+                  onSeedModeChange={refinement.setSeedMode}
+                  onSeedChange={refinement.setActiveSeed}
+                  activeGenerationId={refinement.generationResult?.generation_id}
+                  onSelectMessage={refinement.handleSelectMessage}
+                  onToggleWardrobe={() => setCurrentStep(3)}
+                  isWardrobeOpen={false}
+                  assignmentCount={wardrobe.wardrobeAssignments.length + propsHook.propAssignments.length}
+                  sceneLabel={sceneSubMode === 'props' ? 'Props' : 'Wardrobe'}
+                />
+              </div>
+
+              <div className="workspace-right-column">
+                <div className="workspace-viewport-wrapper">
+                  <CanvasViewport
+                    imageUrl={refinement.generationResult?.master_image_url || moodboard.activeBaseline?.image_url || null}
+                    beforeImageUrl={refinement.previousGenerationResult?.master_image_url || moodboard.activeBaseline?.image_url || null}
+                    baselineImageUrl={moodboard.activeBaseline?.image_url || null}
+                    beforeLabel={
+                      refinement.previousGenerationResult &&
+                        refinement.previousGenerationResult.generation_id !== moodboard.activeBaseline?.id
+                        ? 'Previous Iteration'
+                        : 'Baseline'
+                    }
+                    afterLabel="Refined Output"
+                    isGenerating={refinement.isGenerating}
+                    generationResult={refinement.generationResult}
+                    previousGenerationResult={refinement.previousGenerationResult}
+                    activeSeed={refinement.activeSeed}
+                    seedMode={refinement.seedMode}
+                    onOpenHistory={() => historyHook.setIsHistoryOpen(true)}
+                    canGenerate={false}
+                    mode="refinement"
+                    wardrobeAssignments={wardrobe.wardrobeAssignments}
+                    onDropGarment={wardrobe.handleAddWardrobeAssignment}
+                    onRemovePin={wardrobe.handleRemoveWardrobeAssignment}
+                    onUpdatePinPosition={wardrobe.handleUpdateWardrobePosition}
+                    isWardrobeMode={false}
+                  />
+                </div>
+              </div>
+            </div>
+          )
         )}
 
         {currentStep === 3 && (
-          <div className="workspace-grid inpaint-workspace-grid">
-            <div className="workspace-left-column">
-              <CanvasStudio
-                imageUrl={refinement.generationResult?.master_image_url || moodboard.activeBaseline?.image_url || null}
-                generationId={refinement.generationResult?.generation_id || moodboard.activeBaseline?.id}
-                activeSeed={refinement.activeSeed}
-                aspectRatio={activeAspectRatio}
-                onEditComplete={refinement.handleInpaintComplete}
-                onSwitchToGraph={() => setCurrentStep(2)}
-                onOpenHistory={() => historyHook.setIsHistoryOpen(true)}
-                isInpainting={refinement.isInpainting}
-                setIsInpainting={refinement.setIsInpainting}
-              />
-            </div>
-
-            <div className="workspace-right-column">
-              <div className="workspace-viewport-wrapper">
-                <CanvasViewport
-                  imageUrl={refinement.generationResult?.master_image_url || moodboard.activeBaseline?.image_url || null}
-                  beforeImageUrl={refinement.previousGenerationResult?.master_image_url || moodboard.activeBaseline?.image_url || null}
-                  baselineImageUrl={moodboard.activeBaseline?.image_url || null}
-                  beforeLabel={
-                    refinement.previousGenerationResult &&
-                    refinement.previousGenerationResult.generation_id !== moodboard.activeBaseline?.id
-                      ? 'Before Inpaint'
-                      : 'Baseline'
-                  }
-                  afterLabel="Inpainted Output"
-                  isGenerating={refinement.isInpainting}
-                  isInpaintMode={true}
-                  generationResult={refinement.generationResult}
-                  previousGenerationResult={refinement.previousGenerationResult}
-                  activeSeed={refinement.activeSeed}
-                  seedMode={refinement.seedMode}
-                  onOpenHistory={() => historyHook.setIsHistoryOpen(true)}
-                  canGenerate={false}
-                  mode="canvas"
-                />
-              </div>
-            </div>
-          </div>
-        )}
-
-        {currentStep === 4 && (
           <div className="workspace-grid wardrobe-workspace-grid">
             <div className="workspace-left-column">
               {sceneSubMode === 'props' ? (
@@ -685,7 +686,7 @@ export default function App() {
                   baselineImageUrl={moodboard.activeBaseline?.image_url || null}
                   beforeLabel={
                     refinement.previousGenerationResult &&
-                    refinement.previousGenerationResult.generation_id !== moodboard.activeBaseline?.id
+                      refinement.previousGenerationResult.generation_id !== moodboard.activeBaseline?.id
                       ? 'Previous Output'
                       : 'Baseline'
                   }
@@ -714,7 +715,7 @@ export default function App() {
           </div>
         )}
 
-        {currentStep === 5 && (
+        {currentStep === 4 && (
           <ExportStudio
             generationResult={refinement.generationResult}
             activeBaseline={moodboard.activeBaseline}

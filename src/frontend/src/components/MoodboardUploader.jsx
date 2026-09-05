@@ -310,7 +310,7 @@ export default function MoodboardUploader({
         </div>
 
         <p className="direct-upload-description">
-          Already have a starting image or high-res photo? Upload it here to skip moodboard direction and jump straight into <strong>Step 2 (Refinement Studio)</strong>.
+          Already have a starting image or high-res photo? Upload it here to skip moodboard direction and jump straight into <strong>Step 2 (Adjust Studio)</strong>.
         </p>
 
         {!directFile ? (
