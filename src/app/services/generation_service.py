@@ -35,6 +35,7 @@ from app.utils.image_utils import (
 from app.utils.prompt_loader import (
     DEFAULT_NEGATIVE_PROMPT,
     WARDROBE_COMPOSITION_SYSTEM_PROMPT,
+    PROP_COMPOSITION_SYSTEM_PROMPT,
 )
 
 logger = get_logger("generation_service")
@@ -43,7 +44,7 @@ logger = get_logger("generation_service")
 class GenerationService:
     """
     Synchronous generation orchestration service for baseline candidates, seed-locked fine-tuning,
-    conversational refinement, targeted inpainting, and wardrobe composition.
+    conversational refinement, targeted inpainting, wardrobe composition, and prop composition.
     Composes ImageGenerator, StorageService, PromptCompiler, FirestoreManager, and TelemetryLogger.
     """
 
@@ -57,6 +58,7 @@ class GenerationService:
         inpaint_model_name: str = "gemini-3-pro-image",
         audit_path: Optional[Path] = None,
         wardrobe_service: Optional[Any] = None,
+        prop_service: Optional[Any] = None,
         vision_service: Optional[Any] = None,
         client: Optional[genai.Client] = None,
         image_generator: Optional[ImageGenerator] = None,
@@ -70,6 +72,7 @@ class GenerationService:
         self.model_name = model_name
         self.inpaint_model_name = inpaint_model_name
         self.wardrobe_service = wardrobe_service
+        self.prop_service = prop_service
         self.vision_service = vision_service
         self.client = client or genai.Client(api_key=self.api_key)
         self.telemetry = telemetry or TelemetryLogger(
@@ -1221,6 +1224,287 @@ class GenerationService:
             "accumulated_tokens": acc_tokens,
             "cost_breakdown": cost_breakdown,
         }
+
+    def compose_props(
+        self,
+        parent_id: str,
+        assignments: List[Union[Dict[str, Any], Any]],
+        aspect_ratio: Optional[str] = None,
+        model_name: Optional[str] = None,
+        seed: Optional[int] = None,
+        negative_prompt: Optional[str] = None,
+        conversation_id: Optional[str] = None,
+        custom_instruction: Optional[str] = None,
+        imagen_model: Optional[str] = None,
+        vision_model: Optional[str] = None,
+        user_id: str = "local_dev_user",
+    ) -> Dict[str, Any]:
+        """
+        Multimodal prop composition inserting designated objects into the scene with
+        full physical integration (contact surfaces, perspective lines, contact shadows, depth occlusion).
+        """
+        active_model = imagen_model or model_name or self.model_name
+        req_id = f"compose_prop_{uuid.uuid4().hex[:8]}"
+        created_at = datetime.now(timezone.utc).isoformat()
+        child_id = f"gen_prop_{uuid.uuid4().hex[:8]}"
+
+        parent_gen = self.db.get_generation(parent_id)
+        if not parent_gen:
+            raise ValueError(f"Parent generation '{parent_id}' not found")
+
+        parent_path = parent_gen.get("master_image_path")
+        parent_image_bytes = self._load_image_bytes(parent_path)
+
+        eff_aspect = aspect_ratio or parent_gen.get("aspect_ratio", "2:3")
+        eff_seed = seed if seed is not None else parent_gen.get("seed", 4289102)
+
+        normalized_assignments: List[Dict[str, Any]] = []
+        for asgn in assignments:
+            if hasattr(asgn, "model_dump"):
+                normalized_assignments.append(asgn.model_dump())
+            elif hasattr(asgn, "dict"):
+                normalized_assignments.append(asgn.dict())
+            elif isinstance(asgn, dict):
+                normalized_assignments.append(dict(asgn))
+            else:
+                normalized_assignments.append(getattr(asgn, "__dict__", {}))
+
+        grounded_data = {}
+        if self.prop_service is not None:
+            try:
+                grounded_data = self.prop_service.ground_prop_boxes(
+                    generation_id=parent_id,
+                    assignments=normalized_assignments,
+                    vision_model=vision_model,
+                    user_id=user_id,
+                )
+            except Exception as e:
+                logger.warning(f"Could not run prop scene grounding: {e}")
+
+        grounded_props_list = grounded_data.get("grounded_props", [])
+        grounded_by_pin = {g["pin_number"]: g for g in grounded_props_list if "pin_number" in g}
+        guardrail_text = (
+            grounded_data.get("scene_preservation_guardrail")
+            or grounded_data.get("scene_guardrails")
+            or "Strictly preserve all human subjects, hairstyles, clothing, and surrounding architecture exactly as shown in the reference image without any alterations."
+        )
+
+        prop_references: List[bytes] = []
+        assignment_prompts: List[str] = []
+
+        for asgn in normalized_assignments:
+            item_id = asgn.get("prop_item_id")
+            pin_num = asgn.get("pin_number", 1)
+            item = self.db.get_prop_item(item_id) if item_id else None
+
+            if item:
+                crop_path = item.get("upscaled_image_path") or item.get("cropped_image_path")
+                if crop_path:
+                    try:
+                        prop_references.append(self._load_image_bytes(crop_path))
+                    except Exception as e:
+                        logger.warning(f"Could not load prop crop {crop_path}: {e}")
+
+                g_info = grounded_by_pin.get(pin_num, {})
+                host_surface = g_info.get("host_surface", "designated scene location")
+                spatial_anc = g_info.get("spatial_anchor", "target quadrant")
+                rel_scale = g_info.get("relative_scale", f"scale preset: {asgn.get('scale_preset', 'medium')}")
+                lighting_shadow = g_info.get("lighting_and_shadow", "harmonize with scene lighting and cast contact shadows")
+                depth_occ = g_info.get("depth_occlusion", "natural spatial depth layering")
+
+                label = item.get("label", "prop object")
+                category = item.get("category", "decor")
+                asgn_text = f"Prop #{pin_num} ({spatial_anc}): Place \"{label}\" ({category}) {host_surface}.\n  - SCALE: {rel_scale}\n  - LIGHTING & CONTACT SHADOW: {lighting_shadow}\n  - DEPTH OCCLUSION: {depth_occ}"
+
+                extracted_details = item.get("extracted_details") or {}
+                if extracted_details:
+                    details_parts = []
+                    if extracted_details.get("materials"):
+                        mats = extracted_details["materials"]
+                        m_str = ", ".join(mats) if isinstance(mats, list) else str(mats)
+                        details_parts.append(f"MATERIALS: {m_str}")
+                    if extracted_details.get("surface_finish"):
+                        details_parts.append(f"SURFACE FINISH: {extracted_details['surface_finish']}")
+                    if extracted_details.get("primary_color"):
+                        details_parts.append(f"COLOR: {extracted_details['primary_color']}")
+                    if extracted_details.get("geometry_and_form"):
+                        details_parts.append(f"GEOMETRY: {extracted_details['geometry_and_form']}")
+                    if details_parts:
+                        asgn_text += f"\n  - MATERIAL FIDELITY: {'; '.join(details_parts)}"
+
+                user_instruction = asgn.get("custom_instruction")
+                if user_instruction and user_instruction.strip():
+                    asgn_text += f"\n  - SPECIFIC PLACEMENT NOTE: {user_instruction.strip()}"
+
+                assignment_prompts.append(asgn_text)
+
+        # Trace lineage depth for progressive turn numbering and chromatic continuity
+        lineage_depth, _ = self._trace_lineage(parent_gen)
+
+        composition_parts = [
+            PROP_COMPOSITION_SYSTEM_PROMPT,
+            f"SCENE & SUBJECT PRESERVATION GUARDRAIL:\n{guardrail_text}",
+        ]
+        if lineage_depth >= 1:
+            turn_num = lineage_depth + 1
+            composition_parts.append(
+                f"PROGRESSIVE SCENE TURN #{turn_num} CHROMATIC ANCHOR:\n"
+                "- Maintain absolute color temperature, neutral white balance, and authentic lighting matching the original scene.\n"
+                "- Do NOT accumulate warm ambient color drift or magenta casts from prior turns. Keep all neutral whites, room architecture, and un-targeted elements strictly aligned with the base scene."
+            )
+
+        all_refs = [parent_image_bytes] + prop_references
+        composition_parts.append("ASSIGNED PROPS INTEGRATION:\n" + "\n\n".join(assignment_prompts))
+
+        if custom_instruction and custom_instruction.strip():
+            composition_parts.append(f"ADDITIONAL USER SCENE DIRECTIVES:\n{custom_instruction.strip()}")
+
+        composition_prompt = "\n\n".join(composition_parts)
+
+        base_neg_prompt = negative_prompt or parent_gen.get("negative_prompt") or DEFAULT_NEGATIVE_PROMPT
+        extra_neg = ["magenta color cast", "warm color drift", "reddish tinting", "floating objects", "detached shadows", "ungrounded items", "distorted proportions"]
+        comp_neg_prompt = f"{base_neg_prompt}, {', '.join(extra_neg)}"
+
+        image_bytes_out = self._call_multi_image_model(
+            contents=all_refs + [composition_prompt],
+            aspect_ratio=eff_aspect,
+            model_name=active_model,
+            seed=eff_seed,
+            negative_prompt=comp_neg_prompt,
+            audit_request_id=req_id,
+        )
+
+        filename = f"{child_id}_master.png"
+        master_path, width, height = self._save_generation_image(user_id, filename, image_bytes_out, eff_aspect)
+
+        metrics = self.image_generator.last_call_metrics
+        image_call_cost = float(metrics.get("cost_usd", 0.0))
+        image_call_tokens = int(metrics.get("total_token_count", 0))
+
+        grounding_cost = float(grounded_data.get("cost_usd") or 0.0)
+        grounding_toks_raw = grounded_data.get("tokens")
+        grounding_tokens = int(
+            grounding_toks_raw.get("total_token_count", 0)
+            if isinstance(grounding_toks_raw, dict)
+            else (grounding_toks_raw or 0)
+        )
+
+        turn_cost = round(image_call_cost + grounding_cost, 6)
+        turn_tokens = image_call_tokens + grounding_tokens
+
+        parent_acc_cost = float(parent_gen.get("accumulated_cost_usd", 0.0)) if parent_gen else 0.0
+        parent_acc_tokens = int(parent_gen.get("accumulated_tokens", 0)) if parent_gen else 0
+        acc_cost = round(parent_acc_cost + turn_cost, 6)
+        acc_tokens = parent_acc_tokens + turn_tokens
+
+        cost_breakdown = {
+            "image_model_cost_usd": image_call_cost,
+            "image_model_tokens": image_call_tokens,
+            "grounding_cost_usd": grounding_cost,
+            "grounding_tokens": grounding_tokens,
+            "turn_cost_usd": turn_cost,
+            "turn_tokens": turn_tokens,
+            "parent_accumulated_cost_usd": parent_acc_cost,
+            "parent_accumulated_tokens": parent_acc_tokens,
+            "accumulated_cost_usd": acc_cost,
+            "accumulated_tokens": acc_tokens,
+            "call_metrics": metrics.get("cost_breakdown", {}),
+        }
+
+        schema_data = {
+            "prop_assignments": normalized_assignments,
+            "grounded_props": grounded_props_list,
+            "prop_composition": True,
+            "cost_breakdown": cost_breakdown,
+        }
+        if custom_instruction and custom_instruction.strip():
+            schema_data["custom_instruction"] = custom_instruction.strip()
+        if conversation_id:
+            schema_data["conversation_id"] = conversation_id
+
+        record = {
+            "id": child_id,
+            "parent_id": parent_id,
+            "moodboard_id": parent_gen.get("moodboard_id"),
+            "conversation_id": conversation_id,
+            "is_baseline": False,
+            "created_at": created_at,
+            "schema_json": schema_data,
+            "compiled_prompt": composition_prompt,
+            "negative_prompt": comp_neg_prompt,
+            "seed": eff_seed,
+            "master_image_path": master_path,
+            "aspect_ratio": eff_aspect,
+            "resolution_width": width,
+            "resolution_height": height,
+            "model_name": active_model,
+            "cost_usd": turn_cost,
+            "tokens": turn_tokens,
+            "accumulated_cost_usd": acc_cost,
+            "accumulated_tokens": acc_tokens,
+        }
+        self.db.create_generation(user_id=user_id, gen_data=record)
+
+        for asgn in normalized_assignments:
+            item_id = asgn.get("prop_item_id")
+            pin_num = asgn.get("pin_number", 1)
+            bbox = asgn.get("bounding_box") or {"ymin": 0.4, "xmin": 0.4, "ymax": 0.6, "xmax": 0.6}
+            scale_preset = asgn.get("scale_preset", "medium")
+            custom_instruction = asgn.get("custom_instruction")
+            target_desc = asgn.get("target_description") or ""
+
+            assign_data = {
+                "id": f"pa_{uuid.uuid4().hex[:8]}",
+                "generation_id": child_id,
+                "prop_item_id": item_id,
+                "pin_number": pin_num,
+                "bounding_box": bbox,
+                "scale_preset": scale_preset,
+                "target_description": target_desc,
+                "custom_instruction": custom_instruction,
+            }
+            self.db.create_prop_assignment(user_id=user_id, assignment_data=assign_data)
+
+        try:
+            self.telemetry.record_event(
+                event="prop_composition_success",
+                request_id=req_id,
+                component="props",
+                generation_id=child_id,
+                model=active_model,
+                cost_usd=turn_cost,
+                tokens=turn_tokens,
+                cost_breakdown=cost_breakdown,
+                outputs={"master_image_path": master_path, "generation_id": child_id},
+            )
+        except Exception as e:
+            logger.warning(f"Could not record prop composition telemetry: {e}")
+
+        return {
+            "generation_id": child_id,
+            "parent_id": parent_id,
+            "conversation_id": conversation_id,
+            "seed": eff_seed,
+            "compiled_prompt": composition_prompt,
+            "negative_prompt": comp_neg_prompt,
+            "image_url": f"/api/images/{master_path}",
+            "created_at": created_at,
+            "aspect_ratio": eff_aspect,
+            "resolution": {"width": width, "height": height},
+            "assignments": [
+                {
+                    **asgn,
+                    "grounded_surface": grounded_by_pin.get(asgn.get("pin_number", 1), {}).get("host_surface", "Scene Surface"),
+                }
+                for asgn in normalized_assignments
+            ],
+            "cost_usd": turn_cost,
+            "tokens": turn_tokens,
+            "accumulated_cost_usd": acc_cost,
+            "accumulated_tokens": acc_tokens,
+            "cost_breakdown": cost_breakdown,
+        }
+
 
     def generate_image(
         self,

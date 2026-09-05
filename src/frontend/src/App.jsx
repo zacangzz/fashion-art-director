@@ -18,6 +18,7 @@ import PromptReviewSection from './components/PromptReviewSection';
 import BaselineSelector, { getBaseResolution } from './components/BaselineSelector';
 import RefinementChat from './components/RefinementChat';
 import WardrobePanel from './components/WardrobePanel';
+import PropsPanel from './components/PropsPanel';
 import CanvasStudio from './components/CanvasStudio';
 import CanvasViewport from './components/CanvasViewport';
 import ExportStudio from './components/ExportStudio';
@@ -35,12 +36,14 @@ import { useModelConfig } from './hooks/useModelConfig';
 import { useMoodboardAnalysis } from './hooks/useMoodboardAnalysis';
 import { useRefinementStudio } from './hooks/useRefinementStudio';
 import { useWardrobeComposer } from './hooks/useWardrobeComposer';
+import { usePropComposer } from './hooks/usePropComposer';
 import { useLineageHistory } from './hooks/useLineageHistory';
 
 export default function App() {
   const { currentUser, userProfile, loading, signOutUser } = useAuth();
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
+  const [sceneSubMode, setSceneSubMode] = useState('wardrobe'); // 'wardrobe' | 'props'
   const [errorMessage, setErrorMessage] = useState(null);
   const [activeAspectRatio, setActiveAspectRatio] = useState('1:1');
 
@@ -186,6 +189,26 @@ export default function App() {
     onHistoryRefresh: () => historyHook.loadHistoryList(),
   });
 
+  // 6. Prop Composition Hook
+  const propsHook = usePropComposer({
+    visionModel,
+    imagenModel,
+    aspectRatio: activeAspectRatio,
+    onAspectRatioChange: setActiveAspectRatio,
+    generationResult: refinement.generationResult,
+    activeBaseline: moodboard.activeBaseline,
+    activeSeed: refinement.activeSeed,
+    seedMode: refinement.seedMode,
+    conversationId: refinement.conversationId,
+    setPreviousGenerationResult: refinement.setPreviousGenerationResult,
+    setGenerationResult: refinement.setGenerationResult,
+    setActiveSeed: refinement.setActiveSeed,
+    setConversationId: refinement.setConversationId,
+    setConversationMessages: refinement.setConversationMessages,
+    onError: setErrorMessage,
+    onHistoryRefresh: () => historyHook.loadHistoryList(),
+  });
+
   // Load session data on approval
   useEffect(() => {
     if (currentUser && userProfile?.status === 'approved') {
@@ -287,7 +310,7 @@ export default function App() {
             disabled={!hasActiveImage}
           >
             <span className="step-num">04</span>
-            <span>Wardrobe</span>
+            <span>Scene</span>
           </button>
 
           <button
@@ -437,10 +460,13 @@ export default function App() {
         <WorkflowToolbar
           aspectRatio={activeAspectRatio}
           onAspectRatioChange={setActiveAspectRatio}
+          showSceneSubMode={currentStep === 4}
+          sceneSubMode={sceneSubMode}
+          onSceneSubModeChange={setSceneSubMode}
           activeSeed={refinement.activeSeed}
           seedMode={refinement.seedMode}
           onSeedModeChange={refinement.setSeedMode}
-          disabled={refinement.isGenerating || moodboard.isGeneratingBaselines || moodboard.isAnalyzing || wardrobe.isComposingWardrobe}
+          disabled={refinement.isGenerating || moodboard.isGeneratingBaselines || moodboard.isAnalyzing || wardrobe.isComposingWardrobe || propsHook.isComposingProps}
         />
 
         {currentStep === 1 && (
@@ -536,7 +562,8 @@ export default function App() {
                 onSelectMessage={refinement.handleSelectMessage}
                 onToggleWardrobe={() => setCurrentStep(4)}
                 isWardrobeOpen={false}
-                assignmentCount={wardrobe.wardrobeAssignments.length}
+                assignmentCount={wardrobe.wardrobeAssignments.length + propsHook.propAssignments.length}
+                sceneLabel={sceneSubMode === 'props' ? 'Props' : 'Wardrobe'}
               />
             </div>
 
@@ -619,18 +646,35 @@ export default function App() {
         {currentStep === 4 && (
           <div className="workspace-grid wardrobe-workspace-grid">
             <div className="workspace-left-column">
-              <WardrobePanel
-                isOpen={true}
-                onClose={() => setCurrentStep(2)}
-                assignments={wardrobe.wardrobeAssignments}
-                onAddAssignment={wardrobe.handleAddWardrobeAssignment}
-                onRemoveAssignment={wardrobe.handleRemoveWardrobeAssignment}
-                onClearAssignments={wardrobe.handleClearWardrobeAssignments}
-                onCompose={wardrobe.handleComposeWardrobe}
-                isComposing={wardrobe.isComposingWardrobe}
-                activeGenerationId={refinement.generationResult?.generation_id || moodboard.activeBaseline?.id}
-                visionModel={visionModel}
-              />
+              {sceneSubMode === 'props' ? (
+                <PropsPanel
+                  isOpen={true}
+                  onClose={() => setCurrentStep(2)}
+                  assignments={propsHook.propAssignments}
+                  onAddAssignment={propsHook.handleAddPropAssignment}
+                  onRemoveAssignment={propsHook.handleRemovePropAssignment}
+                  onClearAssignments={propsHook.handleClearPropAssignments}
+                  onUpdatePropScale={propsHook.handleUpdatePropScale}
+                  onUpdatePropNotes={propsHook.handleUpdatePropNotes}
+                  onCompose={propsHook.handleComposeProps}
+                  isComposing={propsHook.isComposingProps}
+                  activeGenerationId={refinement.generationResult?.generation_id || moodboard.activeBaseline?.id}
+                  visionModel={visionModel}
+                />
+              ) : (
+                <WardrobePanel
+                  isOpen={true}
+                  onClose={() => setCurrentStep(2)}
+                  assignments={wardrobe.wardrobeAssignments}
+                  onAddAssignment={wardrobe.handleAddWardrobeAssignment}
+                  onRemoveAssignment={wardrobe.handleRemoveWardrobeAssignment}
+                  onClearAssignments={wardrobe.handleClearWardrobeAssignments}
+                  onCompose={wardrobe.handleComposeWardrobe}
+                  isComposing={wardrobe.isComposingWardrobe}
+                  activeGenerationId={refinement.generationResult?.generation_id || moodboard.activeBaseline?.id}
+                  visionModel={visionModel}
+                />
+              )}
             </div>
 
             <div className="workspace-right-column">
@@ -645,20 +689,25 @@ export default function App() {
                       ? 'Previous Output'
                       : 'Baseline'
                   }
-                  afterLabel="Wardrobe Output"
-                  isGenerating={wardrobe.isComposingWardrobe}
+                  afterLabel={sceneSubMode === 'props' ? 'Prop Output' : 'Wardrobe Output'}
+                  isGenerating={sceneSubMode === 'props' ? propsHook.isComposingProps : wardrobe.isComposingWardrobe}
                   generationResult={refinement.generationResult}
                   previousGenerationResult={refinement.previousGenerationResult}
                   activeSeed={refinement.activeSeed}
                   seedMode={refinement.seedMode}
                   onOpenHistory={() => historyHook.setIsHistoryOpen(true)}
                   canGenerate={false}
-                  mode="wardrobe"
+                  mode={sceneSubMode === 'props' ? 'props' : 'wardrobe'}
                   wardrobeAssignments={wardrobe.wardrobeAssignments}
                   onDropGarment={wardrobe.handleAddWardrobeAssignment}
                   onRemovePin={wardrobe.handleRemoveWardrobeAssignment}
                   onUpdatePinPosition={wardrobe.handleUpdateWardrobePosition}
-                  isWardrobeMode={true}
+                  isWardrobeMode={sceneSubMode === 'wardrobe'}
+                  propAssignments={propsHook.propAssignments}
+                  onDropProp={propsHook.handleAddPropAssignment}
+                  onUpdatePropBox={propsHook.handleUpdatePropBox}
+                  onRemovePropAssignment={propsHook.handleRemovePropAssignment}
+                  isPropsMode={sceneSubMode === 'props'}
                 />
               </div>
             </div>

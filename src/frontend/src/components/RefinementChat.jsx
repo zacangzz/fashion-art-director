@@ -40,6 +40,7 @@ export default function RefinementChat({
   onToggleWardrobe,
   isWardrobeOpen = false,
   assignmentCount = 0,
+  sceneLabel = 'Scene',
 }) {
   const [promptInput, setPromptInput] = useState('');
   const [showTuningTray, setShowTuningTray] = useState(true);
@@ -181,17 +182,17 @@ export default function RefinementChat({
               <Upload size={13} />
             </button>
 
-            {/* Wardrobe Studio Toggle */}
+            {/* Scene Studio Toggle */}
             <button
               type="button"
               className={`wardrobe-toggle-btn ${isWardrobeOpen ? 'active' : ''}`}
               onClick={onToggleWardrobe}
-              title="Open Wardrobe Studio to swap clothes with multi-image references"
+              title="Open Scene Studio to adjust wardrobe or place props"
               aria-pressed={isWardrobeOpen}
-              aria-label="Toggle Wardrobe Studio Panel"
+              aria-label="Toggle Scene Studio Panel"
             >
               <Shirt size={13} />
-              <span>Wardrobe</span>
+              <span>{sceneLabel}</span>
               {assignmentCount > 0 && <span className="wardrobe-pin-badge">{assignmentCount}</span>}
             </button>
           </div>
@@ -226,6 +227,8 @@ export default function RefinementChat({
                       ? 'Active Inpaint Anchor'
                       : activeMsg.is_wardrobe
                       ? 'Active Wardrobe Anchor'
+                      : activeMsg.is_prop
+                      ? 'Active Prop Anchor'
                       : activeMsg.background_reference_id
                       ? 'Active Background Harmonization'
                       : 'Active Refinement Anchor'}
@@ -280,6 +283,8 @@ export default function RefinementChat({
                         ? 'Inpaint Edit'
                         : msg.is_wardrobe
                         ? 'Wardrobe Swap'
+                        : msg.is_prop
+                        ? 'Prop Placement'
                         : `Iteration ${index}`}
                     </span>
 

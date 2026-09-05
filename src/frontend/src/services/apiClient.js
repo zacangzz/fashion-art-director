@@ -686,6 +686,118 @@ export async function composeWardrobe(payload) {
 }
 
 /**
+ * Uploads a multi-prop catalog sheet for auto-segmentation.
+ * @param {File} file
+ * @param {string} [visionModel]
+ * @returns {Promise<{items: Array}>}
+ */
+export async function uploadPropSheet(file, visionModel = null) {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (visionModel) {
+    formData.append('vision_model', visionModel);
+  }
+
+  const response = await authFetch('/api/props/upload-sheet', {
+    method: 'POST',
+    body: formData,
+  });
+
+  return handleApiResponse(response, 'Prop catalog segmentation failed');
+}
+
+/**
+ * Directly uploads a single isolated prop image.
+ * @param {File} file
+ * @param {string} [category]
+ * @param {string} [visionModel]
+ * @returns {Promise<{items: Array}>}
+ */
+export async function uploadSingleProp(file, category = 'decor', visionModel = null) {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (category) {
+    formData.append('category', category);
+  }
+  if (visionModel) {
+    formData.append('vision_model', visionModel);
+  }
+
+  const response = await authFetch('/api/props/upload-single', {
+    method: 'POST',
+    body: formData,
+  });
+
+  return handleApiResponse(response, 'Single prop upload failed');
+}
+
+/**
+ * Fetches all saved prop items for user.
+ * @returns {Promise<{items: Array}>}
+ */
+export async function fetchPropItems() {
+  const response = await authFetch('/api/props/items');
+  return handleApiResponse(response, 'Failed to fetch prop items');
+}
+
+/**
+ * Deletes a prop item by ID.
+ * @param {string} id
+ * @returns {Promise<{status: string, id: string}>}
+ */
+export async function deletePropItem(id) {
+  const response = await authFetch(`/api/props/items/${id}`, {
+    method: 'DELETE',
+  });
+  return handleApiResponse(response, 'Failed to delete prop item');
+}
+
+/**
+ * Deletes all prop items for the current user.
+ * @returns {Promise<{status: string, deleted_count: number}>}
+ */
+export async function deleteAllPropItems() {
+  const response = await authFetch('/api/props/items', {
+    method: 'DELETE',
+  });
+  return handleApiResponse(response, 'Failed to clear prop items');
+}
+
+/**
+ * Upscales a prop item to 4K definition.
+ * @param {string} itemId
+ * @param {Object} [options]
+ * @returns {Promise<Object>}
+ */
+export async function upscaleProp(itemId, { imagenModel } = {}) {
+  const response = await authFetch(`/api/props/items/${encodeURIComponent(itemId)}/upscale`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ imagen_model: imagenModel }),
+  });
+  return handleApiResponse(response, 'Failed to upscale prop');
+}
+
+/**
+ * Sends a multi-image prop composition request with spatial scene grounding.
+ * @param {Object} payload { parent_id, assignments, seed, seed_mode, aspect_ratio, negative_prompt, conversation_id, custom_instruction }
+ * @returns {Promise<Object>}
+ */
+export async function composeProps(payload) {
+  const response = await authFetch('/api/props/compose', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  return handleApiResponse(response, 'Prop composition failed');
+}
+
+/**
  * Fetches structured audit events with optional filtering.
  * @param {Object} [params]
  * @returns {Promise<{total: number, limit: number, offset: number, events: Array}>}

@@ -654,3 +654,187 @@ class UpscaleGarmentResponse(BaseModel):
     cost_sgd: float = 0.0
     exchange_rate: Optional[float] = None
     tokens: int = 0
+
+
+# ==============================================================================
+# Prop Composition Models
+# ==============================================================================
+
+PropCategory = Literal[
+    "furniture",
+    "decor",
+    "tableware",
+    "handheld",
+    "electronics",
+    "lighting",
+    "plants",
+    "architectural",
+    "other",
+]
+
+
+class DetectedProp(BaseModel):
+    label: str = Field(description="Descriptive name or title of the prop object")
+    category: PropCategory = Field(
+        default="decor", description="Prop classification category"
+    )
+    box_2d: List[int] = Field(
+        description="Bounding box [ymin, xmin, ymax, xmax] as integers on a 0 to 1000 scale"
+    )
+
+
+class PropSegmentationResult(BaseModel):
+    items: List[DetectedProp] = Field(
+        default_factory=list,
+        description="List of detected standalone props, furniture, or decor items",
+    )
+
+
+class PropExtractedDetails(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    prop_type: Optional[str] = Field(default=None, description="Specific prop object type e.g. Ceramic Vase, Eames Lounge Chair, Vintage Camera")
+    materials: List[str] = Field(default_factory=list, description="Primary materials e.g. Walnut wood, Brushed brass, Glazed ceramic, Smoked glass")
+    primary_color: Optional[str] = Field(default=None, description="Dominant primary hue")
+    secondary_colors: List[str] = Field(default_factory=list, description="Secondary accent hues or trim colors")
+    surface_finish: Optional[str] = Field(default=None, description="Finish e.g. Matte, High-gloss, Patina, Textured weave, Polished")
+    textures: Optional[str] = Field(default=None, description="Surface texture details")
+    has_text_or_logo: bool = Field(default=False, description="Whether visible branding, letters, or numbers appear on the prop")
+    exact_text_content: List[str] = Field(default_factory=list, description="Exact transcription of visible branding or text")
+    geometry_and_form: Optional[str] = Field(default=None, description="Overall 3D geometry e.g. Cylindrical, Geometric angular, Sculptural curved")
+    estimated_scale_hint: Optional[str] = Field(default=None, description="Estimated physical size hint e.g. Small tabletop accent ~20cm, Large floor piece ~1.2m")
+    style_era: Optional[str] = Field(default=None, description="Aesthetic style e.g. Mid-century modern, Brutalist, Art Deco, Contemporary minimal")
+
+
+class PropCard(BaseModel):
+    id: str
+    user_id: Optional[str] = None
+    label: str
+    category: PropCategory = "decor"
+    image_url: str = ""
+    upscaled_image_url: Optional[str] = None
+    source_image_url: Optional[str] = None
+    cropped_image_path: Optional[str] = None
+    source_image_path: Optional[str] = None
+    upscaled_image_path: Optional[str] = None
+    bbox: Optional[List[float]] = None
+    bbox_json: Optional[Any] = None
+    extracted_details: Optional[Union[PropExtractedDetails, Dict[str, Any]]] = None
+    extracted_details_json: Optional[Any] = None
+    created_at: Optional[str] = None
+    upscale_status: Optional[str] = "pending"
+    is_upscaled: bool = False
+    cost_usd: float = 0.0
+    cost_sgd: float = 0.0
+    exchange_rate: Optional[float] = None
+    tokens: int = 0
+
+    @model_validator(mode="before")
+    @classmethod
+    def populate_prop_image_urls(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            item_id = data.get("id", "")
+            if not data.get("image_url"):
+                crop = data.get("cropped_image_path")
+                if crop:
+                    data["image_url"] = (
+                        crop
+                        if (crop.startswith("http://") or crop.startswith("https://") or crop.startswith("/api/"))
+                        else f"/api/images/{crop.lstrip('/')}"
+                    )
+                elif item_id:
+                    data["image_url"] = f"/api/props/items/{item_id}/image"
+                else:
+                    data["image_url"] = ""
+
+            if not data.get("upscaled_image_url") and data.get("upscaled_image_path"):
+                up = data.get("upscaled_image_path")
+                data["upscaled_image_url"] = (
+                    up
+                    if (up.startswith("http://") or up.startswith("https://") or up.startswith("/api/"))
+                    else f"/api/images/{up.lstrip('/')}"
+                )
+
+            if not data.get("source_image_url") and data.get("source_image_path"):
+                src = data.get("source_image_path")
+                data["source_image_url"] = (
+                    src
+                    if (src.startswith("http://") or src.startswith("https://") or src.startswith("/api/"))
+                    else f"/api/images/{src.lstrip('/')}"
+                )
+        return data
+
+
+class PropUploadResponse(BaseModel):
+    items: List[PropCard] = Field(default_factory=list)
+
+
+class PropListResponse(BaseModel):
+    items: List[PropCard] = Field(default_factory=list)
+
+
+class UpscalePropRequest(BaseModel):
+    imagen_model: Optional[str] = None
+
+
+class UpscalePropResponse(BaseModel):
+    id: str
+    label: str
+    category: Optional[str] = "decor"
+    upscaled_image_path: Optional[str] = None
+    upscaled_image_url: Optional[str] = None
+    upscale_status: str = "completed"
+    is_upscaled: bool = True
+    cost_usd: float = 0.0
+    cost_sgd: float = 0.0
+    exchange_rate: Optional[float] = None
+    tokens: int = 0
+
+
+class PropPinAssignment(BaseModel):
+    prop_item_id: str
+    pin_number: int = 1
+    bounding_box: Dict[str, float] = Field(
+        default_factory=lambda: {"ymin": 0.4, "xmin": 0.4, "ymax": 0.6, "xmax": 0.6},
+        description="Normalized bounding box {ymin, xmin, ymax, xmax} on 0.0–1.0 scale",
+    )
+    scale_preset: Literal["small", "medium", "large", "custom"] = "medium"
+    target_description: Optional[str] = ""
+    custom_instruction: Optional[str] = None
+    item_label: Optional[str] = None
+    category: Optional[str] = "decor"
+
+
+class PropComposeRequest(BaseModel):
+    parent_id: Optional[str] = None
+    assignments: List[PropPinAssignment] = Field(default_factory=list)
+    seed_mode: str = "locked"
+    seed: int = 4289102
+    aspect_ratio: Optional[str] = None
+    negative_prompt: Optional[str] = None
+    conversation_id: Optional[str] = None
+    custom_instruction: Optional[str] = None
+    imagen_model: Optional[str] = None
+    vision_model: Optional[str] = None
+
+
+class PropComposeResponse(BaseModel):
+    generation_id: str
+    parent_id: Optional[str] = None
+    seed: int
+    compiled_prompt: str
+    negative_prompt: str
+    image_url: str
+    created_at: str
+    aspect_ratio: Optional[str] = "2:3"
+    resolution: Optional[Dict[str, int]] = None
+    conversation_id: Optional[str] = None
+    assignments: List[PropPinAssignment] = Field(default_factory=list)
+    cost_usd: Optional[float] = 0.0
+    cost_sgd: Optional[float] = 0.0
+    exchange_rate: Optional[float] = None
+    tokens: Optional[int] = 0
+    accumulated_cost_usd: Optional[float] = 0.0
+    accumulated_cost_sgd: Optional[float] = 0.0
+    accumulated_tokens: Optional[int] = 0
+

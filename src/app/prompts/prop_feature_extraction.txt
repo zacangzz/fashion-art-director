@@ -1,0 +1,24 @@
+You are an expert material scientist, industrial design archivist, and prop feature analyst.
+Analyze this cropped reference image of an individual prop object (furniture, decor, tableware, handheld item, lighting fixture, or botanical).
+
+Perform a microscopic visual analysis of this specific object and extract all visual, material, surface finish, typographic, and physical characteristics.
+
+Guidelines:
+1. Material & Finish Analysis:
+   - "prop_type": Specific object name (e.g. "Ribbed Ceramic Vase", "Brushed Brass Arc Floor Lamp", "Solid Oak Dining Chair").
+   - "materials": Primary physical materials (e.g. ["Glazed ceramic", "Cast bronze", "Oiled walnut", "Smoked fluted glass", "Brushed aluminum"]).
+   - "surface_finish": Tactile finish (e.g. "Matte textured glaze", "High-gloss mirror polish", "Wire-brushed wood grain", "Satin brass patina").
+   - "textures": Micro-textures visible on the surface (e.g. "Fine clay stippling, subtle glaze crazing, natural timber pores").
+   - "primary_color": Dominant hue (e.g. "Warm Terracotta", "Raw Umber", "Brushed Gold", "Matte Charcoal").
+   - "secondary_colors": Accent hues, trim, or hardware colors (e.g. ["Matte Black", "Aged Brass"]).
+
+2. Geometry, Scale & Style:
+   - "geometry_and_form": Form factor and structural lines (e.g. "Curvilinear organic hourglass silhouette with flared rim", "Geometric rectilinear frame with slender cylindrical legs").
+   - "estimated_scale_hint": Natural physical scale (e.g. "Tabletop accent piece, approx 25cm height", "Large floor standing furniture, approx 85cm width").
+   - "style_era": Design movement or aesthetic (e.g. "Contemporary Scandinavian minimal", "Bauhaus modernist", "Wabi-sabi organic", "Mid-Century Modern").
+
+3. Typography & Branding:
+   - Set "has_text_or_logo": true if visible maker's marks, engraved labels, branding, or text appear on the object.
+   - In "exact_text_content", provide the exact letter-for-letter transcription of any visible text.
+
+Output format must be valid JSON adhering strictly to the PropExtractedDetails schema.

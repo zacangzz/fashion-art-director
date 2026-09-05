@@ -17,6 +17,8 @@ import {
   Crosshair,
   Cpu,
   Coins,
+  Shirt,
+  Box,
 } from 'lucide-react';
 import { formatSpendSGD, formatTokens } from '../utils/formatters';
 
@@ -103,6 +105,8 @@ export default function HistoryDrawer({
 
               const inpaintMeta = item.inpaint_metadata || item.schema_json?.inpaint_metadata;
               const isInpaint = item.id?.startsWith('gen_inpaint_') || fullPromptText.startsWith('[Inpaint') || Boolean(inpaintMeta);
+              const isWardrobe = Boolean(item.schema_json?.wardrobe_composition) || fullPromptText.startsWith('Wardrobe Swap');
+              const isProp = Boolean(item.schema_json?.prop_composition) || fullPromptText.startsWith('Prop Placement');
               const maskUrl = item.mask_image_url || inpaintMeta?.mask_url;
               const maskCoverage = inpaintMeta?.mask_stats?.coverage_percentage;
               const isShowingMask = viewingMaskId === item.id && Boolean(maskUrl);
@@ -138,6 +142,16 @@ export default function HistoryDrawer({
                       <span className="history-type-tag inpaint-tag" title={maskCoverage !== undefined ? `Mask Coverage: ${maskCoverage}%` : 'Targeted Inpaint Edit'}>
                         <Crosshair size={10} />
                         <span>Inpaint{maskCoverage !== undefined ? ` (${maskCoverage}%)` : ''}</span>
+                      </span>
+                    ) : isProp ? (
+                      <span className="history-type-tag prop-tag" title="Scene Studio Prop Placement">
+                        <Box size={10} />
+                        <span>Props</span>
+                      </span>
+                    ) : isWardrobe ? (
+                      <span className="history-type-tag wardrobe-tag" title="Wardrobe Garment Swap">
+                        <Shirt size={10} />
+                        <span>Wardrobe</span>
                       </span>
                     ) : (
                       <span className="history-type-tag child-tag">

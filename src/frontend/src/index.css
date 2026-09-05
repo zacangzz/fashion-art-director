@@ -2089,6 +2089,8 @@ body {
 .baseline-tag { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
 .child-tag { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
 .inpaint-tag { background: #fdf2f8; color: #be185d; border: 1px solid #fce7f3; }
+.wardrobe-tag { background: #fef3c7; color: #b45309; border: 1px solid #fde68a; }
+.prop-tag { background: #f0fdfa; color: #0f766e; border: 1px solid #ccfbf1; }
 
 .history-card-mask-stat {
   font-size: 0.68rem;
@@ -5715,6 +5717,82 @@ body {
   flex-wrap: wrap;
 }
 
+.workflow-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.workflow-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.workflow-toolbar-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--border-color);
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+
+/* Scene Studio Mode Pill Selector (Wardrobe vs Props) */
+.scene-submode-pill-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-pill);
+  padding: 3px 4px;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+
+.scene-submode-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 14px;
+  border-radius: var(--radius-pill);
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 0.74rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  white-space: nowrap;
+}
+
+.scene-submode-btn:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: var(--bg-surface-hover, rgba(0, 0, 0, 0.04));
+}
+
+.scene-submode-btn.active {
+  background: var(--text-primary);
+  color: var(--text-inverse);
+  box-shadow: 0 2px 8px rgba(24, 24, 27, 0.16);
+}
+
+.scene-submode-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.scene-submode-icon {
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+
+.scene-submode-btn:hover:not(:disabled) .scene-submode-icon {
+  transform: scale(1.08);
+}
+
 .workflow-toolbar-group {
   display: flex;
   align-items: center;
@@ -6155,6 +6233,390 @@ body {
   border-top-color: #fff;
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
+}
+
+/* ==============================================================================
+   Props Resizable Bounding Boxes & Interaction Handles
+   ============================================================================== */
+.prop-bounding-box {
+  position: absolute;
+  border: 2px dashed #14b8a6;
+  background: rgba(20, 184, 166, 0.12);
+  box-shadow: 0 0 12px rgba(20, 184, 166, 0.35);
+  cursor: move;
+  z-index: 26;
+  user-select: none;
+  touch-action: none;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+  box-sizing: border-box;
+}
+
+.prop-bounding-box:hover {
+  border-color: #2dd4bf;
+  background: rgba(20, 184, 166, 0.18);
+  box-shadow: 0 0 16px rgba(20, 184, 166, 0.5);
+}
+
+.prop-bounding-box.selected {
+  border: 2px solid #2dd4bf;
+  background: rgba(20, 184, 166, 0.22);
+  box-shadow: 0 0 24px rgba(45, 212, 191, 0.7);
+  z-index: 32;
+}
+
+.prop-bounding-box.is-dragging {
+  cursor: grabbing;
+  border-color: #5eead4;
+  box-shadow: 0 0 28px rgba(45, 212, 191, 0.85);
+  z-index: 34;
+}
+
+.prop-box-header {
+  position: absolute;
+  top: -28px;
+  left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  background: rgba(16, 20, 30, 0.95);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(20, 184, 166, 0.5);
+  border-radius: var(--radius-xs, 4px);
+  padding: 2px 6px;
+  font-size: 0.68rem;
+  color: #fff;
+  white-space: nowrap;
+  pointer-events: auto;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  z-index: 35;
+}
+
+.prop-box-title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.prop-box-pin {
+  background: #14b8a6;
+  color: #042f2e;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+
+.prop-box-label {
+  font-weight: 600;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prop-box-scale-pill {
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  color: #5eead4;
+  background: rgba(20, 184, 166, 0.2);
+  padding: 1px 4px;
+  border-radius: 2px;
+  text-transform: capitalize;
+}
+
+.prop-box-close-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  border-radius: 2px;
+}
+
+.prop-box-close-btn:hover {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.15);
+}
+
+.prop-resize-handle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background: #2dd4bf;
+  border: 1.5px solid #07090e;
+  border-radius: 2px;
+  z-index: 36;
+  box-shadow: 0 0 6px rgba(0, 0, 0, 0.6);
+}
+
+.prop-resize-handle.handle-nw {
+  top: -5px;
+  left: -5px;
+  cursor: nwse-resize;
+}
+
+.prop-resize-handle.handle-ne {
+  top: -5px;
+  right: -5px;
+  cursor: nesw-resize;
+}
+
+.prop-resize-handle.handle-se {
+  bottom: -5px;
+  right: -5px;
+  cursor: nwse-resize;
+}
+
+.prop-resize-handle.handle-sw {
+  bottom: -5px;
+  left: -5px;
+  cursor: nesw-resize;
+}
+
+.prop-resize-handle:hover {
+  transform: scale(1.3);
+  background: #ffffff;
+  border-color: #14b8a6;
+}
+
+/* Workflow Toolbar Scene Submode */
+.workflow-toolbar-scene-submode {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Props Upload Mode Selector */
+.props-upload-mode-container {
+  padding: 10px 16px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.props-upload-mode-toggle,
+.workflow-view-toggle {
+  display: flex;
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-pill);
+  padding: 3px;
+  gap: 2px;
+}
+
+.props-upload-mode-btn,
+.workflow-toggle-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--radius-pill);
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  white-space: nowrap;
+}
+
+.props-upload-mode-btn:hover,
+.workflow-toggle-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-surface-hover);
+}
+
+.props-upload-mode-btn.active,
+.workflow-toggle-btn.active {
+  background: var(--text-primary);
+  color: var(--text-inverse);
+  box-shadow: 0 1px 4px rgba(24, 24, 27, 0.14);
+}
+
+.props-category-select-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.props-category-select-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.props-category-dropdown {
+  padding: 4px 8px;
+  font-size: 0.76rem;
+  width: 100%;
+}
+
+/* Scale Preset Pill Selector */
+.props-scale-toggle {
+  display: flex;
+  align-items: center;
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-pill);
+  padding: 2px;
+  gap: 2px;
+}
+
+.props-scale-btn {
+  flex: 1;
+  padding: 3px 6px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  font-family: var(--font-sans);
+  border-radius: var(--radius-pill);
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.props-scale-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-surface-hover);
+}
+
+.props-scale-btn.active {
+  background: var(--text-primary);
+  color: var(--text-inverse);
+  box-shadow: 0 1px 3px rgba(24, 24, 27, 0.12);
+}
+
+/* Gallery-Grade Editorial Empty State (Gallery Lumina Vitrine Card) */
+.gallery-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 36px 20px;
+  margin: 12px 0;
+  background: var(--bg-surface-elevated);
+  border: 1px dashed var(--border-color-hover, #e2e4e9);
+  border-radius: var(--radius-xs, 0px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
+  transition: all 0.2s ease;
+}
+
+.gallery-empty-state:hover {
+  border-color: var(--border-focus, #2563eb);
+}
+
+.empty-icon-capsule {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-pill);
+  background: rgba(20, 184, 166, 0.1);
+  border: 1px solid rgba(20, 184, 166, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 14px;
+  color: #0d9488;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.gallery-empty-state:hover .empty-icon-capsule {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(20, 184, 166, 0.2);
+}
+
+.empty-icon-capsule.wardrobe-capsule {
+  background: rgba(37, 99, 235, 0.08);
+  border-color: rgba(37, 99, 235, 0.22);
+  color: var(--accent-primary, #2563eb);
+}
+
+.gallery-empty-state:hover .empty-icon-capsule.wardrobe-capsule {
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
+}
+
+.empty-capsule-icon {
+  flex-shrink: 0;
+}
+
+.gallery-empty-state .empty-title {
+  font-family: var(--font-serif);
+  font-weight: 500;
+  font-size: 1.05rem;
+  color: var(--text-primary);
+  margin: 0 0 6px 0;
+  letter-spacing: -0.01em;
+}
+
+.gallery-empty-state .empty-desc {
+  font-family: var(--font-sans);
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  max-width: 260px;
+  margin: 0 0 16px 0;
+}
+
+.empty-actions-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.btn-gallery-empty-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 0.74rem;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.btn-gallery-empty-action:hover:not(:disabled) {
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+  background: var(--sky-tint-light);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.12);
+}
+
+.btn-gallery-empty-action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Ensure wardrobe/props item containers scroll cleanly */
+.wardrobe-items-container,
+.wardrobe-items-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 16px;
+  background: var(--bg-surface);
 }
 
 /* ==============================================================================
@@ -9497,6 +9959,7 @@ textarea:focus-visible,
 .obs-badge-generation { background: #EBF3FE; color: #1D4ED8; border: 1px solid #DBEAFE; }
 .obs-badge-vision { background: #ECFEFF; color: #0E7490; border: 1px solid #CFFAFE; }
 .obs-badge-wardrobe { background: #FEF3C7; color: #B45309; border: 1px solid #FDE68A; }
+.obs-badge-props { background: #F0FDFA; color: #0F766E; border: 1px solid #CCFBF1; }
 .obs-badge-inpaint { background: #FDF2F8; color: #BE185D; border: 1px solid #FCE7F3; }
 .obs-badge-background { background: #ECFDF5; color: #047857; border: 1px solid #A7F3D0; }
 .obs-badge-api { background: #F4F4F6; color: #52525B; border: 1px solid #E2E4E9; }
@@ -10572,6 +11035,11 @@ textarea:focus-visible,
   background: rgba(16, 185, 129, 0.12);
   color: #34d399;
   border: 1px solid rgba(16, 185, 129, 0.3);
+}
+.obs-badge-props {
+  background: rgba(20, 184, 166, 0.15);
+  color: #2dd4bf;
+  border: 1px solid rgba(20, 184, 166, 0.3);
 }
 
 /* ==========================================================================

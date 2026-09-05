@@ -15,6 +15,8 @@ ALLOWED_COLLECTIONS = [
     "background_references",
     "wardrobe_items",
     "composition_assignments",
+    "prop_items",
+    "prop_assignments",
     "telemetry_events",
     "usage_daily",
     "model_pricing",
@@ -694,6 +696,209 @@ class FirestoreManager:
         return items
 
     # -------------------------------------------------------------------------
+    # 5.1 PROPS & SCENE ASSIGNMENTS
+    # -------------------------------------------------------------------------
+    def _normalize_prop_doc(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        d = dict(data)
+        d["bbox"] = d.get("bbox_json") or d.get("bbox")
+        d["extracted_details"] = d.get("extracted_details_json") or d.get("extracted_details")
+        crop = d.get("cropped_image_path")
+        if crop:
+            d["image_url"] = crop if crop.startswith("http") or crop.startswith("/api/") else f"/api/images/{crop.lstrip('/')}"
+        elif d.get("id"):
+            d["image_url"] = f"/api/props/items/{d['id']}/image"
+        up = d.get("upscaled_image_path")
+        if up:
+            d["upscaled_image_url"] = up if up.startswith("http") or up.startswith("/api/") else f"/api/images/{up.lstrip('/')}"
+        src = d.get("source_image_path")
+        if src:
+            d["source_image_url"] = src if src.startswith("http") or src.startswith("/api/") else f"/api/images/{src.lstrip('/')}"
+        d["is_upscaled"] = d.get("upscale_status") == "completed" and bool(d.get("upscaled_image_path"))
+        eff_rate = get_daily_exchange_rate(db=self.db)
+        c_usd = float(d.get("cost_usd") or 0.0)
+        c_sgd = float(d.get("cost_sgd") or (c_usd * eff_rate))
+        d["cost_usd"] = round_up_cost(c_usd, 3)
+        d["cost_sgd"] = round_up_cost(c_sgd, 3)
+        d["exchange_rate"] = eff_rate
+        return d
+
+    def create_prop_item(self, user_id: str, item_data: Dict[str, Any]) -> Dict[str, Any]:
+        item_id = item_data.get("id") or f"pi_{uuid.uuid4().hex[:12]}"
+        logger.info(f"Creating prop item {item_id} for user {user_id}: {item_data.get('label')}")
+        eff_rate = get_daily_exchange_rate(db=self.db)
+        c_usd = float(item_data.get("cost_usd") or 0.0)
+        c_sgd = float(item_data.get("cost_sgd") or (c_usd * eff_rate))
+        doc_data = {
+            "id": item_id,
+            "user_id": user_id,
+            "source_image_path": item_data.get("source_image_path", ""),
+            "label": item_data.get("label", "Prop Item"),
+            "category": item_data.get("category", "decor"),
+            "cropped_image_path": item_data.get("cropped_image_path", ""),
+            "upscaled_image_path": item_data.get("upscaled_image_path"),
+            "upscale_status": item_data.get("upscale_status", "pending"),
+            "upscale_error": item_data.get("upscale_error"),
+            "bbox_json": self._to_firestore_safe(item_data.get("bbox_json") or item_data.get("bbox") or []),
+            "extracted_details_json": self._to_firestore_safe(item_data.get("extracted_details_json") or item_data.get("extracted_details") or {}),
+            "cost_usd": round_up_cost(c_usd, 3),
+            "cost_sgd": round_up_cost(c_sgd, 3),
+            "exchange_rate": eff_rate,
+            "tokens": int(item_data.get("tokens") or 0),
+            "created_at": item_data.get("created_at") or self._now_iso(),
+            "deleted_at": None,
+        }
+        self.db.collection("prop_items").document(item_id).set(doc_data)
+        return self._normalize_prop_doc(doc_data)
+
+    def update_prop_item_details(
+        self,
+        item_id: str,
+        details: Dict[str, Any],
+        label: Optional[str] = None,
+        category: Optional[str] = None,
+    ) -> bool:
+        doc_ref = self.db.collection("prop_items").document(item_id)
+        doc = doc_ref.get()
+        if not doc.exists:
+            return False
+        updates: Dict[str, Any] = {
+            "extracted_details_json": self._to_firestore_safe(details),
+        }
+        if label:
+            updates["label"] = label
+        if category:
+            updates["category"] = category
+        doc_ref.update(updates)
+        return True
+
+    def update_prop_item_upscale(
+        self,
+        item_id: str,
+        upscaled_image_path: Optional[str] = None,
+        upscale_status: str = "completed",
+        upscale_error: Optional[str] = None,
+        cost_usd: float = 0.0,
+        tokens: int = 0,
+    ) -> bool:
+        doc_ref = self.db.collection("prop_items").document(item_id)
+        doc = doc_ref.get()
+        if not doc.exists:
+            return False
+        cur = doc.to_dict()
+        eff_rate = get_daily_exchange_rate(db=self.db)
+        new_cost_usd = round_up_cost(float(cur.get("cost_usd") or 0.0) + cost_usd, 3)
+        new_cost_sgd = round_up_cost(float(cur.get("cost_sgd") or 0.0) + (cost_usd * eff_rate), 3)
+        new_tokens = int(cur.get("tokens") or 0) + tokens
+        updates: Dict[str, Any] = {
+            "upscale_status": upscale_status,
+            "cost_usd": new_cost_usd,
+            "cost_sgd": new_cost_sgd,
+            "tokens": new_tokens,
+        }
+        if upscaled_image_path is not None:
+            updates["upscaled_image_path"] = upscaled_image_path
+        if upscale_error is not None:
+            updates["upscale_error"] = upscale_error
+        doc_ref.update(updates)
+        return True
+
+    def get_prop_item(self, item_id: str) -> Optional[Dict[str, Any]]:
+        doc = self.db.collection("prop_items").document(item_id).get()
+        if doc.exists:
+            data = doc.to_dict()
+            if data.get("deleted_at") is None:
+                return self._normalize_prop_doc(data)
+        return None
+
+    def list_prop_items(self, user_id: str) -> List[Dict[str, Any]]:
+        docs = list(
+            self.db.collection("prop_items")
+            .where("user_id", "==", user_id)
+            .stream()
+        )
+        active = [d.to_dict() for d in docs if d.to_dict().get("deleted_at") is None]
+        active.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+        return [self._normalize_prop_doc(d) for d in active]
+
+    def delete_prop_item(self, item_id_or_user: str, item_id: Optional[str] = None) -> bool:
+        target_item_id = item_id if item_id else item_id_or_user
+        doc_ref = self.db.collection("prop_items").document(target_item_id)
+        doc = doc_ref.get()
+        if doc.exists:
+            now_ts = self._now_iso()
+            doc_ref.update({"deleted_at": now_ts})
+            try:
+                assignments = self.db.collection("prop_assignments").where("prop_item_id", "==", target_item_id).stream()
+                for a in assignments:
+                    a.reference.update({"deleted_at": now_ts})
+            except Exception:
+                pass
+            return True
+        return False
+
+    def delete_all_prop_items(self, user_id: str) -> List[Dict[str, Any]]:
+        docs = list(
+            self.db.collection("prop_items")
+            .where("user_id", "==", user_id)
+            .stream()
+        )
+        active = [d.to_dict() for d in docs if d.to_dict().get("deleted_at") is None]
+        now_ts = self._now_iso()
+        for d in active:
+            item_id = d["id"]
+            self.db.collection("prop_items").document(item_id).update({"deleted_at": now_ts})
+            try:
+                assignments = self.db.collection("prop_assignments").where("prop_item_id", "==", item_id).stream()
+                for a in assignments:
+                    a.reference.delete()
+            except Exception:
+                pass
+
+        try:
+            assignments = self.db.collection("prop_assignments").where("user_id", "==", user_id).stream()
+            for a in assignments:
+                a.reference.delete()
+        except Exception:
+            pass
+
+        return [self._normalize_prop_doc(d) for d in active]
+
+    def create_prop_assignment(self, user_id: str, assignment_data: Dict[str, Any]) -> Dict[str, Any]:
+        assignment_id = assignment_data.get("id") or f"pa_{uuid.uuid4().hex[:12]}"
+        doc_data = {
+            "id": assignment_id,
+            "user_id": user_id,
+            "generation_id": assignment_data.get("generation_id"),
+            "prop_item_id": assignment_data.get("prop_item_id"),
+            "pin_number": int(assignment_data.get("pin_number", 1)),
+            "bounding_box": self._to_firestore_safe(assignment_data.get("bounding_box") or {"ymin": 0.4, "xmin": 0.4, "ymax": 0.6, "xmax": 0.6}),
+            "scale_preset": assignment_data.get("scale_preset", "medium"),
+            "target_description": assignment_data.get("target_description", ""),
+            "custom_instruction": assignment_data.get("custom_instruction"),
+            "created_at": assignment_data.get("created_at") or self._now_iso(),
+            "deleted_at": None,
+        }
+        self.db.collection("prop_assignments").document(assignment_id).set(doc_data)
+        return doc_data
+
+    def list_prop_assignments(self, generation_id: str) -> List[Dict[str, Any]]:
+        docs = list(self.db.collection("prop_assignments").where("generation_id", "==", generation_id).stream())
+        items = [d.to_dict() for d in docs if d.to_dict().get("deleted_at") is None]
+        items.sort(key=lambda x: x.get("pin_number", 0))
+
+        # Enrich assignments with prop label & crop path if available
+        for a in items:
+            p_id = a.get("prop_item_id")
+            if p_id:
+                p_item = self.get_prop_item(p_id)
+                if p_item:
+                    a["prop_label"] = p_item.get("label")
+                    a["cropped_image_path"] = p_item.get("cropped_image_path")
+                    a["cropped_image_url"] = p_item.get("image_url")
+                    a["category"] = p_item.get("category")
+        return items
+
+    # -------------------------------------------------------------------------
     # 6. USERS, WHITELIST & AUTHENTICATION
     # -------------------------------------------------------------------------
     def get_user(self, user_id: str) -> Optional[Dict[str, Any]]:
@@ -886,6 +1091,25 @@ class FirestoreManager:
                     tokens_by_uid[u_id] = tokens_by_uid.get(u_id, 0) + t_toks
         except Exception as err:
             logger.debug(f"Wardrobe spend aggregation note: {err}")
+
+        # Aggregate prop items
+        try:
+            for p_doc in self.db.collection("prop_items").stream():
+                p_dict = p_doc.to_dict()
+                u_id = p_dict.get("user_id")
+                if not u_id or p_dict.get("deleted_at") is not None:
+                    continue
+                c_usd = float(p_dict.get("cost_usd") or 0.0)
+                c_sgd = float(p_dict.get("cost_sgd") or (c_usd * eff_rate))
+                t_toks = int(p_dict.get("tokens") or 0)
+                if c_usd > 0:
+                    spend_usd_by_uid[u_id] = spend_usd_by_uid.get(u_id, 0.0) + c_usd
+                if c_sgd > 0:
+                    spend_sgd_by_uid[u_id] = spend_sgd_by_uid.get(u_id, 0.0) + c_sgd
+                if t_toks > 0:
+                    tokens_by_uid[u_id] = tokens_by_uid.get(u_id, 0) + t_toks
+        except Exception as err:
+            logger.debug(f"Prop spend aggregation note: {err}")
 
         # Update each user with accurate, ceiling-rounded spend
         for u in users_list:

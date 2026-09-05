@@ -285,12 +285,41 @@ export default function WardrobePanel({
             <p>Loading wardrobe library...</p>
           </div>
         ) : filteredItems.length === 0 ? (
-          <div className="wardrobe-empty-state">
-            <Shirt size={32} className="text-muted" />
-            <p className="empty-title">No garments in this category</p>
+          <div className="gallery-empty-state wardrobe-empty-state" role="status">
+            <div className="empty-icon-capsule wardrobe-capsule">
+              <Shirt size={22} className="empty-capsule-icon" />
+            </div>
+            <h4 className="empty-title">
+              {items.length === 0
+                ? 'No Garments in Studio Library'
+                : `No ${selectedCategory.charAt(0).toUpperCase() + selectedCategory.slice(1)} Garments`}
+            </h4>
             <p className="empty-desc">
-              Upload a lookbook image containing outfits, shirts, jackets, or trousers.
+              {items.length === 0
+                ? 'Upload a lookbook or catalog image to segment and extract wearable outfits and pieces.'
+                : `No garments found in this category. You have ${items.length} item${items.length === 1 ? '' : 's'} in other categories.`}
             </p>
+            <div className="empty-actions-row">
+              {items.length === 0 ? (
+                <button
+                  type="button"
+                  className="btn-gallery-empty-action"
+                  onClick={() => !isUploading && fileInputRef.current?.click()}
+                  disabled={isUploading}
+                >
+                  <Upload size={13} />
+                  <span>Upload Lookbook Sheet</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn-gallery-empty-action"
+                  onClick={() => setSelectedCategory('all')}
+                >
+                  <span>Show All Garments ({items.length})</span>
+                </button>
+              )}
+            </div>
           </div>
         ) : (
           <div className="wardrobe-cards-grid">

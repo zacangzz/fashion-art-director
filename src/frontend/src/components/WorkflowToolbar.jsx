@@ -10,6 +10,8 @@ import {
   Copy,
   Check,
   ChevronDown,
+  Shirt,
+  Box,
 } from 'lucide-react';
 import {
   ASPECT_RATIO_OPTIONS,
@@ -19,11 +21,14 @@ import {
 
 /**
  * Reusable Workflow Toolbar rendered across all pipeline stages.
- * Provides a synchronized Aspect Ratio dropdown and Active Seed status badge.
+ * Provides a synchronized Aspect Ratio dropdown, Scene submode toggle (Wardrobe / Props), and Active Seed status badge.
  * 
  * @param {Object} props
  * @param {string} props.aspectRatio - Current active aspect ratio (e.g., '1:1', '4:5', '16:9')
  * @param {Function} props.onAspectRatioChange - Callback when aspect ratio is changed
+ * @param {'wardrobe' | 'props'} [props.sceneSubMode='wardrobe'] - Current scene studio sub-mode
+ * @param {Function} [props.onSceneSubModeChange] - Callback to toggle scene submode
+ * @param {boolean} [props.showSceneSubMode=false] - Whether to display the Wardrobe / Props toggle
  * @param {number} [props.activeSeed] - Current active generation seed
  * @param {'locked' | 'random'} [props.seedMode='locked'] - Current seed mode
  * @param {Function} [props.onSeedModeChange] - Callback to toggle seed mode
@@ -33,6 +38,9 @@ import {
 export default function WorkflowToolbar({
   aspectRatio = '1:1',
   onAspectRatioChange,
+  sceneSubMode = 'wardrobe',
+  onSceneSubModeChange,
+  showSceneSubMode = false,
   activeSeed,
   seedMode = 'locked',
   onSeedModeChange,
@@ -70,45 +78,80 @@ export default function WorkflowToolbar({
 
   return (
     <div className={`workflow-toolbar ${className}`.trim()} role="toolbar" aria-label="Workflow Context & Canvas Controls">
-      {/* Left: Aspect Ratio Control Group */}
-      <div className="workflow-toolbar-group workflow-toolbar-ratio-group">
-        <div className="workflow-ratio-selector-wrap">
-          <span className="workflow-toolbar-icon-box" title={`Orientation: ${ratioInfo.orientation}`}>
-            {renderRatioIcon(ratioInfo.orientation, 15)}
-          </span>
-          <label htmlFor="workflow-aspect-ratio-select" className="workflow-toolbar-label">
-            Aspect Ratio:
-          </label>
-          <div className="workflow-select-container">
-            <select
-              id="workflow-aspect-ratio-select"
-              aria-label="Workflow Aspect Ratio Selection"
-              className="workflow-ratio-select"
-              value={aspectRatio}
-              onChange={(e) => onAspectRatioChange?.(e.target.value)}
-              disabled={disabled}
-            >
-              {ASPECT_RATIO_OPTIONS.map((opt) => (
-                <option key={opt.id} value={opt.id}>
-                  {opt.name} ({opt.width}×{opt.height})
-                </option>
-              ))}
-            </select>
-            <ChevronDown size={13} className="workflow-select-chevron" />
+      {/* Left: Aspect Ratio Control Group & Scene Studio Submode */}
+      <div className="workflow-toolbar-left">
+        <div className="workflow-toolbar-group workflow-toolbar-ratio-group">
+          <div className="workflow-ratio-selector-wrap">
+            <span className="workflow-toolbar-icon-box" title={`Orientation: ${ratioInfo.orientation}`}>
+              {renderRatioIcon(ratioInfo.orientation, 15)}
+            </span>
+            <label htmlFor="workflow-aspect-ratio-select" className="workflow-toolbar-label">
+              Aspect Ratio:
+            </label>
+            <div className="workflow-select-container">
+              <select
+                id="workflow-aspect-ratio-select"
+                aria-label="Workflow Aspect Ratio Selection"
+                className="workflow-ratio-select"
+                value={aspectRatio}
+                onChange={(e) => onAspectRatioChange?.(e.target.value)}
+                disabled={disabled}
+              >
+                {ASPECT_RATIO_OPTIONS.map((opt) => (
+                  <option key={opt.id} value={opt.id}>
+                    {opt.name} ({opt.width}×{opt.height})
+                  </option>
+                ))}
+              </select>
+              <ChevronDown size={13} className="workflow-select-chevron" />
+            </div>
+          </div>
+
+          {/* Resolution Specs Tag */}
+          <div className="workflow-res-tag" title={`Target 4K Master Canvas: ${activeMasterRes.width}×${activeMasterRes.height} px`}>
+            <span className="workflow-res-pill">
+              4K • {activeMasterRes.width}×{activeMasterRes.height}
+            </span>
           </div>
         </div>
 
-        {/* Resolution Specs Tag */}
-        <div className="workflow-res-tag" title={`Target 4K Master Canvas: ${activeMasterRes.width}×${activeMasterRes.height} px`}>
-          <span className="workflow-res-pill">
-            4K • {activeMasterRes.width}×{activeMasterRes.height}
-          </span>
-        </div>
+        {/* Immediately adjacent: Scene Studio Mode Toggle [ 👔 Wardrobe | 📦 Props ] */}
+        {showSceneSubMode && (
+          <div className="workflow-toolbar-group workflow-toolbar-scene-submode">
+            <div className="workflow-toolbar-divider" aria-hidden="true" />
+            <span className="workflow-toolbar-label">Scene Studio:</span>
+            <div className="scene-submode-pill-toggle" role="group" aria-label="Scene Studio Mode">
+              <button
+                type="button"
+                className={`scene-submode-btn ${sceneSubMode === 'wardrobe' ? 'active' : ''}`}
+                onClick={() => onSceneSubModeChange?.('wardrobe')}
+                disabled={disabled}
+                aria-pressed={sceneSubMode === 'wardrobe'}
+                title="Switch to Wardrobe & Garment Swapper"
+              >
+                <Shirt size={14} className="scene-submode-icon" />
+                <span>Wardrobe</span>
+              </button>
+              <button
+                type="button"
+                className={`scene-submode-btn ${sceneSubMode === 'props' ? 'active' : ''}`}
+                onClick={() => onSceneSubModeChange?.('props')}
+                disabled={disabled}
+                aria-pressed={sceneSubMode === 'props'}
+                title="Switch to Props Studio & Object Placement"
+              >
+                <Box size={14} className="scene-submode-icon" />
+                <span>Props</span>
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Right: Active Seed Status Badge */}
-      {activeSeed !== undefined && activeSeed !== null && (
-        <div className="workflow-toolbar-group workflow-toolbar-seed-group">
+      <div className="workflow-toolbar-right">
+        {activeSeed !== undefined && activeSeed !== null && (
+          <div className="workflow-toolbar-group workflow-toolbar-seed-group">
           <div
             className={`workflow-seed-badge ${seedMode === 'locked' ? 'seed-locked' : 'seed-random'}`}
             title={
@@ -148,6 +191,7 @@ export default function WorkflowToolbar({
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }

@@ -158,13 +158,59 @@ Table composition_assignments {
   }
 }
 
+Table prop_items {
+  id                    string    [pk, note: 'Format: pi_{uuid12}']
+  user_id               string    [not null, note: 'Firebase Auth UID']
+  source_image_path     string    [not null, note: 'GCS/Local storage path to uploaded source sheet/image']
+  label                 string    [not null, note: 'AI-detected or user-specified prop label']
+  category              string    [default: 'decor', note: 'furniture | decor | tableware | handheld | electronics | lighting | plants | architectural | other']
+  cropped_image_path    string    [not null, note: 'GCS path: {user_id}/props/items/{filename}']
+  upscaled_image_path   string    [note: 'GCS path to AI-upscaled version']
+  upscale_status        string    [default: 'pending', note: 'pending | completed | failed']
+  upscale_error         string
+  bbox                  array     [note: 'Native Firestore array [ymin, xmin, ymax, xmax] on 0-1000 scale']
+  extracted_details     map       [note: 'Native Firestore map — material, finish, colors, geometry, scale_hint']
+  cost_usd              number    [default: 0.0, note: 'Cost in USD (ceil 3 decimals)']
+  cost_sgd              number    [default: 0.0, note: 'Cost in SGD (ceil 3 decimals)']
+  exchange_rate         number    [note: 'USD-to-SGD daily conversion rate used']
+  tokens                number    [default: 0]
+  created_at            timestamp [not null, default: `now()`]
+  deleted_at            timestamp [note: 'Soft delete — null means active']
+
+  indexes {
+    user_id [name: 'idx_props_user']
+    (user_id, deleted_at) [name: 'idx_props_user_active']
+    (user_id, created_at) [name: 'idx_props_user_created']
+  }
+}
+
+Table prop_assignments {
+  id                  string    [pk, note: 'Format: pa_{uuid12}']
+  user_id             string    [not null, note: 'Firebase Auth UID']
+  generation_id       string    [not null, note: 'FK to generations.id']
+  prop_item_id        string    [not null, note: 'FK to prop_items.id']
+  pin_number          number    [not null, note: 'Numbered prop assignment ①②③']
+  bounding_box        map       [note: 'Native Firestore map {ymin: float, xmin: float, ymax: float, xmax: float} normalized 0.0–1.0']
+  scale_preset        string    [default: 'medium', note: 'small | medium | large | custom']
+  target_description  string    [note: 'Semantic scene grounding description (e.g. coffee table surface)']
+  custom_instruction  string    [note: 'Specific user placement instruction for this prop']
+  created_at          timestamp [not null, default: `now()`]
+  deleted_at          timestamp [note: 'Soft delete — null means active']
+
+  indexes {
+    generation_id [name: 'idx_prop_asgn_generation']
+    (generation_id, pin_number) [name: 'idx_prop_asgn_gen_pin']
+    prop_item_id [name: 'idx_prop_asgn_prop']
+  }
+}
+
 Table telemetry_events {
   id                  string    [pk, note: 'Firestore auto-generated ID']
   user_id             string    [note: 'Firebase Auth UID — null for system events']
   timestamp           timestamp [not null, note: 'UTC ISO-8601']
   event               string    [not null, note: 'e.g. api_response, vision_response, generation_complete']
   request_id          string    [not null, note: 'Correlation ID for request lifecycle tracing']
-  component           string    [not null, note: 'api | generation | vision | wardrobe | inpaint | export | background']
+  component           string    [not null, note: 'api | generation | vision | wardrobe | props | inpaint | export | background']
   status              string    [not null, note: 'success | error | started']
   duration_ms         number    [note: 'Operation duration in milliseconds']
   model               string    [note: 'Gemini model name if applicable']
@@ -246,3 +292,6 @@ Ref: generations.background_reference_id > background_references.id   // Generat
 Ref: conversations.baseline_generation_id - generations.id            // Conversation anchored to baseline
 Ref: composition_assignments.generation_id > generations.id           // Assignment targets a generation
 Ref: composition_assignments.wardrobe_item_id > wardrobe_items.id     // Assignment references a garment
+Ref: prop_assignments.generation_id > generations.id                  // Assignment targets a generation
+Ref: prop_assignments.prop_item_id > prop_items.id                    // Assignment references a prop
+

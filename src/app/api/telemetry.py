@@ -81,7 +81,7 @@ def list_generation_runs(
 
 @router.get("/events", response_model=TelemetryEventsResponse)
 def list_telemetry_events(
-    component: Optional[str] = Query(None, description="Filter by component (e.g., generation, vision, wardrobe, inpaint, background, api)"),
+    component: Optional[str] = Query(None, description="Filter by component (e.g., generation, vision, wardrobe, props, inpaint, background, api)"),
     event: Optional[str] = Query(None, description="Filter by event name (e.g., fine_tune_request, vision_response)"),
     request_id: Optional[str] = Query(None, description="Filter by request ID"),
     status: Optional[str] = Query(None, description="Filter by status (success, error, started)"),

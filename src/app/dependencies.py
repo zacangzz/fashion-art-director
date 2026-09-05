@@ -11,6 +11,7 @@ from app.services.storage_service import StorageService
 from app.services.image_generator import ImageGenerator
 from app.services.vision_service import VisionService
 from app.services.wardrobe_service import WardrobeService
+from app.services.prop_service import PropService
 from app.services.generation_service import GenerationService
 from app.services.export_service import ExportService
 from app.utils.telemetry import TelemetryLogger
@@ -79,9 +80,24 @@ def get_wardrobe_service() -> WardrobeService:
 
 
 @lru_cache()
+def get_prop_service() -> PropService:
+    settings = get_settings()
+    return PropService(
+        db_manager=get_db_manager(),
+        storage_service=get_storage_service(),
+        api_key=settings.GEMINI_API_KEY,
+        vision_model=settings.VISION_MODEL,
+        imagen_model=settings.IMAGEN_MODEL,
+        client=get_gemini_client(),
+        image_generator=get_image_generator(),
+    )
+
+
+@lru_cache()
 def get_generation_service() -> GenerationService:
     settings = get_settings()
     ws = get_wardrobe_service()
+    ps = get_prop_service()
     vs = get_vision_service()
     return GenerationService(
         db_manager=get_db_manager(),
@@ -90,6 +106,7 @@ def get_generation_service() -> GenerationService:
         model_name=settings.IMAGEN_MODEL,
         inpaint_model_name=settings.INPAINT_MODEL,
         wardrobe_service=ws,
+        prop_service=ps,
         vision_service=vs,
         client=get_gemini_client(),
         image_generator=get_image_generator(),

@@ -53,6 +53,7 @@ const COMPONENT_TAG_CLASSES = {
   generation: 'obs-badge-generation',
   vision: 'obs-badge-vision',
   wardrobe: 'obs-badge-wardrobe',
+  props: 'obs-badge-props',
   inpaint: 'obs-badge-inpaint',
   background: 'obs-badge-background',
   api: 'obs-badge-api',
@@ -62,6 +63,8 @@ const STAGE_COLORS = {
   vision: '#06b6d4',
   prompt: '#a855f7',
   generation: '#6366f1',
+  props: '#14b8a6',
+  wardrobe: '#f59e0b',
   inpaint: '#ec4899',
   background: '#10b981',
   api: '#64748b',
@@ -537,7 +540,7 @@ export default function ObservabilityPage() {
 
                 {/* Component Filter Pills */}
                 <div className="obs-filter-pill-group">
-                  {['all', 'generation', 'vision', 'wardrobe', 'inpaint', 'background'].map((comp) => (
+                  {['all', 'generation', 'vision', 'wardrobe', 'props', 'inpaint', 'background'].map((comp) => (
                     <button
                       key={comp}
                       type="button"
@@ -822,7 +825,7 @@ export default function ObservabilityPage() {
                 </div>
 
                 <div className="obs-filter-pill-group">
-                  {['all', 'generation', 'vision', 'wardrobe', 'inpaint', 'background', 'api'].map((comp) => (
+                  {['all', 'generation', 'vision', 'wardrobe', 'props', 'inpaint', 'background', 'api'].map((comp) => (
                     <button
                       key={comp}
                       type="button"
@@ -1075,7 +1078,7 @@ export default function ObservabilityPage() {
                     );
                   })
                 ) : (
-                  ['generations', 'telemetry_events', 'users', 'moodboards', 'sessions'].map((col) => (
+                  ['generations', 'telemetry_events', 'users', 'moodboards', 'sessions', 'wardrobe_items', 'prop_items', 'prop_assignments'].map((col) => (
                     <button
                       key={col}
                       type="button"

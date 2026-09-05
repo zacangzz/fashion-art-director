@@ -20,6 +20,7 @@ import {
   ChevronUp,
   Terminal,
   Shirt,
+  Box,
   X,
   Hand,
   Move,
@@ -47,6 +48,11 @@ export default function CanvasViewport({
   onRemovePin = null,
   onUpdatePinPosition = null,
   isWardrobeMode = false,
+  isPropsMode = false,
+  propAssignments = [],
+  onDropProp = null,
+  onUpdatePropBox = null,
+  onRemovePropAssignment = null,
 }) {
   const [zoom, setZoom] = useState(1);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
@@ -63,6 +69,9 @@ export default function CanvasViewport({
   const [isDragOver, setIsDragOver] = useState(false);
   const [selectedPinNumber, setSelectedPinNumber] = useState(null);
   const [draggingPinNumber, setDraggingPinNumber] = useState(null);
+  const [selectedPropPin, setSelectedPropPin] = useState(null);
+  const [propDragStart, setPropDragStart] = useState(null);
+  const [resizingPropCorner, setResizingPropCorner] = useState(null);
 
   const imageContainerRef = useRef(null);
   const viewportBoxRef = useRef(null);
@@ -137,20 +146,20 @@ export default function CanvasViewport({
     : imageUrl;
 
   const handleDragOver = (e) => {
-    if (!isWardrobeMode) return;
+    if (!isWardrobeMode && !isPropsMode) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
     setIsDragOver(true);
   };
 
   const handleDragLeave = (e) => {
-    if (!isWardrobeMode) return;
+    if (!isWardrobeMode && !isPropsMode) return;
     if (e.currentTarget.contains(e.relatedTarget)) return;
     setIsDragOver(false);
   };
 
   const handleDrop = (e) => {
-    if (!isWardrobeMode) return;
+    if (!isWardrobeMode && !isPropsMode) return;
     e.preventDefault();
     setIsDragOver(false);
     const dataStr = e.dataTransfer.getData('application/json');
@@ -162,9 +171,13 @@ export default function CanvasViewport({
       const rect = imgElem.getBoundingClientRect();
       const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
       const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
-      onDropGarment?.(item, { x, y });
+      if (item.isProp || isPropsMode) {
+        onDropProp?.(item, { x, y });
+      } else if (isWardrobeMode) {
+        onDropGarment?.(item, { x, y });
+      }
     } catch (err) {
-      console.error('Failed to parse dropped garment', err);
+      console.error('Failed to parse dropped item', err);
     }
   };
 
@@ -197,6 +210,12 @@ export default function CanvasViewport({
         onRemovePin?.(selectedPinNumber);
         setSelectedPinNumber(null);
       }
+
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedPropPin !== null) {
+        e.preventDefault();
+        onRemovePropAssignment?.(selectedPropPin);
+        setSelectedPropPin(null);
+      }
     };
 
     const handleKeyUp = (e) => {
@@ -224,7 +243,7 @@ export default function CanvasViewport({
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('blur', handleWindowBlur);
     };
-  }, [selectedPinNumber, onRemovePin]);
+  }, [selectedPinNumber, onRemovePin, selectedPropPin, onRemovePropAssignment]);
 
   const handleViewportMouseDown = (e) => {
     if (isSpacePressedRef.current || e.button === 1) {
@@ -251,6 +270,62 @@ export default function CanvasViewport({
       const x = Math.max(0.02, Math.min(0.98, (e.clientX - rect.left) / rect.width));
       const y = Math.max(0.02, Math.min(0.98, (e.clientY - rect.top) / rect.height));
       onUpdatePinPosition?.(draggingPinNumber, { x, y });
+    } else if (resizingPropCorner && imageContainerRef.current) {
+      e.preventDefault();
+      const { pinNumber, corner, startBox, startMouse, aspectRatio: boxAspect } = resizingPropCorner;
+      const dx = (e.clientX - startMouse.x) / startMouse.rectWidth;
+      const dy = (e.clientY - startMouse.y) / startMouse.rectHeight;
+      const isFreeform = e.shiftKey;
+
+      let newXmin = startBox.xmin;
+      let newXmax = startBox.xmax;
+      let newYmin = startBox.ymin;
+      let newYmax = startBox.ymax;
+
+      if (corner === 'se') {
+        newXmax = Math.max(startBox.xmin + 0.05, Math.min(1.0, startBox.xmax + dx));
+        if (!isFreeform && boxAspect) {
+          const newW = newXmax - startBox.xmin;
+          newYmax = Math.max(startBox.ymin + 0.05, Math.min(1.0, startBox.ymin + newW / boxAspect));
+        } else {
+          newYmax = Math.max(startBox.ymin + 0.05, Math.min(1.0, startBox.ymax + dy));
+        }
+      } else if (corner === 'sw') {
+        newXmin = Math.max(0.0, Math.min(startBox.xmax - 0.05, startBox.xmin + dx));
+        if (!isFreeform && boxAspect) {
+          const newW = startBox.xmax - newXmin;
+          newYmax = Math.max(startBox.ymin + 0.05, Math.min(1.0, startBox.ymin + newW / boxAspect));
+        } else {
+          newYmax = Math.max(startBox.ymin + 0.05, Math.min(1.0, startBox.ymax + dy));
+        }
+      } else if (corner === 'ne') {
+        newXmax = Math.max(startBox.xmin + 0.05, Math.min(1.0, startBox.xmax + dx));
+        if (!isFreeform && boxAspect) {
+          const newW = newXmax - startBox.xmin;
+          newYmin = Math.max(0.0, Math.min(startBox.ymax - 0.05, startBox.ymax - newW / boxAspect));
+        } else {
+          newYmin = Math.max(0.0, Math.min(startBox.ymax - 0.05, startBox.ymin + dy));
+        }
+      } else if (corner === 'nw') {
+        newXmin = Math.max(0.0, Math.min(startBox.xmax - 0.05, startBox.xmin + dx));
+        if (!isFreeform && boxAspect) {
+          const newW = startBox.xmax - newXmin;
+          newYmin = Math.max(0.0, Math.min(startBox.ymax - 0.05, startBox.ymax - newW / boxAspect));
+        } else {
+          newYmin = Math.max(0.0, Math.min(startBox.ymax - 0.05, startBox.ymin + dy));
+        }
+      }
+      onUpdatePropBox?.(pinNumber, { xmin: newXmin, xmax: newXmax, ymin: newYmin, ymax: newYmax });
+    } else if (propDragStart && imageContainerRef.current) {
+      e.preventDefault();
+      const { pinNumber, startBox, startMouse } = propDragStart;
+      const dx = (e.clientX - startMouse.x) / startMouse.rectWidth;
+      const dy = (e.clientY - startMouse.y) / startMouse.rectHeight;
+      const w = startBox.xmax - startBox.xmin;
+      const h = startBox.ymax - startBox.ymin;
+      const newXmin = Math.max(0, Math.min(1 - w, startBox.xmin + dx));
+      const newYmin = Math.max(0, Math.min(1 - h, startBox.ymin + dy));
+      onUpdatePropBox?.(pinNumber, { xmin: newXmin, xmax: newXmin + w, ymin: newYmin, ymax: newYmin + h });
     }
   };
 
@@ -261,6 +336,12 @@ export default function CanvasViewport({
     }
     if (draggingPinNumber !== null) {
       setDraggingPinNumber(null);
+    }
+    if (resizingPropCorner !== null) {
+      setResizingPropCorner(null);
+    }
+    if (propDragStart !== null) {
+      setPropDragStart(null);
     }
   };
 
@@ -461,11 +542,11 @@ export default function CanvasViewport({
           /* Single Image View (or Peek Before active) */
           <div
             ref={imageContainerRef}
-            className={`image-zoom-container ${isWardrobeMode ? 'is-wardrobe-drop-target' : ''} ${isDragOver ? 'is-drag-active' : ''}`}
+            className={`image-zoom-container ${isWardrobeMode || isPropsMode ? 'is-wardrobe-drop-target' : ''} ${isDragOver ? 'is-drag-active' : ''}`}
             style={{
               transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoom})`,
               transformOrigin: 'center center',
-              transition: isPanning || draggingPinNumber !== null ? 'none' : 'transform 0.15s ease-out',
+              transition: isPanning || draggingPinNumber !== null || resizingPropCorner !== null || propDragStart !== null ? 'none' : 'transform 0.15s ease-out',
               position: 'relative',
             }}
             onDragOver={handleDragOver}
@@ -496,6 +577,15 @@ export default function CanvasViewport({
               </div>
             )}
 
+            {/* Props Drop Hint Overlay */}
+            {isPropsMode && isDragOver && (
+              <div className="wardrobe-drop-hint-overlay">
+                <Box size={28} className="animate-bounce text-accent" />
+                <span className="drop-hint-title">Drop to Place Prop</span>
+                <span className="drop-hint-subtitle">Creates a resizable bounding box for object placement</span>
+              </div>
+            )}
+
             {/* Wardrobe Numbered Pins Overlay with Drag & Delete */}
             {isWardrobeMode && wardrobeAssignments.map((asgn) => {
               const posX = (asgn.drop_position?.x ?? 0.5) * 100;
@@ -513,7 +603,6 @@ export default function CanvasViewport({
                     setSelectedPinNumber(asgn.pin_number);
                   }}
                   onMouseDown={(e) => {
-                    // Left click to start dragging
                     if (e.button === 0) {
                       e.stopPropagation();
                       setSelectedPinNumber(asgn.pin_number);
@@ -550,6 +639,96 @@ export default function CanvasViewport({
                       <X size={11} />
                     </button>
                   </div>
+                </div>
+              );
+            })}
+
+            {/* Props Resizable Bounding Boxes Overlay */}
+            {isPropsMode && propAssignments.map((asgn) => {
+              const box = asgn.bounding_box || { xmin: 0.35, xmax: 0.65, ymin: 0.35, ymax: 0.65 };
+              const isSelected = selectedPropPin === asgn.pin_number;
+              const isDraggingBox = propDragStart?.pinNumber === asgn.pin_number;
+
+              return (
+                <div
+                  key={asgn.pin_number}
+                  className={`prop-bounding-box ${isSelected ? 'selected' : ''} ${isDraggingBox ? 'is-dragging' : ''}`}
+                  style={{
+                    left: `${box.xmin * 100}%`,
+                    top: `${box.ymin * 100}%`,
+                    width: `${Math.max(0.01, box.xmax - box.xmin) * 100}%`,
+                    height: `${Math.max(0.01, box.ymax - box.ymin) * 100}%`,
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedPropPin(asgn.pin_number);
+                  }}
+                  onMouseDown={(e) => {
+                    if (e.button === 0 && !e.target.classList.contains('prop-resize-handle') && !e.target.closest('.prop-box-close-btn')) {
+                      e.stopPropagation();
+                      setSelectedPropPin(asgn.pin_number);
+                      if (imageContainerRef.current) {
+                        const rect = imageContainerRef.current.getBoundingClientRect();
+                        setPropDragStart({
+                          pinNumber: asgn.pin_number,
+                          startBox: { ...box },
+                          startMouse: { x: e.clientX, y: e.clientY, rectWidth: rect.width, rectHeight: rect.height },
+                        });
+                      }
+                    }
+                  }}
+                  role="button"
+                  tabIndex={0}
+                  title={`Prop #${asgn.pin_number}: ${asgn.item_label || 'Prop'} (Drag to reposition, corner handles to resize, Delete to remove)`}
+                >
+                  {/* Bounding Box Header Badge */}
+                  <div className="prop-box-header">
+                    <div className="prop-box-title">
+                      <span className="prop-box-pin">#{asgn.pin_number}</span>
+                      <span className="prop-box-label">{asgn.item_label || 'Prop'}</span>
+                      <span className="prop-box-scale-pill">{asgn.scale_preset || 'medium'}</span>
+                    </div>
+                    <button
+                      type="button"
+                      className="prop-box-close-btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onRemovePropAssignment?.(asgn.pin_number);
+                        if (selectedPropPin === asgn.pin_number) {
+                          setSelectedPropPin(null);
+                        }
+                      }}
+                      title="Remove prop"
+                      aria-label={`Remove prop ${asgn.pin_number}`}
+                    >
+                      <X size={10} />
+                    </button>
+                  </div>
+
+                  {/* 4 Corner Resize Handles */}
+                  {['nw', 'ne', 'se', 'sw'].map((corner) => (
+                    <div
+                      key={corner}
+                      className={`prop-resize-handle handle-${corner}`}
+                      onMouseDown={(e) => {
+                        if (e.button === 0) {
+                          e.stopPropagation();
+                          setSelectedPropPin(asgn.pin_number);
+                          if (imageContainerRef.current) {
+                            const rect = imageContainerRef.current.getBoundingClientRect();
+                            setResizingPropCorner({
+                              pinNumber: asgn.pin_number,
+                              corner,
+                              startBox: { ...box },
+                              startMouse: { x: e.clientX, y: e.clientY, rectWidth: rect.width, rectHeight: rect.height },
+                              aspectRatio: (box.xmax - box.xmin) / Math.max(0.001, box.ymax - box.ymin),
+                            });
+                          }
+                        }
+                      }}
+                      title={`Drag to resize (${corner.toUpperCase()}). Hold Shift for freeform.`}
+                    />
+                  ))}
                 </div>
               );
             })}

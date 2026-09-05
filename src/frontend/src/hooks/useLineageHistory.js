@@ -136,6 +136,7 @@ export function useLineageHistory({
           is_inpaint:
             item.id?.startsWith('gen_inpaint_') || Boolean(item.inpaint_metadata || item.schema_json?.inpaint_metadata),
           is_wardrobe: Boolean(item.schema_json?.wardrobe_composition),
+          is_prop: Boolean(item.schema_json?.prop_composition),
         }));
         setConversationMessages(reconstructed);
         setConversationId(convId || `conv_${record.id}`);

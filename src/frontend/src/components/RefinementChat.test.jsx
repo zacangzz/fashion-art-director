@@ -65,7 +65,7 @@ describe('RefinementChat Component', () => {
       />
     );
 
-    const wardrobeBtns = screen.getAllByRole('button', { name: /Wardrobe/i });
+    const wardrobeBtns = screen.getAllByRole('button', { name: /Scene|Wardrobe/i });
     fireEvent.click(wardrobeBtns[0]);
 
     expect(handleToggleWardrobe).toHaveBeenCalled();
