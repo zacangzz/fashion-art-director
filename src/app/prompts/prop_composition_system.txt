@@ -24,6 +24,3 @@ Your task is to produce a single, photorealistic raw photo cohesive master image
   * Do NOT introduce global color shifts, magenta tinting, yellow-magenta drift, or artificial warming filters.
 - Raw Photo Optical Fidelity:
   * Maintain 1:1 original photographic clarity, depth-of-field blur consistency, authentic lens characteristics, and natural film grain. Strictly avoid plastic smoothing or AI-hallucinated smudges.
-
-COMPOSITION INSTRUCTIONS:
-{COMPOSITION_INSTRUCTIONS}

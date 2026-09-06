@@ -194,7 +194,7 @@ export default function CameraSpatialStagerModal({
       onClose={onClose}
       title="Spatial Camera & Subject Stager"
       subtitle="Full 3D scene studio: stage characters, camera position, optical depth of field & photometric lighting."
-      icon={<Compass size={18} className="text-emerald-400" />}
+      icon={<Compass size={18} className="text-accent" />}
       size="lg"
       footer={modalFooter}
       className="stager-modal-popup"

@@ -2,7 +2,7 @@ import io
 import base64
 import hashlib
 from typing import Optional, Dict, Any, List, Union
-from PIL import Image, ImageCms
+from PIL import Image, ImageCms, ImageFilter
 from google.genai import types
 
 _CACHED_SRGB_PROFILE_BYTES: Optional[bytes] = None
@@ -157,6 +157,96 @@ def detect_closest_aspect_ratio(width: int, height: int) -> str:
         "1.8:1": 1.8,
     }
     return min(ratios.keys(), key=lambda k: abs(ratios[k] - target_ratio))
+
+
+def conform_uploaded_image(
+    image_bytes: bytes,
+    custom_aspect_ratio: Optional[str] = None,
+    max_dimension: int = 3840,
+) -> tuple[bytes, str, int, int]:
+    """
+    Standardizes an uploaded photo using Pillow:
+    1. Detects closest preset aspect ratio (or uses custom).
+    2. Proportionally downscales oversized images (> max_dimension) via Image.Resampling.LANCZOS without cropping.
+    3. Conforms image to exact aspect ratio canvas via Smart Canvas Fit (subtle ambient edge extension),
+       ensuring 100% of original photo content is preserved without cropping or black bars.
+    4. Attaches calibrated sRGB color profile and returns (png_bytes, aspect_ratio, width, height).
+    """
+    if not image_bytes:
+        return image_bytes, "2:3", 0, 0
+
+    pil_img = Image.open(io.BytesIO(image_bytes))
+    if pil_img.mode not in ("RGB", "RGBA"):
+        pil_img = pil_img.convert("RGB")
+
+    w, h = pil_img.size
+    eff_aspect = custom_aspect_ratio or detect_closest_aspect_ratio(w, h)
+
+    # 1. Proportionally downscale oversized images to 4K max bounds without cropping
+    if w > max_dimension or h > max_dimension:
+        pil_img.thumbnail((max_dimension, max_dimension), Image.Resampling.LANCZOS)
+        w, h = pil_img.size
+
+    # 2. Compute target aspect ratio
+    ratio_lookup = {
+        "1:1": 1.0,
+        "16:9": 16 / 9,
+        "9:16": 9 / 16,
+        "21:9": 21 / 9,
+        "2:3": 2 / 3,
+        "3:2": 3 / 2,
+        "4:5": 4 / 5,
+        "5:4": 5 / 4,
+        "3:4": 3 / 4,
+        "4:3": 4 / 3,
+        "1.8:1": 1.8,
+    }
+    target_ratio = ratio_lookup.get(eff_aspect, w / h if h > 0 else 1.0)
+    current_ratio = w / h if h > 0 else 1.0
+
+    # 3. If aspect ratio differs by more than 0.5%, perform Smart Canvas Fit
+    if abs(current_ratio - target_ratio) > 0.005:
+        if current_ratio > target_ratio:
+            # Image is wider than target ratio: width stays, height expands
+            canvas_w = w
+            canvas_h = round(w / target_ratio)
+            x_offset = 0
+            y_offset = (canvas_h - h) // 2
+        else:
+            # Image is taller than target ratio: height stays, width expands
+            canvas_h = h
+            canvas_w = round(h * target_ratio)
+            x_offset = (canvas_w - w) // 2
+            y_offset = 0
+
+        # Create blurred ambient background from original image
+        bg = pil_img.resize((canvas_w, canvas_h), Image.Resampling.BILINEAR)
+        blur_rad = max(15, min(canvas_w, canvas_h) // 30)
+        bg = bg.filter(ImageFilter.GaussianBlur(radius=blur_rad))
+
+        # Paste uncropped original photo in center
+        if pil_img.mode == "RGBA":
+            bg.paste(pil_img, (x_offset, y_offset), pil_img)
+        else:
+            bg.paste(pil_img, (x_offset, y_offset))
+
+        conformed_img = bg
+        final_w, final_h = canvas_w, canvas_h
+    else:
+        conformed_img = pil_img
+        final_w, final_h = w, h
+
+    # 4. Standardize to sRGB with ICC profile
+    buf = io.BytesIO()
+    save_kwargs: Dict[str, Any] = {"format": "PNG"}
+    srgb_bytes = get_standard_srgb_profile_bytes()
+    if srgb_bytes:
+        save_kwargs["icc_profile"] = srgb_bytes
+
+    conformed_img.save(buf, **save_kwargs)
+    conformed_bytes = buf.getvalue()
+
+    return conformed_bytes, eff_aspect, final_w, final_h
 
 
 def normalize_interaction_aspect_ratio(aspect_ratio: Optional[str]) -> str:

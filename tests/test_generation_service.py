@@ -511,3 +511,252 @@ def test_save_generation_image_embeds_srgb_profile(tmp_path):
     assert len(saved_img.info["icc_profile"]) > 0
 
 
+def test_conform_uploaded_image_smart_canvas_fit_4_5():
+    from app.utils.image_utils import conform_uploaded_image, get_standard_srgb_profile_bytes
+
+    # Create image simulating FT3.png (1651 x 1838) with specific center color
+    img = Image.new("RGB", (1651, 1838), color=(120, 200, 150))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    raw_bytes = buf.getvalue()
+
+    conformed_bytes, aspect, w, h = conform_uploaded_image(raw_bytes)
+
+    assert aspect == "4:5"
+    assert w == 1651
+    assert h == 2064
+    assert round(w / h, 2) == 0.80
+
+    # Verify center pixel is untouched and ICC profile is attached
+    re_opened = Image.open(io.BytesIO(conformed_bytes))
+    assert re_opened.size == (1651, 2064)
+    center_pixel = re_opened.getpixel((1651 // 2, 2064 // 2))
+    assert center_pixel == (120, 200, 150)
+    assert "icc_profile" in re_opened.info
+    assert len(re_opened.info["icc_profile"]) == len(get_standard_srgb_profile_bytes())
+
+
+def test_conform_uploaded_image_downscales_oversized():
+    from app.utils.image_utils import conform_uploaded_image
+
+    # Create oversized image: 4800 x 3200 (3:2 ratio)
+    img = Image.new("RGB", (4800, 3200), color=(100, 120, 140))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    raw_bytes = buf.getvalue()
+
+    conformed_bytes, aspect, w, h = conform_uploaded_image(raw_bytes, max_dimension=3840)
+
+    assert aspect == "3:2"
+    assert max(w, h) <= 3840
+    assert w == 3840
+    assert h == 2560
+
+
+def test_wardrobe_service_generate_photo_scene_description():
+    from app.services.wardrobe_service import WardrobeService
+    from app.utils.prompt_loader import PHOTO_INGESTION_SYSTEM_PROMPT
+
+    fake_db = FakeFirestoreClient()
+    db_mgr = FirestoreManager(fake_db)
+    storage_service = MagicMock()
+    mock_client = MagicMock()
+
+    mock_interaction = MagicMock()
+    mock_interaction.output_text = "A candid, atmospheric worm's-eye view of two young siblings on a lush meadow."
+    mock_interaction.usage_metadata = MagicMock(prompt_token_count=150, candidates_token_count=80, total_token_count=230)
+    mock_client.interactions.create.return_value = mock_interaction
+
+    wardrobe_service = WardrobeService(
+        db_manager=db_mgr,
+        api_key="mock_key",
+        storage_service=storage_service,
+        client=mock_client,
+    )
+
+    dummy_bytes = create_dummy_png_bytes(200, 200)
+    desc = wardrobe_service.generate_photo_scene_description(dummy_bytes, vision_model="gemini-3.5-flash-lite")
+
+    assert "worm's-eye view of two young siblings" in desc
+    mock_client.interactions.create.assert_called_once()
+    call_kwargs = mock_client.interactions.create.call_args.kwargs
+    assert call_kwargs["model"] == "gemini-3.5-flash-lite"
+    assert any("Scene Context & Atmosphere" in str(item) for item in call_kwargs["input"])
+
+
+def test_register_uploaded_photo_conforms_and_extracts_prose(tmp_path):
+    storage_dir = str(tmp_path / "storage")
+    fake_bucket = MagicMock()
+    fake_blob = MagicMock()
+    fake_bucket.blob.return_value = fake_blob
+    storage_service = StorageService(bucket=fake_bucket, environment="local", storage_dir=storage_dir)
+
+    fake_db = FakeFirestoreClient()
+    db_mgr = FirestoreManager(fake_db)
+    wardrobe_service = MagicMock()
+    wardrobe_service.generate_photo_scene_description.return_value = "Worm's-eye shot of kids on grass."
+
+    service = GenerationService(
+        db_manager=db_mgr,
+        storage_service=storage_service,
+        wardrobe_service=wardrobe_service,
+    )
+
+    # 1651 x 1838 input
+    raw_bytes = create_dummy_png_bytes(1651, 1838)
+    result = service.register_uploaded_photo(raw_bytes, filename="FT3.png", user_id="test_user")
+
+    assert result["aspect_ratio"] == "4:5"
+    assert result["compiled_prompt"] == "Worm's-eye shot of kids on grass."
+    assert result["resolution"] == {"width": 1651, "height": 2064}
+
+    # Verify Firestore document
+    gen_doc = db_mgr.get_generation(result["generation_id"])
+    assert gen_doc is not None
+    assert gen_doc["compiled_prompt"] == "Worm's-eye shot of kids on grass."
+    assert gen_doc["aspect_ratio"] == "4:5"
+    assert gen_doc["schema_json"]["has_scene_prose"] is True
+
+
+def test_compose_wardrobe_legacy_upload_on_the_fly_fallback_and_locks(tmp_path):
+    storage_dir = str(tmp_path / "storage")
+    os.makedirs(os.path.join(storage_dir, "generations"), exist_ok=True)
+    os.makedirs(os.path.join(storage_dir, "wardrobe"), exist_ok=True)
+
+    fake_bucket = MagicMock()
+    fake_blob = MagicMock()
+    fake_bucket.blob.return_value = fake_blob
+    storage_service = StorageService(bucket=fake_bucket, environment="local", storage_dir=storage_dir)
+
+    fake_db = FakeFirestoreClient()
+    db_mgr = FirestoreManager(fake_db)
+
+    # Legacy upload with generic placeholder prompt
+    parent_img_bytes = create_dummy_png_bytes(1651, 2064)
+    parent_path = storage_service.upload_bytes(
+        user_id="test_user",
+        category="generations",
+        filename="gen_upload_legacy_master.png",
+        data=parent_img_bytes,
+    )
+
+    db_mgr.create_generation(
+        user_id="test_user",
+        gen_data={
+            "id": "gen_upload_legacy",
+            "master_image_path": parent_path,
+            "compiled_prompt": "Directly ingested photo: Ft3",
+            "prompt": "Directly ingested photo: Ft3",
+            "model_name": "direct_upload",
+            "aspect_ratio": "4:5",
+            "seed": 12345,
+        }
+    )
+
+    # Wardrobe item
+    crop_path = storage_service.upload_bytes(
+        user_id="test_user",
+        category="wardrobe",
+        filename="crop_kenzo.png",
+        data=create_dummy_png_bytes(200, 200),
+    )
+    db_mgr.create_wardrobe_item(
+        user_id="test_user",
+        item_data={
+            "id": "item_kenzo",
+            "label": "Kenzo Tiger T-Shirt",
+            "category": "tops",
+            "cropped_image_path": crop_path,
+            "extracted_details": {
+                "has_text_or_logo": True,
+                "exact_text_content": ["KENZO PARIS"],
+                "has_graphic_or_print": True,
+                "graphic_description": "Embroidered tiger graphic",
+            }
+        }
+    )
+
+    wardrobe_service = MagicMock()
+    wardrobe_service.generate_photo_scene_description.return_value = "Master scene: extreme worm's-eye view of children on grass with daisies."
+    wardrobe_service.ground_wardrobe_pins.return_value = {
+        "grounded_pins": [{
+            "pin_number": 1,
+            "target_subject": "boy in yellow shorts",
+            "body_location": "upper torso",
+            "spatial_anchor": "left side of frame",
+        }],
+        "unmodified_subjects_guardrail": "Keep girl on right strictly unchanged.",
+    }
+
+    image_generator = MagicMock()
+    image_generator.generate.return_value = create_dummy_png_bytes(1651, 2064)
+    image_generator.last_call_metrics = {"cost_usd": 0.04, "total_token_count": 500}
+
+    service = GenerationService(
+        db_manager=db_mgr,
+        storage_service=storage_service,
+        image_generator=image_generator,
+        wardrobe_service=wardrobe_service,
+    )
+
+    res = service.compose_wardrobe(
+        parent_id="gen_upload_legacy",
+        assignments=[{"pin_number": 1, "wardrobe_item_id": "item_kenzo"}],
+        user_id="test_user",
+    )
+
+    # 1. On-the-fly ingestion was triggered and parent record updated
+    wardrobe_service.generate_photo_scene_description.assert_called_once()
+    updated_parent = db_mgr.get_generation("gen_upload_legacy")
+    assert "Master scene: extreme worm's-eye view" in updated_parent["compiled_prompt"]
+
+    # 2. Inspect prompt passed to image_generator
+    call_args = image_generator.generate.call_args.kwargs
+    prompt_text = call_args["prompt"]
+    assert "REFERENCE BASE SCENE ANCHOR" in prompt_text
+    assert "Master scene: extreme worm's-eye view" in prompt_text
+    assert "CANVAS & PERSPECTIVE LOCK" in prompt_text
+    assert "(shown in Reference Image #2)" in prompt_text
+
+    # 3. Verify reference images count passed
+    assert len(call_args["reference_images"]) == 2
+
+
+def test_image_generator_reference_image_interleaving():
+    mock_client = MagicMock()
+    mock_interaction = MagicMock()
+    mock_interaction.output_image.data = base64.b64encode(create_dummy_png_bytes()).decode("utf-8")
+    mock_interaction.output_text = "generated"
+    mock_interaction.usage_metadata = MagicMock(prompt_token_count=100, candidates_token_count=100, total_token_count=200)
+    mock_client.interactions.create.return_value = mock_interaction
+
+    gen = ImageGenerator(client=mock_client)
+
+    img1 = create_dummy_png_bytes(50, 50)
+    img2 = create_dummy_png_bytes(60, 60)
+
+    # Multi-image call: should include Reference Image #1: and Reference Image #2:
+    gen.generate(
+        prompt="Compose scene",
+        reference_images=[img1, img2],
+        model="gemini-3.1-flash-image",
+    )
+
+    call_items = mock_client.interactions.create.call_args.kwargs["input"]
+    text_labels = [item["text"] for item in call_items if isinstance(item, dict) and item.get("type") == "text"]
+    assert "Reference Image #1:" in text_labels
+    assert "Reference Image #2:" in text_labels
+
+    # Single-image call: should NOT insert redundant tag
+    mock_client.interactions.create.reset_mock()
+    gen.generate(
+        prompt="Single image edit",
+        reference_images=[img1],
+        model="gemini-3.1-flash-image",
+    )
+    single_call_items = mock_client.interactions.create.call_args.kwargs["input"]
+    single_text_labels = [item["text"] for item in single_call_items if isinstance(item, dict) and item.get("type") == "text"]
+    assert "Reference Image #1:" not in single_text_labels
+
+
+

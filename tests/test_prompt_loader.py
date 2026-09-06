@@ -14,6 +14,9 @@ from app.utils.prompt_loader import (
     RESYNC_LEVERS_FROM_PROMPT_SYSTEM,
     RESYNC_LEVERS_FROM_PROMPT_TEMPLATE,
     CHECK_CONFLICTS_SYSTEM_PROMPT,
+    PHOTO_INGESTION_SYSTEM_PROMPT,
+    WARDROBE_COMPOSITION_SYSTEM_PROMPT,
+    PROP_COMPOSITION_SYSTEM_PROMPT,
 )
 
 
@@ -86,3 +89,11 @@ def test_prompt_assets_are_loaded_and_composed():
     assert "blurry" in DEFAULT_NEGATIVE_PROMPT
     assert "unnaturally white teeth" in DEFAULT_NEGATIVE_PROMPT
     assert "fused teeth" in DEFAULT_NEGATIVE_PROMPT
+
+    # Photo Ingestion & Wardrobe/Prop Composition Prompts
+    assert "Scene Context & Atmosphere" in PHOTO_INGESTION_SYSTEM_PROMPT
+    assert "Camera Optics & Framing" in PHOTO_INGESTION_SYSTEM_PROMPT
+    assert "Hyper-Specific Subjects & Attire" in PHOTO_INGESTION_SYSTEM_PROMPT
+    assert "Do NOT return JSON" in PHOTO_INGESTION_SYSTEM_PROMPT
+    assert "{COMPOSITION_INSTRUCTIONS}" not in WARDROBE_COMPOSITION_SYSTEM_PROMPT
+    assert "{COMPOSITION_INSTRUCTIONS}" not in PROP_COMPOSITION_SYSTEM_PROMPT

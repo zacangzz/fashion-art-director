@@ -28,6 +28,7 @@ from app.utils.image_utils import (
     ASPECT_RATIO_RESOLUTIONS,
     analyze_mask_bytes,
     detect_closest_aspect_ratio,
+    conform_uploaded_image,
     normalize_interaction_aspect_ratio,
     to_interaction_image_input,
     standardize_image_to_srgb,
@@ -379,19 +380,31 @@ class GenerationService:
     ) -> Dict[str, Any]:
         """
         Ingests a user-provided image directly as a baseline generation record.
+        Conforms image to target aspect ratio and 4K bounds via Pillow,
+        and extracts 4-layer sequential Master Scene prose via vision model.
         """
         gen_id = f"gen_upload_{uuid.uuid4().hex[:8]}"
         created_at = datetime.now(timezone.utc).isoformat()
 
-        pil_img = Image.open(io.BytesIO(image_bytes))
-        width, height = pil_img.size
-        eff_aspect = custom_aspect_ratio or detect_closest_aspect_ratio(width, height)
+        # 1. Pillow Smart Canvas Fit and 4K resolution bounds
+        conformed_bytes, eff_aspect, width, height = conform_uploaded_image(
+            image_bytes=image_bytes,
+            custom_aspect_ratio=custom_aspect_ratio,
+        )
 
         out_filename = f"{gen_id}_master.png"
-        master_path, width, height = self._save_generation_image(user_id, out_filename, image_bytes, eff_aspect)
+        master_path, width, height = self._save_generation_image(user_id, out_filename, conformed_bytes, eff_aspect)
 
+        # 2. Extract Step-1 style 4-layer sequential prose
         title = os.path.splitext(filename or "uploaded_photo")[0].replace("_", " ").title()
-        prompt_desc = f"Directly ingested photo: {title}"
+        scene_prose = ""
+        if self.wardrobe_service is not None:
+            try:
+                scene_prose = self.wardrobe_service.generate_photo_scene_description(conformed_bytes)
+            except Exception as e:
+                logger.warning(f"Could not generate scene description for upload {gen_id}: {e}")
+
+        prompt_desc = scene_prose or f"Directly ingested photo: {title}"
         seed = random.randint(100000, 9999999)
 
         record = {
@@ -400,8 +413,13 @@ class GenerationService:
             "moodboard_id": None,
             "is_baseline": True,
             "created_at": created_at,
-            "schema_json": {"task": "direct_photo_upload", "original_filename": filename},
+            "schema_json": {
+                "task": "direct_photo_upload",
+                "original_filename": filename,
+                "has_scene_prose": bool(scene_prose),
+            },
             "compiled_prompt": prompt_desc,
+            "prompt": prompt_desc,
             "negative_prompt": "",
             "seed": seed,
             "master_image_path": master_path,
@@ -1015,6 +1033,33 @@ class GenerationService:
         eff_aspect = aspect_ratio or parent_gen.get("aspect_ratio", "2:3")
         eff_seed = seed if seed is not None else parent_gen.get("seed", 4289102)
 
+        parent_prompt = parent_gen.get("compiled_prompt") or parent_gen.get("prompt") or ""
+        is_direct_upload = parent_id.startswith("gen_upload_") or parent_gen.get("model_name") == "direct_upload"
+
+        # On-the-fly legacy ingestion fallback for direct uploads lacking rich scene prose
+        if is_direct_upload and (not parent_prompt or parent_prompt.startswith("Directly ingested photo:")):
+            if self.wardrobe_service is not None and parent_image_bytes:
+                try:
+                    logger.info(f"Running on-the-fly scene ingestion for legacy direct upload {parent_id}")
+                    new_prose = self.wardrobe_service.generate_photo_scene_description(
+                        parent_image_bytes,
+                        vision_model=vision_model,
+                    )
+                    if new_prose:
+                        parent_prompt = new_prose
+                        try:
+                            parent_schema = dict(parent_gen.get("schema_json") or {})
+                            parent_schema["has_scene_prose"] = True
+                            self.db.update_generation(parent_id, {
+                                "compiled_prompt": new_prose,
+                                "prompt": new_prose,
+                                "schema_json": parent_schema,
+                            })
+                        except Exception as ue:
+                            logger.warning(f"Could not update Firestore parent record for {parent_id}: {ue}")
+                except Exception as e:
+                    logger.warning(f"On-the-fly photo scene ingestion failed for {parent_id}: {e}")
+
         normalized_assignments: List[Dict[str, Any]] = []
         for asgn in assignments:
             if hasattr(asgn, "model_dump"):
@@ -1056,9 +1101,11 @@ class GenerationService:
 
             if item:
                 crop_path = item.get("upscaled_image_path") or item.get("cropped_image_path")
+                ref_idx = None
                 if crop_path:
                     try:
                         garment_references.append(self._load_image_bytes(crop_path))
+                        ref_idx = 1 + len(garment_references)
                     except Exception as e:
                         logger.warning(f"Could not load garment crop {crop_path}: {e}")
 
@@ -1069,7 +1116,8 @@ class GenerationService:
 
                 label = item.get("label", "garment")
                 category = item.get("category", "tops")
-                asgn_text = f"Pin #{pin_num} ({spatial_anc}): Replace {body_loc} of {target_sub} with \"{label}\" ({category})."
+                ref_tag = f" (shown in Reference Image #{ref_idx})" if ref_idx else ""
+                asgn_text = f"Pin #{pin_num} ({spatial_anc}): Replace {body_loc} of {target_sub} with \"{label}\" ({category}){ref_tag}."
 
                 extracted_details = item.get("extracted_details") or {}
                 if extracted_details:
@@ -1098,6 +1146,15 @@ class GenerationService:
             WARDROBE_COMPOSITION_SYSTEM_PROMPT,
             f"MULTI-SUBJECT INVARIANCE GUARDRAIL:\n{guardrail_text}",
         ]
+        if parent_prompt and not parent_prompt.startswith("Directly ingested photo:"):
+            composition_parts.append(
+                f"REFERENCE BASE SCENE ANCHOR (PRESERVE 100% OF CAMERA ANGLE, LIGHTING, PROPS, AND UNTARGETED SUBJECTS):\n{parent_prompt}"
+            )
+        composition_parts.append(
+            "CANVAS & PERSPECTIVE LOCK:\n"
+            "Strictly preserve the original camera angle, perspective, subject distance, and wide framing from the reference image. "
+            "Do NOT zoom in, re-crop, or exclude foreground/background elements. Maintain identical composition and environmental context."
+        )
         if lineage_depth >= 1:
             turn_num = lineage_depth + 1
             composition_parts.append(
@@ -1258,6 +1315,33 @@ class GenerationService:
         eff_aspect = aspect_ratio or parent_gen.get("aspect_ratio", "2:3")
         eff_seed = seed if seed is not None else parent_gen.get("seed", 4289102)
 
+        parent_prompt = parent_gen.get("compiled_prompt") or parent_gen.get("prompt") or ""
+        is_direct_upload = parent_id.startswith("gen_upload_") or parent_gen.get("model_name") == "direct_upload"
+
+        # On-the-fly legacy ingestion fallback for direct uploads lacking rich scene prose
+        if is_direct_upload and (not parent_prompt or parent_prompt.startswith("Directly ingested photo:")):
+            if self.wardrobe_service is not None and parent_image_bytes:
+                try:
+                    logger.info(f"Running on-the-fly scene ingestion for legacy direct upload {parent_id} in compose_props")
+                    new_prose = self.wardrobe_service.generate_photo_scene_description(
+                        parent_image_bytes,
+                        vision_model=vision_model,
+                    )
+                    if new_prose:
+                        parent_prompt = new_prose
+                        try:
+                            parent_schema = dict(parent_gen.get("schema_json") or {})
+                            parent_schema["has_scene_prose"] = True
+                            self.db.update_generation(parent_id, {
+                                "compiled_prompt": new_prose,
+                                "prompt": new_prose,
+                                "schema_json": parent_schema,
+                            })
+                        except Exception as ue:
+                            logger.warning(f"Could not update Firestore parent record for {parent_id}: {ue}")
+                except Exception as e:
+                    logger.warning(f"On-the-fly photo scene ingestion failed for {parent_id}: {e}")
+
         normalized_assignments: List[Dict[str, Any]] = []
         for asgn in assignments:
             if hasattr(asgn, "model_dump"):
@@ -1299,9 +1383,11 @@ class GenerationService:
 
             if item:
                 crop_path = item.get("upscaled_image_path") or item.get("cropped_image_path")
+                ref_idx = None
                 if crop_path:
                     try:
                         prop_references.append(self._load_image_bytes(crop_path))
+                        ref_idx = 1 + len(prop_references)
                     except Exception as e:
                         logger.warning(f"Could not load prop crop {crop_path}: {e}")
 
@@ -1314,7 +1400,8 @@ class GenerationService:
 
                 label = item.get("label", "prop object")
                 category = item.get("category", "decor")
-                asgn_text = f"Prop #{pin_num} ({spatial_anc}): Place \"{label}\" ({category}) {host_surface}.\n  - SCALE: {rel_scale}\n  - LIGHTING & CONTACT SHADOW: {lighting_shadow}\n  - DEPTH OCCLUSION: {depth_occ}"
+                ref_tag = f" (shown in Reference Image #{ref_idx})" if ref_idx else ""
+                asgn_text = f"Prop #{pin_num} ({spatial_anc}): Place \"{label}\" ({category}){ref_tag} {host_surface}.\n  - SCALE: {rel_scale}\n  - LIGHTING & CONTACT SHADOW: {lighting_shadow}\n  - DEPTH OCCLUSION: {depth_occ}"
 
                 extracted_details = item.get("extracted_details") or {}
                 if extracted_details:
@@ -1345,6 +1432,15 @@ class GenerationService:
             PROP_COMPOSITION_SYSTEM_PROMPT,
             f"SCENE & SUBJECT PRESERVATION GUARDRAIL:\n{guardrail_text}",
         ]
+        if parent_prompt and not parent_prompt.startswith("Directly ingested photo:"):
+            composition_parts.append(
+                f"REFERENCE BASE SCENE ANCHOR (PRESERVE 100% OF CAMERA ANGLE, LIGHTING, PROPS, AND UNTARGETED SUBJECTS):\n{parent_prompt}"
+            )
+        composition_parts.append(
+            "CANVAS & PERSPECTIVE LOCK:\n"
+            "Strictly preserve the original camera angle, perspective, subject distance, and wide framing from the reference image. "
+            "Do NOT zoom in, re-crop, or exclude foreground/background elements. Maintain identical composition and environmental context."
+        )
         if lineage_depth >= 1:
             turn_num = lineage_depth + 1
             composition_parts.append(

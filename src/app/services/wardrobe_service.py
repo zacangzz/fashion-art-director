@@ -38,6 +38,7 @@ from app.utils.prompt_loader import (
     SUBJECT_GROUNDING_PROMPT,
     GARMENT_UPSCALE_SYSTEM_PROMPT,
     GARMENT_FEATURE_EXTRACTION_PROMPT,
+    PHOTO_INGESTION_SYSTEM_PROMPT,
 )
 
 logger = get_logger("wardrobe_service")
@@ -776,3 +777,43 @@ class WardrobeService:
                 "tokens": {"prompt_token_count": 0, "candidates_token_count": 0, "total_token_count": 0},
                 "cost_breakdown": {},
             }
+
+    def generate_photo_scene_description(
+        self,
+        image_bytes: bytes,
+        vision_model: Optional[str] = None,
+    ) -> str:
+        """
+        Analyzes an uploaded photograph and reverse-engineers a rich, 4-layer sequential Master Scene Description
+        in evocative prose (matching Step 1's Master Generation Prompt style).
+        """
+        if not image_bytes:
+            return ""
+
+        active_model = vision_model or self.vision_model
+        request_id = f"photo_ingest_{uuid.uuid4().hex[:8]}"
+
+        image_part = to_image_part(image_bytes)
+        contents = [
+            image_part,
+            PHOTO_INGESTION_SYSTEM_PROMPT,
+        ]
+
+        self._audit("photo_scene_description_request", request_id, model=active_model)
+
+        try:
+            response = self._generate_content_sync(contents, vision_model=active_model)
+            raw_text = getattr(response, "text", "") or ""
+            if not raw_text and hasattr(response, "output_text"):
+                raw_text = getattr(response, "output_text", "") or ""
+            prose = raw_text.strip()
+            # Clean any accidental markdown backticks wrapping the whole paragraph
+            if prose.startswith("```") and prose.endswith("```"):
+                prose = prose.strip("`").strip()
+                if prose.lower().startswith("markdown") or prose.lower().startswith("text"):
+                    prose = prose.split("\n", 1)[-1].strip()
+            self._audit("photo_scene_description_success", request_id, prose_length=len(prose))
+            return prose
+        except Exception as e:
+            logger.warning(f"Photo scene description generation failed: {e}")
+            return ""

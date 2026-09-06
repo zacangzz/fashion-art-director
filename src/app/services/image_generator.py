@@ -143,7 +143,9 @@ class ImageGenerator:
 
         input_items: List[Any] = []
         if reference_images:
-            for ref in reference_images:
+            for idx, ref in enumerate(reference_images, start=1):
+                if len(reference_images) > 1:
+                    input_items.append({"type": "text", "text": f"Reference Image #{idx}:"})
                 if isinstance(ref, bytes):
                     input_items.append(to_interaction_image_input(ref, optimize=True))
                 elif isinstance(ref, dict):

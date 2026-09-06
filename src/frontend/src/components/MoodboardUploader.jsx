@@ -15,6 +15,7 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 
+import { Button, Badge, Select } from './ui';
 import {
   ASPECT_RATIO_OPTIONS,
   detectClosestRatio,
@@ -158,7 +159,7 @@ export default function MoodboardUploader({
             <Upload size={16} className="text-accent" />
             <span className="card-title">Moodboard Ingestion</span>
           </div>
-          <span className="badge-counter">{files.length}/5 files</span>
+          <Badge variant="neutral" size="sm">{files.length}/5 files</Badge>
         </div>
 
         {/* Drag & Drop Zone */}
@@ -237,16 +238,9 @@ export default function MoodboardUploader({
                 Starting Scene Prompt <span style={{ color: '#ef4444' }}>*</span>
               </label>
             </div>
-            <span
-              className="baseline-prompt-badge"
-              style={{
-                background: !prompt.trim() ? '#FEF2F2' : '#ECFDF5',
-                color: !prompt.trim() ? '#DC2626' : '#059669',
-                border: `1px solid ${!prompt.trim() ? '#FEE2E2' : '#A7F3D0'}`,
-              }}
-            >
+            <Badge variant={!prompt.trim() ? 'danger' : 'success'} size="xs">
               {!prompt.trim() ? 'Required' : 'Ready'}
-            </span>
+            </Badge>
           </div>
           <textarea
             id="baseline-prompt-input"
@@ -260,7 +254,7 @@ export default function MoodboardUploader({
           />
           <div className="baseline-prompt-hint">
             {!prompt.trim() ? (
-              <span style={{ color: '#D97706', fontWeight: 500 }}>
+              <span style={{ color: 'var(--accent-warning)', fontWeight: 500 }}>
                 * Please provide a starting prompt. The vision model will analyze your uploaded references with this prompt to extract visual levers and synthesize the Master Prompt.
               </span>
             ) : (
@@ -272,41 +266,34 @@ export default function MoodboardUploader({
         </div>
 
         {/* Primary Action Button */}
-        <button
-          type="button"
-          className="btn-primary"
+        <Button
+          variant="primary"
+          size="md"
+          fullWidth
           onClick={handleAnalyzeClick}
           disabled={files.length === 0 || !prompt.trim() || isAnalyzing}
-          style={{ width: '100%', marginTop: '4px' }}
+          loading={isAnalyzing}
+          icon={<Sparkles size={16} />}
+          style={{ marginTop: '4px' }}
         >
-          {isAnalyzing ? (
-            <>
-              <Loader2 size={16} className="spin-animation" />
-              <span>Analyzing Moodboard & Synthesizing Levers...</span>
-            </>
-          ) : (
-            <>
-              <Sparkles size={16} />
-              <span>
-                {files.length === 0
-                  ? 'Upload 1–5 Reference Files to Begin'
-                  : !prompt.trim()
-                  ? 'Enter Starting Prompt to Analyze'
-                  : 'Analyze Moodboard'}
-              </span>
-            </>
-          )}
-        </button>
+          {isAnalyzing
+            ? 'Analyzing Moodboard & Synthesizing Levers...'
+            : files.length === 0
+            ? 'Upload 1–5 Reference Files to Begin'
+            : !prompt.trim()
+            ? 'Enter Starting Prompt to Analyze'
+            : 'Analyze Moodboard'}
+        </Button>
       </div>
 
       {/* Secondary Card: Skip Art Direction — Direct Photo Ingestion */}
       <div className="direct-upload-card">
         <div className="card-header">
           <div className="card-title-group">
-            <ImageIcon size={16} className="text-emerald-400" />
+            <ImageIcon size={16} className="text-accent" />
             <span className="card-title">Direct Photo Ingestion</span>
           </div>
-          <span className="badge-counter badge-skip-art">Skip Art Direction</span>
+          <Badge variant="primary" dot>Skip Art Direction</Badge>
         </div>
 
         <p className="direct-upload-description">
@@ -343,8 +330,8 @@ export default function MoodboardUploader({
                 }
               }}
             />
-            <div className="dropzone-icon" style={{ color: '#10b981' }}>
-              <Upload size={24} />
+            <div className="dropzone-icon">
+              <Upload size={24} className="text-accent" />
             </div>
             <p className="dropzone-text">
               Drop 1 photo here, or <span>browse</span>
@@ -372,51 +359,48 @@ export default function MoodboardUploader({
                   {directFile.name}
                 </div>
                 <div className="direct-meta-specs">
-                  {directDimensions
-                    ? `${directDimensions.width} × ${directDimensions.height} px`
-                    : `${(directFile.size / (1024 * 1024)).toFixed(2)} MB`}
-                  {' • '}
-                  <span className="text-emerald-400" style={{ fontWeight: 600 }}>
-                    Detected: {detectedRatio}
+                  <span>
+                    {directDimensions
+                      ? `${directDimensions.width} × ${directDimensions.height} px`
+                      : `${(directFile.size / (1024 * 1024)).toFixed(2)} MB`}
                   </span>
+                  <span className="spec-bullet">•</span>
+                  <Badge variant="primary" size="xs">
+                    Detected: {detectedRatio}
+                  </Badge>
                 </div>
 
                 <div className="direct-ratio-selector-row">
                   <span className="direct-ratio-label">Aspect Ratio:</span>
-                  <select
-                    className="direct-ratio-select"
+                  <Select
+                    size="sm"
                     value={chosenRatio}
                     onChange={(e) => setChosenRatio(e.target.value)}
                     disabled={isDirectUploading}
-                  >
-                    {ASPECT_RATIO_OPTIONS.map((opt) => (
-                      <option key={opt.id} value={opt.id}>
-                        {opt.name} {opt.id === detectedRatio ? '(Auto-Detected)' : ''}
-                      </option>
-                    ))}
-                  </select>
+                    options={ASPECT_RATIO_OPTIONS.map((opt) => ({
+                      value: opt.id,
+                      label: `${opt.name}${opt.id === detectedRatio ? ' (Auto-Detected)' : ''}`,
+                    }))}
+                    className="direct-ratio-select-field"
+                  />
                 </div>
               </div>
             </div>
 
-            <button
-              type="button"
-              className="btn-primary direct-submit-btn"
+            <Button
+              variant="primary"
+              size="md"
+              fullWidth
               onClick={handleProceedDirectUpload}
               disabled={isDirectUploading}
+              loading={isDirectUploading}
+              iconRight={<ArrowRight size={16} />}
+              className="direct-submit-btn"
             >
-              {isDirectUploading ? (
-                <>
-                  <Loader2 size={16} className="spin-animation" />
-                  <span>Registering Photo & Initializing Studio...</span>
-                </>
-              ) : (
-                <>
-                  <span>Skip Art Direction & Begin Refinement</span>
-                  <ArrowRight size={16} />
-                </>
-              )}
-            </button>
+              {isDirectUploading
+                ? 'Registering Photo & Initializing Studio...'
+                : 'Skip Art Direction & Begin Refinement'}
+            </Button>
           </div>
         )}
 

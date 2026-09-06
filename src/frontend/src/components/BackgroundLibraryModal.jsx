@@ -50,7 +50,7 @@ export default function BackgroundLibraryModal({
       onClose={onClose}
       title="Reference Background Library"
       subtitle="Select or upload reference environments for perspective and lighting harmonization."
-      icon={<Layers size={18} className="text-emerald-400" />}
+      icon={<Layers size={18} className="text-accent" />}
       size="lg"
       className="bg-library-modal"
     >
@@ -89,7 +89,7 @@ export default function BackgroundLibraryModal({
         {library.length === 0 && !isLoading ? (
           <div className="bg-library-empty-state" onClick={handleTriggerUpload}>
             <div className="bg-empty-icon-wrap">
-              <Upload size={28} className="text-emerald-400" />
+              <Upload size={28} className="text-accent" />
             </div>
             <h4 className="bg-empty-title">No Background References Yet</h4>
             <p className="bg-empty-desc">

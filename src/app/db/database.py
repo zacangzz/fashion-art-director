@@ -312,6 +312,19 @@ class FirestoreManager:
             return self._normalize_generation_doc(doc.to_dict())
         return None
 
+    def update_generation(self, generation_id: str, updates: Dict[str, Any]) -> bool:
+        """
+        Updates fields on an existing generation document.
+        """
+        doc_ref = self.db.collection("generations").document(generation_id)
+        doc = doc_ref.get()
+        if not doc.exists:
+            return False
+
+        safe_updates = self._to_firestore_safe(updates)
+        doc_ref.update(safe_updates)
+        return True
+
     def list_generations(
         self,
         user_id: str,

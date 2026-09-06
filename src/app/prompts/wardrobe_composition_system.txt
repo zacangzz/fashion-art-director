@@ -15,7 +15,3 @@ Your task is to produce a single, authentic raw photo cohesive image where:
 - Color Constancy & Calibrated White Balance Lock: Strictly preserve the exact Kelvin color temperature, neutral white balance, background chromaticity, neutral gray tones, and authentic skin undertones of the reference base image. Harmonize lighting on the newly added garments WITHOUT shifting the overall scene white balance, and strictly prevent cumulative warm color casts, magenta/reddish tinting, yellow-magenta color drift, or unnatural warming filters across the rest of the image, subjects, and background.
 - Background & Composition: Surrounding environment, background props, camera angle, and unmentioned elements remain strictly identical.
 - Fidelity & Sharpness Lock: Maintain 1:1 original source sharpness, raw photo fidelity, crisp focus, visible skin pores, natural skin texture, realistic teeth texture, natural tooth alignment, authentic gum line, subtle dental translucency, minor skin blemishes, natural light, and authentic micro-textures. Strictly prevent plastic skin, airbrushed textures, waxy smoothing, or unnatural dentures/teeth on subjects and scene elements.
-
-
-COMPOSITION INSTRUCTIONS:
-{COMPOSITION_INSTRUCTIONS}

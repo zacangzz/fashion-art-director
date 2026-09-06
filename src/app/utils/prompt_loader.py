@@ -44,4 +44,5 @@ PROP_FEATURE_EXTRACTION_PROMPT = load_prompt("prop_feature_extraction.txt")
 PROP_UPSCALE_SYSTEM_PROMPT = load_prompt("prop_upscale_system.txt")
 PROP_SCENE_GROUNDING_PROMPT = load_prompt("prop_scene_grounding.txt")
 PROP_COMPOSITION_SYSTEM_PROMPT = load_prompt("prop_composition_system.txt")
+PHOTO_INGESTION_SYSTEM_PROMPT = load_prompt("photo_ingestion_system.txt")
 
