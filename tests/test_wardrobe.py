@@ -406,7 +406,7 @@ def test_wardrobe_composition_dual_reference_and_lineage_anchor(test_db, dummy_i
         user_id="local_dev_user",
     )
     assert res_turn1["generation_id"] is not None
-    assert "Color Constancy & Calibrated White Balance Lock" in res_turn1["compiled_prompt"]
+    assert "Master Photographic Canvas Lock" in res_turn1["compiled_prompt"]
     assert "PROGRESSIVE STYLING TURN #2" not in res_turn1["compiled_prompt"]
 
     # Case B: Turn 2 (Parent = gen_turn1_001, Lineage Depth = 1 from root)
@@ -419,7 +419,7 @@ def test_wardrobe_composition_dual_reference_and_lineage_anchor(test_db, dummy_i
     compiled_turn2 = res_turn2["compiled_prompt"]
     assert "PROGRESSIVE STYLING TURN #2 CHROMATIC ANCHOR" in compiled_turn2
     assert "Maintain absolute color temperature, neutral white balance" in compiled_turn2
-    assert "Color Constancy & Calibrated White Balance Lock" in compiled_turn2
+    assert "Master Photographic Canvas Lock" in compiled_turn2
 
     # Verify that mock_client.interactions.create was called with single parent scene + garment crop for Turn 2
     _, last_call_kwargs = mock_client.interactions.create.call_args

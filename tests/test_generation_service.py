@@ -713,9 +713,11 @@ def test_compose_wardrobe_legacy_upload_on_the_fly_fallback_and_locks(tmp_path):
     # 2. Inspect prompt passed to image_generator
     call_args = image_generator.generate.call_args.kwargs
     prompt_text = call_args["prompt"]
-    assert "REFERENCE BASE SCENE ANCHOR" in prompt_text
-    assert "Master scene: extreme worm's-eye view" in prompt_text
-    assert "CANVAS & PERSPECTIVE LOCK" in prompt_text
+    # For upload lineages, verbose scene anchor is suppressed and clean master canvas lock is injected
+    assert "ORIGINAL BASE SCENE REFERENCE" not in prompt_text
+    assert "Master scene: extreme worm's-eye view" not in prompt_text
+    assert "Master Photographic Canvas Lock" in prompt_text
+    assert "35mm" not in prompt_text
     assert "(shown in Reference Image #2)" in prompt_text
 
     # Verify safety filter sanitization: minor and raw anatomy terms are scrubbed
@@ -807,6 +809,178 @@ def test_image_generator_reference_image_interleaving():
     single_call_items = mock_client.interactions.create.call_args.kwargs["input"]
     single_text_labels = [item["text"] for item in single_call_items if isinstance(item, dict) and item.get("type") == "text"]
     assert "Reference Image #1:" not in single_text_labels
+
+
+def test_compose_wardrobe_ai_baseline_retains_scene_anchor(tmp_path):
+    storage_dir = str(tmp_path / "storage")
+    os.makedirs(os.path.join(storage_dir, "generations"), exist_ok=True)
+    os.makedirs(os.path.join(storage_dir, "wardrobe"), exist_ok=True)
+
+    fake_bucket = MagicMock()
+    fake_blob = MagicMock()
+    fake_bucket.blob.return_value = fake_blob
+    storage_service = StorageService(bucket=fake_bucket, environment="local", storage_dir=storage_dir)
+
+    fake_db = FakeFirestoreClient()
+    db_mgr = FirestoreManager(fake_db)
+
+    # Native AI baseline generation (gen_base_...)
+    parent_img_bytes = create_dummy_png_bytes(1024, 1536)
+    parent_path = storage_service.upload_bytes(
+        user_id="test_user",
+        category="generations",
+        filename="gen_base_test_master.png",
+        data=parent_img_bytes,
+    )
+
+    db_mgr.create_generation(
+        user_id="test_user",
+        gen_data={
+            "id": "gen_base_test",
+            "master_image_path": parent_path,
+            "compiled_prompt": "A nostalgic 1990s raw photo of two models laughing on a sunlit patio.",
+            "prompt": "A nostalgic 1990s raw photo of two models laughing on a sunlit patio.",
+            "model_name": "gemini-3-pro-image",
+            "aspect_ratio": "2:3",
+            "seed": 756782,
+        }
+    )
+
+    crop_path = storage_service.upload_bytes(
+        user_id="test_user",
+        category="wardrobe",
+        filename="crop_tee.png",
+        data=create_dummy_png_bytes(200, 200),
+    )
+    db_mgr.create_wardrobe_item(
+        user_id="test_user",
+        item_data={
+            "id": "item_tee",
+            "label": "Vintage Tee",
+            "category": "tops",
+            "cropped_image_path": crop_path,
+        }
+    )
+
+    image_generator = MagicMock()
+    image_generator.generate.return_value = create_dummy_png_bytes(1024, 1536)
+    image_generator.last_call_metrics = {"cost_usd": 0.04, "total_token_count": 500}
+
+    service = GenerationService(
+        db_manager=db_mgr,
+        storage_service=storage_service,
+        image_generator=image_generator,
+    )
+
+    service.compose_wardrobe(
+        parent_id="gen_base_test",
+        assignments=[{"pin_number": 1, "wardrobe_item_id": "item_tee"}],
+        user_id="test_user",
+    )
+
+    call_args = image_generator.generate.call_args.kwargs
+    prompt_text = call_args["prompt"]
+    # AI baseline: ORIGINAL BASE SCENE REFERENCE is included for diffusion latent alignment
+    assert "ORIGINAL BASE SCENE REFERENCE" in prompt_text
+    assert "A nostalgic 1990s raw photo of two models laughing on a sunlit patio." in prompt_text
+    assert "Master Photographic Canvas Lock" in prompt_text
+    assert "35mm" not in prompt_text
+
+
+def test_compose_wardrobe_multi_turn_upload_lineage_suppresses_scene_anchor(tmp_path):
+    storage_dir = str(tmp_path / "storage")
+    os.makedirs(os.path.join(storage_dir, "generations"), exist_ok=True)
+    os.makedirs(os.path.join(storage_dir, "wardrobe"), exist_ok=True)
+
+    fake_bucket = MagicMock()
+    fake_blob = MagicMock()
+    fake_bucket.blob.return_value = fake_blob
+    storage_service = StorageService(bucket=fake_bucket, environment="local", storage_dir=storage_dir)
+
+    fake_db = FakeFirestoreClient()
+    db_mgr = FirestoreManager(fake_db)
+
+    # Root is a direct upload
+    root_path = storage_service.upload_bytes(
+        user_id="test_user",
+        category="generations",
+        filename="gen_upload_root_master.png",
+        data=create_dummy_png_bytes(1651, 2064),
+    )
+    db_mgr.create_generation(
+        user_id="test_user",
+        gen_data={
+            "id": "gen_upload_root",
+            "master_image_path": root_path,
+            "compiled_prompt": "Reverse-engineered narrative scene description of the upload.",
+            "model_name": "direct_upload",
+            "aspect_ratio": "4:5",
+            "seed": 12345,
+            "schema_json": {"task": "direct_photo_upload"},
+        }
+    )
+
+    # Turn 1 is a wardrobe generation child of the upload
+    turn1_path = storage_service.upload_bytes(
+        user_id="test_user",
+        category="generations",
+        filename="gen_wardrobe_turn1_master.png",
+        data=create_dummy_png_bytes(1651, 2064),
+    )
+    db_mgr.create_generation(
+        user_id="test_user",
+        gen_data={
+            "id": "gen_wardrobe_turn1",
+            "parent_id": "gen_upload_root",
+            "master_image_path": turn1_path,
+            "compiled_prompt": "Prompt from turn 1",
+            "model_name": "gemini-3-pro-image",
+            "aspect_ratio": "4:5",
+            "seed": 12345,
+        }
+    )
+
+    crop_path = storage_service.upload_bytes(
+        user_id="test_user",
+        category="wardrobe",
+        filename="crop_jeans.png",
+        data=create_dummy_png_bytes(200, 200),
+    )
+    db_mgr.create_wardrobe_item(
+        user_id="test_user",
+        item_data={
+            "id": "item_jeans",
+            "label": "Vintage Jeans",
+            "category": "bottoms",
+            "cropped_image_path": crop_path,
+        }
+    )
+
+    image_generator = MagicMock()
+    image_generator.generate.return_value = create_dummy_png_bytes(1651, 2064)
+    image_generator.last_call_metrics = {"cost_usd": 0.04, "total_token_count": 500}
+
+    service = GenerationService(
+        db_manager=db_mgr,
+        storage_service=storage_service,
+        image_generator=image_generator,
+    )
+
+    # Progressive turn 2 from turn 1
+    service.compose_wardrobe(
+        parent_id="gen_wardrobe_turn1",
+        assignments=[{"pin_number": 1, "wardrobe_item_id": "item_jeans"}],
+        user_id="test_user",
+    )
+
+    call_args = image_generator.generate.call_args.kwargs
+    prompt_text = call_args["prompt"]
+    # Turn 2 lineage traces up to gen_upload_root -> must suppress scene anchor and keep invariance lock
+    assert "ORIGINAL BASE SCENE REFERENCE" not in prompt_text
+    assert "Master Photographic Canvas Lock" in prompt_text
+    assert "PROGRESSIVE STYLING TURN #2 CHROMATIC ANCHOR" in prompt_text
+    assert "35mm" not in prompt_text
+
 
 
 

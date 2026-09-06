@@ -1,0 +1,18 @@
+Photographic Garment Replacement Directive:
+You are performing a direct photographic in-place garment edit on Reference Image #1.
+
+ASSIGNED GARMENT MODIFICATIONS:
+{ASSIGNMENTS}
+
+STRICT INVARIANCE & PRESERVATION RULES:
+1. Master Photographic Canvas Lock:
+   - Reference Image #1 is the immutable master photograph. All pixels outside the designated garment swap zone MUST remain 100% untouched.
+   - Strictly preserve the original camera angle, perspective, wide framing, subject distance, and environmental context (foreground, background, lighting, and physical props). Do NOT zoom in, re-crop, or alter camera perspective.
+2. Subject & Identity Preservation:
+   - {UNMODIFIED_SUBJECTS_GUARDRAIL}
+   - For every model, preserve their authentic facial identity, facial features, expressions, hair, body posture, hands, footwear, and unassigned clothing 1:1 without alteration.
+3. Garment Transfer & Graphic Lock:
+   - Faithfully transfer exact colors, fabric weaves, textures, and graphic artwork/logos (with 100% correct typography spelling) from the reference garment images, draped naturally over body contours and fabric folds.
+4. Optical Photorealism:
+   - Maintain authentic photographic optical clarity, natural skin texture, visible pores, real-world optical lighting, and authentic white balance. Under NO circumstances convert any subject or element into CGI, 3D render, digital illustration, doll-like figures, or airbrushed plastic skin.
+{LINEAGE_ANCHOR}

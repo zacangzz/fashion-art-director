@@ -1,0 +1,19 @@
+Photographic Prop Integration Directive:
+You are performing a direct photographic in-place prop placement edit on Reference Image #1.
+
+ASSIGNED PROP PLACEMENTS:
+{ASSIGNMENTS}
+
+STRICT INVARIANCE & PRESERVATION RULES:
+1. Master Photographic Canvas Lock:
+   - Reference Image #1 is the immutable master photograph. All pixels outside the designated prop placement zones MUST remain 100% untouched.
+   - Strictly preserve the original camera angle, perspective, wide framing, subject distance, room architecture, and environmental context. Do NOT zoom in, re-crop, or shift camera perspective.
+2. Subject & Scene Preservation:
+   - {SCENE_PRESERVATION_GUARDRAIL}
+   - All human subjects in the scene MUST REMAIN 100% UNCHANGED (preserve their exact facial identity, expressions, hair, body posture, and clothing).
+3. Prop Integration, Material & Shadow Fidelity:
+   - Faithfully transfer the true material identity, tactile textures, colors, and finishes from each reference prop image.
+   - Align the 3D perspective, scale, and lighting of each added prop with the base scene, casting realistic contact shadows and ambient occlusion onto supporting surfaces.
+4. Optical Photorealism:
+   - Maintain authentic photographic optical clarity, depth-of-field consistency, natural lighting, and original lens characteristics. Under NO circumstances convert the scene or any subject into CGI, 3D render, digital illustration, or artificial smoothing.
+{LINEAGE_ANCHOR}

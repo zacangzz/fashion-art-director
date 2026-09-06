@@ -35,8 +35,11 @@ from app.utils.image_utils import (
 )
 from app.utils.prompt_loader import (
     DEFAULT_NEGATIVE_PROMPT,
+    COMPOSITION_NEGATIVE_PROMPT,
     WARDROBE_COMPOSITION_SYSTEM_PROMPT,
+    WARDROBE_COMPOSITION_TEMPLATE,
     PROP_COMPOSITION_SYSTEM_PROMPT,
+    PROP_COMPOSITION_TEMPLATE,
     sanitize_prompt_for_safety,
 )
 
@@ -1146,41 +1149,49 @@ class GenerationService:
                 assignment_prompts.append(asgn_text)
 
         # Trace lineage depth for progressive turn numbering and chromatic continuity
-        lineage_depth, _ = self._trace_lineage(parent_gen)
-
-        sanitized_guardrail = self._sanitize_prompt_for_safety(guardrail_text)
-        composition_parts = [
-            WARDROBE_COMPOSITION_SYSTEM_PROMPT,
-            f"MULTI-SUBJECT INVARIANCE GUARDRAIL:\n{sanitized_guardrail}",
-        ]
-        if parent_prompt and not parent_prompt.startswith("Directly ingested photo:"):
-            sanitized_anchor = self._sanitize_prompt_for_safety(parent_prompt)
-            composition_parts.append(
-                f"REFERENCE BASE SCENE ANCHOR (Strict Invariance Lock - Do NOT re-imagine or generate new subjects; preserve 100% of camera perspective, lens optics, lighting, and untargeted models from Reference Image #1):\n{sanitized_anchor}"
-            )
-        composition_parts.append(
-            "CANVAS & PERSPECTIVE LOCK:\n"
-            "Strictly preserve the original camera angle, perspective, subject distance, and wide framing from the reference image. "
-            "Do NOT zoom in, re-crop, or exclude foreground/background elements. Maintain identical composition and environmental context."
+        lineage_depth, root_gen = self._trace_lineage(parent_gen)
+        is_upload_lineage = (
+            parent_id.startswith("gen_upload_")
+            or parent_gen.get("model_name") == "direct_upload"
+            or (parent_gen.get("schema_json") or {}).get("task") == "direct_photo_upload"
+            or (root_gen is not None and (
+                root_gen.get("id", "").startswith("gen_upload_")
+                or root_gen.get("model_name") == "direct_upload"
+                or (root_gen.get("schema_json") or {}).get("task") == "direct_photo_upload"
+            ))
         )
+
+        lineage_anchor_parts = []
+        if not is_upload_lineage and parent_prompt and not parent_prompt.startswith("Directly ingested photo:"):
+            sanitized_anchor = self._sanitize_prompt_for_safety(parent_prompt)
+            lineage_anchor_parts.append(
+                f"\nORIGINAL BASE SCENE REFERENCE (Latent Trajectory Alignment):\n{sanitized_anchor}"
+            )
         if lineage_depth >= 1:
             turn_num = lineage_depth + 1
-            composition_parts.append(
-                f"PROGRESSIVE STYLING TURN #{turn_num} CHROMATIC ANCHOR:\n"
-                "- Maintain absolute color temperature, neutral white balance, and authentic skin undertones matching the original scene.\n"
+            lineage_anchor_parts.append(
+                f"\nPROGRESSIVE STYLING TURN #{turn_num} CHROMATIC ANCHOR:\n"
+                "- Maintain absolute color temperature, neutral white balance, and authentic skin undertones matching the base scene.\n"
                 "- Do NOT accumulate or amplify warm ambient color bounce from prior turns. Keep all background elements, neutral whites, sky tones, and un-targeted skin undertones strictly aligned with the base scene."
             )
+        if custom_instruction and custom_instruction.strip():
+            lineage_anchor_parts.append(
+                f"\nADDITIONAL USER INSTRUCTION:\n{self._sanitize_prompt_for_safety(custom_instruction.strip())}"
+            )
+
+        lineage_anchor_str = "\n".join(lineage_anchor_parts)
+        sanitized_guardrail = self._sanitize_prompt_for_safety(guardrail_text)
+        sanitized_assignments = "\n\n".join([self._sanitize_prompt_for_safety(ap) for ap in assignment_prompts])
+
+        composition_prompt = WARDROBE_COMPOSITION_TEMPLATE.format(
+            ASSIGNMENTS=sanitized_assignments,
+            UNMODIFIED_SUBJECTS_GUARDRAIL=sanitized_guardrail,
+            LINEAGE_ANCHOR=lineage_anchor_str,
+        ).strip()
+
         all_refs = [parent_image_bytes] + garment_references
 
-        sanitized_assignments = [self._sanitize_prompt_for_safety(ap) for ap in assignment_prompts]
-        composition_parts.append("ASSIGNED GARMENT MODIFICATIONS:\n" + "\n\n".join(sanitized_assignments))
-
-        if custom_instruction and custom_instruction.strip():
-            composition_parts.append(f"ADDITIONAL USER INSTRUCTION:\n{self._sanitize_prompt_for_safety(custom_instruction.strip())}")
-
-        composition_prompt = "\n\n".join(composition_parts)
-
-        base_neg_prompt = negative_prompt or parent_gen.get("negative_prompt") or DEFAULT_NEGATIVE_PROMPT
+        base_neg_prompt = negative_prompt or parent_gen.get("negative_prompt") or COMPOSITION_NEGATIVE_PROMPT
         extra_neg = ["magenta color cast", "warm color drift", "reddish tinting", "yellow-magenta shift"]
         if graphic_locks_required:
             extra_neg.extend(["scrambled text", "altered logos", "fake text", "misspelled words", "generic replacement graphics"])
@@ -1435,41 +1446,49 @@ class GenerationService:
                 assignment_prompts.append(asgn_text)
 
         # Trace lineage depth for progressive turn numbering and chromatic continuity
-        lineage_depth, _ = self._trace_lineage(parent_gen)
-
-        sanitized_guardrail = self._sanitize_prompt_for_safety(guardrail_text)
-        composition_parts = [
-            PROP_COMPOSITION_SYSTEM_PROMPT,
-            f"SCENE & SUBJECT PRESERVATION GUARDRAIL:\n{sanitized_guardrail}",
-        ]
-        if parent_prompt and not parent_prompt.startswith("Directly ingested photo:"):
-            sanitized_anchor = self._sanitize_prompt_for_safety(parent_prompt)
-            composition_parts.append(
-                f"REFERENCE BASE SCENE ANCHOR (Strict Invariance Lock - Do NOT re-imagine or generate new subjects; preserve 100% of camera perspective, lens optics, lighting, and untargeted models from Reference Image #1):\n{sanitized_anchor}"
-            )
-        composition_parts.append(
-            "CANVAS & PERSPECTIVE LOCK:\n"
-            "Strictly preserve the original camera angle, perspective, subject distance, and wide framing from the reference image. "
-            "Do NOT zoom in, re-crop, or exclude foreground/background elements. Maintain identical composition and environmental context."
+        lineage_depth, root_gen = self._trace_lineage(parent_gen)
+        is_upload_lineage = (
+            parent_id.startswith("gen_upload_")
+            or parent_gen.get("model_name") == "direct_upload"
+            or (parent_gen.get("schema_json") or {}).get("task") == "direct_photo_upload"
+            or (root_gen is not None and (
+                root_gen.get("id", "").startswith("gen_upload_")
+                or root_gen.get("model_name") == "direct_upload"
+                or (root_gen.get("schema_json") or {}).get("task") == "direct_photo_upload"
+            ))
         )
+
+        lineage_anchor_parts = []
+        if not is_upload_lineage and parent_prompt and not parent_prompt.startswith("Directly ingested photo:"):
+            sanitized_anchor = self._sanitize_prompt_for_safety(parent_prompt)
+            lineage_anchor_parts.append(
+                f"\nORIGINAL BASE SCENE REFERENCE (Latent Trajectory Alignment):\n{sanitized_anchor}"
+            )
         if lineage_depth >= 1:
             turn_num = lineage_depth + 1
-            composition_parts.append(
-                f"PROGRESSIVE SCENE TURN #{turn_num} CHROMATIC ANCHOR:\n"
+            lineage_anchor_parts.append(
+                f"\nPROGRESSIVE SCENE TURN #{turn_num} CHROMATIC ANCHOR:\n"
                 "- Maintain absolute color temperature, neutral white balance, and authentic lighting matching the original scene.\n"
                 "- Do NOT accumulate warm ambient color drift or magenta casts from prior turns. Keep all neutral whites, room architecture, and un-targeted elements strictly aligned with the base scene."
             )
+        if custom_instruction and custom_instruction.strip():
+            lineage_anchor_parts.append(
+                f"\nADDITIONAL USER SCENE DIRECTIVES:\n{self._sanitize_prompt_for_safety(custom_instruction.strip())}"
+            )
+
+        lineage_anchor_str = "\n".join(lineage_anchor_parts)
+        sanitized_guardrail = self._sanitize_prompt_for_safety(guardrail_text)
+        sanitized_assignments = "\n\n".join([self._sanitize_prompt_for_safety(ap) for ap in assignment_prompts])
+
+        composition_prompt = PROP_COMPOSITION_TEMPLATE.format(
+            ASSIGNMENTS=sanitized_assignments,
+            SCENE_PRESERVATION_GUARDRAIL=sanitized_guardrail,
+            LINEAGE_ANCHOR=lineage_anchor_str,
+        ).strip()
 
         all_refs = [parent_image_bytes] + prop_references
-        sanitized_assignments = [self._sanitize_prompt_for_safety(ap) for ap in assignment_prompts]
-        composition_parts.append("ASSIGNED PROPS INTEGRATION:\n" + "\n\n".join(sanitized_assignments))
 
-        if custom_instruction and custom_instruction.strip():
-            composition_parts.append(f"ADDITIONAL USER SCENE DIRECTIVES:\n{self._sanitize_prompt_for_safety(custom_instruction.strip())}")
-
-        composition_prompt = "\n\n".join(composition_parts)
-
-        base_neg_prompt = negative_prompt or parent_gen.get("negative_prompt") or DEFAULT_NEGATIVE_PROMPT
+        base_neg_prompt = negative_prompt or parent_gen.get("negative_prompt") or COMPOSITION_NEGATIVE_PROMPT
         extra_neg = ["magenta color cast", "warm color drift", "reddish tinting", "floating objects", "detached shadows", "ungrounded items", "distorted proportions"]
         comp_neg_prompt = f"{base_neg_prompt}, {', '.join(extra_neg)}"
 

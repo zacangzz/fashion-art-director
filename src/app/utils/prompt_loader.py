@@ -26,6 +26,7 @@ INPAINT_SUFFIX = load_prompt("inpaint_suffix.txt")
 REFINEMENT_SYSTEM_PROMPT = load_prompt("refinement_system.txt")
 WARDROBE_SEGMENTATION_PROMPT = load_prompt("wardrobe_segmentation.txt")
 WARDROBE_COMPOSITION_SYSTEM_PROMPT = load_prompt("wardrobe_composition_system.txt")
+WARDROBE_COMPOSITION_TEMPLATE = load_prompt("wardrobe_composition_template.txt")
 CLOTHING_REGION_DETECTION_PROMPT = load_prompt("clothing_region_detection.txt")
 SUBJECT_GROUNDING_PROMPT = load_prompt("subject_grounding_system.txt")
 RESYNC_MASTER_PROMPT_SYSTEM = load_prompt("resync_master_prompt_system.txt")
@@ -44,7 +45,12 @@ PROP_FEATURE_EXTRACTION_PROMPT = load_prompt("prop_feature_extraction.txt")
 PROP_UPSCALE_SYSTEM_PROMPT = load_prompt("prop_upscale_system.txt")
 PROP_SCENE_GROUNDING_PROMPT = load_prompt("prop_scene_grounding.txt")
 PROP_COMPOSITION_SYSTEM_PROMPT = load_prompt("prop_composition_system.txt")
+PROP_COMPOSITION_TEMPLATE = load_prompt("prop_composition_template.txt")
 PHOTO_INGESTION_SYSTEM_PROMPT = load_prompt("photo_ingestion_system.txt")
+COMPOSITION_NEGATIVE_PROMPT = (
+    "cgi, 3d render, digital illustration, cartoon, anime, airbrushed plastic skin, "
+    "cropped framing, zoomed-in, shifted camera perspective, altered face, distorted anatomy"
+)
 
 
 def sanitize_prompt_for_safety(text: str) -> str:
