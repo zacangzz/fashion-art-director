@@ -61,13 +61,20 @@
   * If a generic retry wrapper catches `"timeout"` on image synthesis, it re-submits the entire 4K generation request from scratch, compounding user wait times to $10\text{–}20$ minutes.
 * **Best Practices**:
   1. Configure `GENAI_TIMEOUT_SECONDS = 900` (15 minutes) for clients performing 4K multi-image synthesis.
-  2. Treat generative image timeouts as fail-fast events rather than transient retries to prevent duplicate quota consumption and double wait times.
+### 6. In-Place Image Editing vs. Generative Prompt Interference in Multi-Modal Conditioning
+* **The Pitfall (Text-to-Image Cross-Attention Override)**:
+  * In multimodal image editing with `gemini-3-pro-image`, supplying long narrative scene descriptions (~300 words) causes text cross-attention conditioning to dominate over reference image conditioning.
+  * For uploaded/external photos (which have no prior latent history with the prompt or seed), the model treats the narrative as a text-to-image prompt and synthesizes a completely new image from scratch instead of modifying the reference photograph.
+* **The Solution**:
+  * Use a concise, single-pass **In-Place Photographic Edit Directive** specifying only the target delta (e.g., garment or prop replacement) and strict invariance rules.
+  * Strip out narrative prose descriptions and prompt bloat.
+  * To prevent the generative model's intrinsic warm daylight bias from shifting hues on skin, grass, and sky, explicitly lock Kelvin color temperature, neutral white balance, and chromaticity in the photorealism directive.
 
 ---
 
 ## Cloud Deployment, Containers & CI/CD
 
-### 6. FastAPI Packaging in Multi-Stage Docker with `uv`
+### 7. FastAPI Packaging in Multi-Stage Docker with `uv`
 * **Python Path in Containers**: When code is organized under `src/app/`, Uvicorn requires `PYTHONPATH=/app/src` so `from app.config import get_settings` resolves cleanly:
   ```dockerfile
   ENV PYTHONPATH=/app/src
@@ -77,7 +84,7 @@
 
 ---
 
-### 7. Firebase Hosting CDN Rewrites vs. Direct Cloud Run Routing (60s Timeout Limit)
+### 8. Firebase Hosting CDN Rewrites vs. Direct Cloud Run Routing (60s Timeout Limit)
 * **The Pitfall (60-Second Proxy Ceiling)**:
   * Firebase Hosting CDN rewrites (`"source": "/api/**", "run": { ... }`) have a hardcoded, non-configurable **60.0-second reverse proxy timeout**.
   * Heavy generative workflows—such as multi-image wardrobe composition using Nano Banana Pro (`gemini-3-pro-image`) at **4K resolution**—routinely take $45\text{–}90$ seconds.
@@ -98,7 +105,7 @@
 
 ---
 
-### 8. Keyless CI/CD via Workload Identity Federation (WIF)
+### 9. Keyless CI/CD via Workload Identity Federation (WIF)
 * **OIDC Provider Configuration**: When creating GitHub OIDC providers with `--attribute-mapping`, provide `--attribute-condition` matching the repository claim to satisfy GCP IAM security constraints:
   ```bash
   gcloud iam workload-identity-pools providers create-oidc "github-actions-provider" \
@@ -113,7 +120,7 @@
 
 ---
 
-### 9. Cloud Storage Image Delivery on Cloud Run (Signed URLs vs. Direct Streaming)
+### 10. Cloud Storage Image Delivery on Cloud Run (Signed URLs vs. Direct Streaming)
 * **The Pitfall**: Calling `blob.generate_signed_url(version="v4")` from Cloud Run with default Compute Engine service account credentials fails with:
   ```
   you need a private key to sign credentials. the credentials you are currently using <class 'google.auth.compute_engine.credentials.Credentials'> just contains a token.
@@ -129,7 +136,7 @@
 
 ## Frontend & Styling Architecture
 
-### 10. Global CSS Consolidation & Component Class Preservation
+### 11. Global CSS Consolidation & Component Class Preservation
 * **The Pitfall**: In large frontend refactorings, replacing a monolithic stylesheet (e.g., `index.css`) with a concise set of generic design-token classes without simultaneously rewriting the JSX class names in every component strips all component-specific CSS selectors (`.ratio-btn`, `.category-card`, `.tag-chip`, `.prompt-review-card`, `.lever-item`, etc.).
 * **Visual Symptom**: The app renders as raw unstyled HTML with broken grids, lost card backdrops, and unformatted controls.
 * **Best Practice**:

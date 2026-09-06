@@ -14,6 +14,7 @@ STRICT INVARIANCE & PRESERVATION RULES:
 3. Prop Integration, Material & Shadow Fidelity:
    - Faithfully transfer the true material identity, tactile textures, colors, and finishes from each reference prop image.
    - Align the 3D perspective, scale, and lighting of each added prop with the base scene, casting realistic contact shadows and ambient occlusion onto supporting surfaces.
-4. Optical Photorealism:
-   - Maintain authentic photographic optical clarity, depth-of-field consistency, natural lighting, and original lens characteristics. Under NO circumstances convert the scene or any subject into CGI, 3D render, digital illustration, or artificial smoothing.
+4. Optical Photorealism & Color Temperature Lock:
+   - Maintain authentic photographic optical clarity, depth-of-field consistency, natural lighting, exact color constancy, and original lens characteristics.
+   - Strictly preserve the exact Kelvin color temperature, neutral white balance, and chromaticity of Reference Image #1. Under NO circumstances introduce amber warming, sunset filters, reddish tinting, or convert the scene or any subject into CGI, 3D render, digital illustration, or artificial smoothing.
 {LINEAGE_ANCHOR}

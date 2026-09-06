@@ -13,6 +13,7 @@ STRICT INVARIANCE & PRESERVATION RULES:
    - For every model, preserve their authentic facial identity, facial features, expressions, hair, body posture, hands, footwear, and unassigned clothing 1:1 without alteration.
 3. Garment Transfer & Graphic Lock:
    - Faithfully transfer exact colors, fabric weaves, textures, and graphic artwork/logos (with 100% correct typography spelling) from the reference garment images, draped naturally over body contours and fabric folds.
-4. Optical Photorealism:
-   - Maintain authentic photographic optical clarity, natural skin texture, visible pores, real-world optical lighting, and authentic white balance. Under NO circumstances convert any subject or element into CGI, 3D render, digital illustration, doll-like figures, or airbrushed plastic skin.
+4. Optical Photorealism & Color Temperature Lock:
+   - Maintain authentic photographic optical clarity, natural skin texture, visible pores, real-world optical lighting, and exact color constancy.
+   - Strictly preserve the exact Kelvin color temperature, neutral white balance, neutral gray points, and crisp blue sky chromaticity of Reference Image #1. Under NO circumstances introduce amber warming, golden hour drift, sunset filters, reddish tinting, or convert any subject or element into CGI, 3D render, digital illustration, doll-like figures, or airbrushed plastic skin.
 {LINEAGE_ANCHOR}
