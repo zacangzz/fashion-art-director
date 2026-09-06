@@ -39,6 +39,7 @@ from app.utils.prompt_loader import (
     GARMENT_UPSCALE_SYSTEM_PROMPT,
     GARMENT_FEATURE_EXTRACTION_PROMPT,
     PHOTO_INGESTION_SYSTEM_PROMPT,
+    sanitize_prompt_for_safety,
 )
 
 logger = get_logger("wardrobe_service")
@@ -588,17 +589,17 @@ class WardrobeService:
                 quad_h = "center"
 
             if y < 0.28 or any(w in label.lower() for w in ["hat", "cap", "beanie", "sunglass", "glasses"]):
-                body_loc = "head and hair region"
+                body_loc = "headwear and accessories area"
                 quad_v = "upper"
             elif y > 0.68 or cat in ["bottoms", "footwear"]:
-                body_loc = "lower body and legs region"
+                body_loc = "lower garment area"
                 quad_v = "lower"
             else:
-                body_loc = "upper torso and chest region"
+                body_loc = "upper garment area"
                 quad_v = "mid"
 
             spatial_anchor = f"{quad_v}-{quad_h} quadrant (x: {round(x*100)}%, y: {round(y*100)}%)"
-            target_subject = f"The subject located {h_desc}"
+            target_subject = f"The model located {h_desc}"
 
             grounded_pins.append({
                 "pin_number": pin_num,
@@ -610,7 +611,7 @@ class WardrobeService:
 
         return {
             "grounded_pins": grounded_pins,
-            "unmodified_subjects_guardrail": "Strictly preserve all other subjects and non-targeted character features, clothing, and hairstyles in the scene exactly as shown in the reference image without any alterations.",
+            "unmodified_subjects_guardrail": "Strictly preserve all other models, subjects, non-targeted facial features, clothing, and hairstyles in the scene exactly as shown in the reference image without any alterations.",
         }
 
     def ground_wardrobe_pins(
@@ -727,7 +728,8 @@ class WardrobeService:
             parsed = parse_json_safely(raw_text, default={})
 
             grounded_list = parsed.get("grounded_pins", []) if isinstance(parsed, dict) else (parsed if isinstance(parsed, list) else [])
-            guardrail = (parsed.get("unmodified_subjects_guardrail") if isinstance(parsed, dict) else None) or fallback_result["unmodified_subjects_guardrail"]
+            raw_guardrail = (parsed.get("unmodified_subjects_guardrail") if isinstance(parsed, dict) else None) or fallback_result["unmodified_subjects_guardrail"]
+            guardrail = sanitize_prompt_for_safety(raw_guardrail)
 
             grounded_by_pin = {g.get("pin_number"): g for g in grounded_list if isinstance(g, dict)}
             final_grounded = []
@@ -738,10 +740,10 @@ class WardrobeService:
                     v_pin = grounded_by_pin[p_num]
                     final_grounded.append({
                         "pin_number": p_num,
-                        "target_subject": v_pin.get("target_subject") or fallback_pin["target_subject"],
-                        "body_location": v_pin.get("body_location") or fallback_pin["body_location"],
+                        "target_subject": sanitize_prompt_for_safety(v_pin.get("target_subject") or fallback_pin["target_subject"]),
+                        "body_location": sanitize_prompt_for_safety(v_pin.get("body_location") or fallback_pin["body_location"]),
                         "spatial_anchor": v_pin.get("spatial_anchor") or fallback_pin["spatial_anchor"],
-                        "current_attire": v_pin.get("current_attire") or fallback_pin["current_attire"],
+                        "current_attire": sanitize_prompt_for_safety(v_pin.get("current_attire") or fallback_pin["current_attire"]),
                     })
                 else:
                     final_grounded.append(fallback_pin)
@@ -812,6 +814,7 @@ class WardrobeService:
                 prose = prose.strip("`").strip()
                 if prose.lower().startswith("markdown") or prose.lower().startswith("text"):
                     prose = prose.split("\n", 1)[-1].strip()
+            prose = sanitize_prompt_for_safety(prose)
             self._audit("photo_scene_description_success", request_id, prose_length=len(prose))
             return prose
         except Exception as e:

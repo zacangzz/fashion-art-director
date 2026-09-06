@@ -93,7 +93,8 @@ def test_prompt_assets_are_loaded_and_composed():
     # Photo Ingestion & Wardrobe/Prop Composition Prompts
     assert "Scene Context & Atmosphere" in PHOTO_INGESTION_SYSTEM_PROMPT
     assert "Camera Optics & Framing" in PHOTO_INGESTION_SYSTEM_PROMPT
-    assert "Hyper-Specific Subjects & Attire" in PHOTO_INGESTION_SYSTEM_PROMPT
+    assert "Hyper-Specific Models & Attire" in PHOTO_INGESTION_SYSTEM_PROMPT
+    assert "AGE-AGNOSTIC EDITORIAL TERMINOLOGY" in PHOTO_INGESTION_SYSTEM_PROMPT
     assert "Do NOT return JSON" in PHOTO_INGESTION_SYSTEM_PROMPT
     assert "{COMPOSITION_INSTRUCTIONS}" not in WARDROBE_COMPOSITION_SYSTEM_PROMPT
     assert "{COMPOSITION_INSTRUCTIONS}" not in PROP_COMPOSITION_SYSTEM_PROMPT

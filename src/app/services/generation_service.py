@@ -37,6 +37,7 @@ from app.utils.prompt_loader import (
     DEFAULT_NEGATIVE_PROMPT,
     WARDROBE_COMPOSITION_SYSTEM_PROMPT,
     PROP_COMPOSITION_SYSTEM_PROMPT,
+    sanitize_prompt_for_safety,
 )
 
 logger = get_logger("generation_service")
@@ -48,6 +49,8 @@ class GenerationService:
     conversational refinement, targeted inpainting, wardrobe composition, and prop composition.
     Composes ImageGenerator, StorageService, PromptCompiler, FirestoreManager, and TelemetryLogger.
     """
+
+    _sanitize_prompt_for_safety = staticmethod(sanitize_prompt_for_safety)
 
     def __init__(
         self,
@@ -401,6 +404,8 @@ class GenerationService:
         if self.wardrobe_service is not None:
             try:
                 scene_prose = self.wardrobe_service.generate_photo_scene_description(conformed_bytes)
+                if scene_prose:
+                    scene_prose = self._sanitize_prompt_for_safety(scene_prose)
             except Exception as e:
                 logger.warning(f"Could not generate scene description for upload {gen_id}: {e}")
 
@@ -1046,6 +1051,7 @@ class GenerationService:
                         vision_model=vision_model,
                     )
                     if new_prose:
+                        new_prose = self._sanitize_prompt_for_safety(new_prose)
                         parent_prompt = new_prose
                         try:
                             parent_schema = dict(parent_gen.get("schema_json") or {})
@@ -1142,13 +1148,15 @@ class GenerationService:
         # Trace lineage depth for progressive turn numbering and chromatic continuity
         lineage_depth, _ = self._trace_lineage(parent_gen)
 
+        sanitized_guardrail = self._sanitize_prompt_for_safety(guardrail_text)
         composition_parts = [
             WARDROBE_COMPOSITION_SYSTEM_PROMPT,
-            f"MULTI-SUBJECT INVARIANCE GUARDRAIL:\n{guardrail_text}",
+            f"MULTI-SUBJECT INVARIANCE GUARDRAIL:\n{sanitized_guardrail}",
         ]
         if parent_prompt and not parent_prompt.startswith("Directly ingested photo:"):
+            sanitized_anchor = self._sanitize_prompt_for_safety(parent_prompt)
             composition_parts.append(
-                f"REFERENCE BASE SCENE ANCHOR (PRESERVE 100% OF CAMERA ANGLE, LIGHTING, PROPS, AND UNTARGETED SUBJECTS):\n{parent_prompt}"
+                f"REFERENCE BASE SCENE ANCHOR (Strict Invariance Lock - Do NOT re-imagine or generate new subjects; preserve 100% of camera perspective, lens optics, lighting, and untargeted models from Reference Image #1):\n{sanitized_anchor}"
             )
         composition_parts.append(
             "CANVAS & PERSPECTIVE LOCK:\n"
@@ -1164,10 +1172,11 @@ class GenerationService:
             )
         all_refs = [parent_image_bytes] + garment_references
 
-        composition_parts.append("ASSIGNED GARMENT MODIFICATIONS:\n" + "\n\n".join(assignment_prompts))
+        sanitized_assignments = [self._sanitize_prompt_for_safety(ap) for ap in assignment_prompts]
+        composition_parts.append("ASSIGNED GARMENT MODIFICATIONS:\n" + "\n\n".join(sanitized_assignments))
 
         if custom_instruction and custom_instruction.strip():
-            composition_parts.append(f"ADDITIONAL USER INSTRUCTION:\n{custom_instruction.strip()}")
+            composition_parts.append(f"ADDITIONAL USER INSTRUCTION:\n{self._sanitize_prompt_for_safety(custom_instruction.strip())}")
 
         composition_prompt = "\n\n".join(composition_parts)
 
@@ -1428,13 +1437,15 @@ class GenerationService:
         # Trace lineage depth for progressive turn numbering and chromatic continuity
         lineage_depth, _ = self._trace_lineage(parent_gen)
 
+        sanitized_guardrail = self._sanitize_prompt_for_safety(guardrail_text)
         composition_parts = [
             PROP_COMPOSITION_SYSTEM_PROMPT,
-            f"SCENE & SUBJECT PRESERVATION GUARDRAIL:\n{guardrail_text}",
+            f"SCENE & SUBJECT PRESERVATION GUARDRAIL:\n{sanitized_guardrail}",
         ]
         if parent_prompt and not parent_prompt.startswith("Directly ingested photo:"):
+            sanitized_anchor = self._sanitize_prompt_for_safety(parent_prompt)
             composition_parts.append(
-                f"REFERENCE BASE SCENE ANCHOR (PRESERVE 100% OF CAMERA ANGLE, LIGHTING, PROPS, AND UNTARGETED SUBJECTS):\n{parent_prompt}"
+                f"REFERENCE BASE SCENE ANCHOR (Strict Invariance Lock - Do NOT re-imagine or generate new subjects; preserve 100% of camera perspective, lens optics, lighting, and untargeted models from Reference Image #1):\n{sanitized_anchor}"
             )
         composition_parts.append(
             "CANVAS & PERSPECTIVE LOCK:\n"
@@ -1450,10 +1461,11 @@ class GenerationService:
             )
 
         all_refs = [parent_image_bytes] + prop_references
-        composition_parts.append("ASSIGNED PROPS INTEGRATION:\n" + "\n\n".join(assignment_prompts))
+        sanitized_assignments = [self._sanitize_prompt_for_safety(ap) for ap in assignment_prompts]
+        composition_parts.append("ASSIGNED PROPS INTEGRATION:\n" + "\n\n".join(sanitized_assignments))
 
         if custom_instruction and custom_instruction.strip():
-            composition_parts.append(f"ADDITIONAL USER SCENE DIRECTIVES:\n{custom_instruction.strip()}")
+            composition_parts.append(f"ADDITIONAL USER SCENE DIRECTIVES:\n{self._sanitize_prompt_for_safety(custom_instruction.strip())}")
 
         composition_prompt = "\n\n".join(composition_parts)
 

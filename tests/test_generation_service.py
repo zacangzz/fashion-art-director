@@ -607,13 +607,13 @@ def test_register_uploaded_photo_conforms_and_extracts_prose(tmp_path):
     result = service.register_uploaded_photo(raw_bytes, filename="FT3.png", user_id="test_user")
 
     assert result["aspect_ratio"] == "4:5"
-    assert result["compiled_prompt"] == "Worm's-eye shot of kids on grass."
+    assert result["compiled_prompt"] == "Worm's-eye shot of models on grass."
     assert result["resolution"] == {"width": 1651, "height": 2064}
 
     # Verify Firestore document
     gen_doc = db_mgr.get_generation(result["generation_id"])
     assert gen_doc is not None
-    assert gen_doc["compiled_prompt"] == "Worm's-eye shot of kids on grass."
+    assert gen_doc["compiled_prompt"] == "Worm's-eye shot of models on grass."
     assert gen_doc["aspect_ratio"] == "4:5"
     assert gen_doc["schema_json"]["has_scene_prose"] is True
 
@@ -718,8 +718,58 @@ def test_compose_wardrobe_legacy_upload_on_the_fly_fallback_and_locks(tmp_path):
     assert "CANVAS & PERSPECTIVE LOCK" in prompt_text
     assert "(shown in Reference Image #2)" in prompt_text
 
+    # Verify safety filter sanitization: minor and raw anatomy terms are scrubbed
+    assert "boy" not in prompt_text.lower()
+    assert "girl" not in prompt_text.lower()
+    assert "children" not in prompt_text.lower()
+    assert "upper torso" not in prompt_text.lower()
+    assert "model in yellow shorts" in prompt_text
+    assert "upper garment area" in prompt_text
+    assert "Keep model on right strictly unchanged" in prompt_text
+
     # 3. Verify reference images count passed
     assert len(call_args["reference_images"]) == 2
+
+
+def test_sanitize_prompt_for_safety_scrubs_minor_and_anatomy_terms():
+    from app.utils.prompt_loader import sanitize_prompt_for_safety
+
+    # 1. Minor terms and age demographics
+    raw_prompt = (
+        "Two young boys standing heroically. Left subject, a younger boy with curly hair, "
+        "and a taller child on the right. Both little kids and toddlers are watching the teenager."
+    )
+    sanitized = sanitize_prompt_for_safety(raw_prompt)
+    assert "young boy" not in sanitized.lower()
+    assert "taller child" not in sanitized.lower()
+    assert "little kids" not in sanitized.lower()
+    assert "toddler" not in sanitized.lower()
+    assert "teenager" not in sanitized.lower()
+    assert "Two models" in sanitized
+    assert "models" in sanitized
+
+    # 2. Sensitive anatomy to standardized garment zones
+    anatomy_prompt = (
+        "Replace Upper torso / chest of Taller child with tank top. "
+        "Also replace legs / waist with shorts. The model is bare-headed."
+    )
+    sanitized_anatomy = sanitize_prompt_for_safety(anatomy_prompt)
+    assert "upper torso / chest" not in sanitized_anatomy.lower()
+    assert "legs / waist" not in sanitized_anatomy.lower()
+    assert "bare-headed" not in sanitized_anatomy.lower()
+    assert "Upper garment area" in sanitized_anatomy
+    assert "lower garment area" in sanitized_anatomy
+    assert "unadorned hair" in sanitized_anatomy
+
+
+def test_sanitize_prompt_for_safety_preserves_fashion_phrases():
+    from app.utils.prompt_loader import sanitize_prompt_for_safety
+
+    # Legitimate fashion garments shouldn't have words corrupted
+    fashion_prompt = "Model wearing oversized boyfriend jeans and a linen shirt with a chest pocket."
+    sanitized = sanitize_prompt_for_safety(fashion_prompt)
+    assert "boyfriend jeans" in sanitized
+    assert "chest pocket" in sanitized
 
 
 def test_image_generator_reference_image_interleaving():

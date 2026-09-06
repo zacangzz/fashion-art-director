@@ -515,7 +515,7 @@ def test_ground_wardrobe_pins_vision_and_heuristic(test_db, dummy_image_bytes, t
     assert len(res["grounded_pins"]) == 1
     pin1 = res["grounded_pins"][0]
     assert pin1["target_subject"] == "Woman on the left with blonde hair"
-    assert pin1["body_location"] == "upper torso / chest"
+    assert pin1["body_location"] == "upper garment area"
     assert "mid-left" in pin1["spatial_anchor"]
     assert "Strictly preserve the man on the right" in res["unmodified_subjects_guardrail"]
 
@@ -531,6 +531,6 @@ def test_ground_wardrobe_pins_vision_and_heuristic(test_db, dummy_image_bytes, t
     assert len(heuristic_res["grounded_pins"]) == 1
     h_pin = heuristic_res["grounded_pins"][0]
     assert "right side" in h_pin["target_subject"]
-    assert "lower body and legs" in h_pin["body_location"]
+    assert "lower garment area" in h_pin["body_location"]
     assert "lower-right quadrant" in h_pin["spatial_anchor"]
 
