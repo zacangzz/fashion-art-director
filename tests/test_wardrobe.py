@@ -285,11 +285,12 @@ def test_wardrobe_composition_dual_reference_and_lineage_anchor(test_db, dummy_i
     storage_service = StorageService(bucket=fake_bucket, environment="local", storage_dir=storage_dir)
 
     # 1. Create root baseline generation in DB (Turn 0)
+    root_bytes = dummy_image_bytes
     root_gen_path = storage_service.upload_bytes(
         user_id="local_dev_user",
         category="generations",
         filename="gen_root_001_master.png",
-        data=dummy_image_bytes,
+        data=root_bytes,
     )
     test_db.create_generation(
         user_id="local_dev_user",
@@ -316,11 +317,16 @@ def test_wardrobe_composition_dual_reference_and_lineage_anchor(test_db, dummy_i
     )
 
     # 2. Create Turn 1 wardrobe generation in DB (Parent = gen_root_001)
+    turn1_img = Image.new("RGB", (200, 200), color=(180, 120, 100))
+    turn1_buf = io.BytesIO()
+    turn1_img.save(turn1_buf, format="PNG")
+    turn1_bytes = turn1_buf.getvalue()
+
     turn1_gen_path = storage_service.upload_bytes(
         user_id="local_dev_user",
         category="generations",
         filename="gen_turn1_001_master.png",
-        data=dummy_image_bytes,
+        data=turn1_bytes,
     )
     test_db.create_generation(
         user_id="local_dev_user",
@@ -407,7 +413,14 @@ def test_wardrobe_composition_dual_reference_and_lineage_anchor(test_db, dummy_i
     )
     assert res_turn1["generation_id"] is not None
     assert "Master Photographic Canvas Lock" in res_turn1["compiled_prompt"]
+    assert "Reference Image #1" in res_turn1["compiled_prompt"]
     assert "PROGRESSIVE STYLING TURN #2" not in res_turn1["compiled_prompt"]
+
+    _, call_turn1_kwargs = mock_client.interactions.create.call_args
+    turn1_input = call_turn1_kwargs.get("input", [])
+    turn1_images = [item for item in turn1_input if isinstance(item, dict) and item.get("type") == "image"]
+    # 1 parent image + 1 garment crop = 2 image references
+    assert len(turn1_images) == 2
 
     # Case B: Turn 2 (Parent = gen_turn1_001, Lineage Depth = 1 from root)
     res_turn2 = gen_service.compose_wardrobe(
@@ -417,17 +430,18 @@ def test_wardrobe_composition_dual_reference_and_lineage_anchor(test_db, dummy_i
     )
     assert res_turn2["generation_id"] is not None
     compiled_turn2 = res_turn2["compiled_prompt"]
-    assert "PROGRESSIVE STYLING TURN #2 CHROMATIC ANCHOR" in compiled_turn2
-    assert "Maintain absolute color temperature, neutral white balance" in compiled_turn2
-    assert "Master Photographic Canvas Lock" in compiled_turn2
+    assert "PROGRESSIVE STYLING TURN #2 CHROMATIC & BASELINE ANCHOR" in compiled_turn2
+    assert "locking overall scene color temperature" in compiled_turn2
+    assert "Reference Image #2" in compiled_turn2
+    assert "Reference Image #1" in compiled_turn2
 
-    # Verify that mock_client.interactions.create was called with single parent scene + garment crop for Turn 2
+    # Verify that mock_client.interactions.create was called with root + parent + garment crop for Turn 2
     _, last_call_kwargs = mock_client.interactions.create.call_args
     api_input = last_call_kwargs.get("input", [])
     assert isinstance(api_input, list)
     image_inputs = [item for item in api_input if isinstance(item, dict) and item.get("type") == "image"]
-    # 1 parent image + 1 garment crop = 2 image references
-    assert len(image_inputs) == 2
+    # 1 root image + 1 parent image + 1 garment crop = 3 image references
+    assert len(image_inputs) == 3
 
 
 def test_ground_wardrobe_pins_vision_and_heuristic(test_db, dummy_image_bytes, tmp_path):

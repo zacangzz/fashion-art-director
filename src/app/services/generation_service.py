@@ -1099,6 +1099,18 @@ class GenerationService:
             "Strictly preserve all other subjects and non-targeted character features exactly as shown.",
         )
 
+        # Trace lineage depth for progressive turn numbering and chromatic continuity
+        lineage_depth, root_gen = self._trace_lineage(parent_gen)
+        root_image_bytes = None
+        if root_gen and root_gen.get("master_image_path"):
+            try:
+                root_image_bytes = self._load_image_bytes(root_gen["master_image_path"])
+            except Exception as e:
+                logger.warning(f"Could not load root image bytes for chromatic grounding: {e}")
+
+        is_dual_ref = bool(lineage_depth >= 1 and root_image_bytes and root_image_bytes != parent_image_bytes)
+        target_canvas = "Reference Image #2 (Current Scene)" if is_dual_ref else "Reference Image #1"
+
         garment_references: List[bytes] = []
         assignment_prompts: List[str] = []
         graphic_locks_required = False
@@ -1114,7 +1126,7 @@ class GenerationService:
                 if crop_path:
                     try:
                         garment_references.append(self._load_image_bytes(crop_path))
-                        ref_idx = 1 + len(garment_references)
+                        ref_idx = (2 if is_dual_ref else 1) + len(garment_references)
                     except Exception as e:
                         logger.warning(f"Could not load garment crop {crop_path}: {e}")
 
@@ -1148,8 +1160,6 @@ class GenerationService:
 
                 assignment_prompts.append(asgn_text)
 
-        # Trace lineage depth for progressive turn numbering and chromatic continuity
-        lineage_depth, root_gen = self._trace_lineage(parent_gen)
         is_upload_lineage = (
             parent_id.startswith("gen_upload_")
             or parent_gen.get("model_name") == "direct_upload"
@@ -1167,7 +1177,15 @@ class GenerationService:
             lineage_anchor_parts.append(
                 f"\nORIGINAL BASE SCENE REFERENCE (Latent Trajectory Alignment):\n{sanitized_anchor}"
             )
-        if lineage_depth >= 1:
+        if is_dual_ref:
+            turn_num = lineage_depth + 1
+            lineage_anchor_parts.append(
+                f"\nPROGRESSIVE STYLING TURN #{turn_num} CHROMATIC & BASELINE ANCHOR:\n"
+                "- Reference Image #1 is the PRISTINE ROOT SCENE (Color temperature, neutral white balance, and chromatic baseline ground truth).\n"
+                "- Reference Image #2 is the CURRENT SCENE to edit in-place.\n"
+                "- Seamlessly swap designated garments onto Reference Image #2 while strictly locking overall scene color temperature, neutral white points, and background chromaticity to Reference Image #1."
+            )
+        elif lineage_depth >= 1:
             turn_num = lineage_depth + 1
             lineage_anchor_parts.append(
                 f"\nPROGRESSIVE STYLING TURN #{turn_num} CHROMATIC ANCHOR:\n"
@@ -1184,18 +1202,22 @@ class GenerationService:
         sanitized_assignments = "\n\n".join([self._sanitize_prompt_for_safety(ap) for ap in assignment_prompts])
 
         composition_prompt = WARDROBE_COMPOSITION_TEMPLATE.format(
+            TARGET_CANVAS=target_canvas,
             ASSIGNMENTS=sanitized_assignments,
             UNMODIFIED_SUBJECTS_GUARDRAIL=sanitized_guardrail,
             LINEAGE_ANCHOR=lineage_anchor_str,
         ).strip()
 
-        all_refs = [parent_image_bytes] + garment_references
+        if is_dual_ref:
+            all_refs = [root_image_bytes, parent_image_bytes] + garment_references
+        else:
+            all_refs = [parent_image_bytes] + garment_references
 
         base_neg_prompt = negative_prompt or parent_gen.get("negative_prompt") or COMPOSITION_NEGATIVE_PROMPT
-        extra_neg = ["magenta color cast", "warm color drift", "reddish tinting", "yellow-magenta shift"]
+        extra_neg = []
         if graphic_locks_required:
             extra_neg.extend(["scrambled text", "altered logos", "fake text", "misspelled words", "generic replacement graphics"])
-        comp_neg_prompt = f"{base_neg_prompt}, {', '.join(extra_neg)}"
+        comp_neg_prompt = f"{base_neg_prompt}, {', '.join(extra_neg)}" if extra_neg else base_neg_prompt
 
         image_bytes_out = self._call_multi_image_model(
             contents=all_refs + [composition_prompt],
@@ -1393,6 +1415,18 @@ class GenerationService:
             or "Strictly preserve all human subjects, hairstyles, clothing, and surrounding architecture exactly as shown in the reference image without any alterations."
         )
 
+        # Trace lineage depth for progressive turn numbering and chromatic continuity
+        lineage_depth, root_gen = self._trace_lineage(parent_gen)
+        root_image_bytes = None
+        if root_gen and root_gen.get("master_image_path"):
+            try:
+                root_image_bytes = self._load_image_bytes(root_gen["master_image_path"])
+            except Exception as e:
+                logger.warning(f"Could not load root image bytes for prop chromatic grounding: {e}")
+
+        is_dual_ref = bool(lineage_depth >= 1 and root_image_bytes and root_image_bytes != parent_image_bytes)
+        target_canvas = "Reference Image #2 (Current Scene)" if is_dual_ref else "Reference Image #1"
+
         prop_references: List[bytes] = []
         assignment_prompts: List[str] = []
 
@@ -1407,7 +1441,7 @@ class GenerationService:
                 if crop_path:
                     try:
                         prop_references.append(self._load_image_bytes(crop_path))
-                        ref_idx = 1 + len(prop_references)
+                        ref_idx = (2 if is_dual_ref else 1) + len(prop_references)
                     except Exception as e:
                         logger.warning(f"Could not load prop crop {crop_path}: {e}")
 
@@ -1445,8 +1479,6 @@ class GenerationService:
 
                 assignment_prompts.append(asgn_text)
 
-        # Trace lineage depth for progressive turn numbering and chromatic continuity
-        lineage_depth, root_gen = self._trace_lineage(parent_gen)
         is_upload_lineage = (
             parent_id.startswith("gen_upload_")
             or parent_gen.get("model_name") == "direct_upload"
@@ -1464,7 +1496,15 @@ class GenerationService:
             lineage_anchor_parts.append(
                 f"\nORIGINAL BASE SCENE REFERENCE (Latent Trajectory Alignment):\n{sanitized_anchor}"
             )
-        if lineage_depth >= 1:
+        if is_dual_ref:
+            turn_num = lineage_depth + 1
+            lineage_anchor_parts.append(
+                f"\nPROGRESSIVE SCENE TURN #{turn_num} CHROMATIC & BASELINE ANCHOR:\n"
+                "- Reference Image #1 is the PRISTINE ROOT SCENE (Color temperature, neutral white balance, and lighting baseline ground truth).\n"
+                "- Reference Image #2 is the CURRENT SCENE to edit in-place.\n"
+                "- Integrate props into Reference Image #2 while strictly locking overall scene color temperature, neutral white balance, and background chromaticity to Reference Image #1."
+            )
+        elif lineage_depth >= 1:
             turn_num = lineage_depth + 1
             lineage_anchor_parts.append(
                 f"\nPROGRESSIVE SCENE TURN #{turn_num} CHROMATIC ANCHOR:\n"
@@ -1481,16 +1521,20 @@ class GenerationService:
         sanitized_assignments = "\n\n".join([self._sanitize_prompt_for_safety(ap) for ap in assignment_prompts])
 
         composition_prompt = PROP_COMPOSITION_TEMPLATE.format(
+            TARGET_CANVAS=target_canvas,
             ASSIGNMENTS=sanitized_assignments,
             SCENE_PRESERVATION_GUARDRAIL=sanitized_guardrail,
             LINEAGE_ANCHOR=lineage_anchor_str,
         ).strip()
 
-        all_refs = [parent_image_bytes] + prop_references
+        if is_dual_ref:
+            all_refs = [root_image_bytes, parent_image_bytes] + prop_references
+        else:
+            all_refs = [parent_image_bytes] + prop_references
 
         base_neg_prompt = negative_prompt or parent_gen.get("negative_prompt") or COMPOSITION_NEGATIVE_PROMPT
-        extra_neg = ["magenta color cast", "warm color drift", "reddish tinting", "floating objects", "detached shadows", "ungrounded items", "distorted proportions"]
-        comp_neg_prompt = f"{base_neg_prompt}, {', '.join(extra_neg)}"
+        extra_neg = ["floating objects", "detached shadows", "ungrounded items", "distorted proportions"]
+        comp_neg_prompt = f"{base_neg_prompt}, {', '.join(extra_neg)}" if extra_neg else base_neg_prompt
 
         image_bytes_out = self._call_multi_image_model(
             contents=all_refs + [composition_prompt],

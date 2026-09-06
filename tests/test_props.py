@@ -275,13 +275,26 @@ def test_prop_composition_service(test_db, dummy_image_bytes, tmp_path):
     fake_bucket.blob.return_value = fake_blob
     storage_service = StorageService(bucket=fake_bucket, environment="local", storage_dir=storage_dir)
 
-    # Upload image bytes so local StorageService finds them
+    # Upload root image bytes
     root_path = storage_service.upload_bytes(
         user_id="local_dev_user",
         category="generations",
         filename="root.png",
         data=dummy_image_bytes,
     )
+    # Upload turn 1 child image bytes (distinct color)
+    turn1_img = Image.new("RGB", (200, 200), color=(110, 140, 190))
+    turn1_buf = io.BytesIO()
+    turn1_img.save(turn1_buf, format="PNG")
+    turn1_bytes = turn1_buf.getvalue()
+
+    turn1_path = storage_service.upload_bytes(
+        user_id="local_dev_user",
+        category="generations",
+        filename="turn1.png",
+        data=turn1_bytes,
+    )
+
     prop_crop_path = storage_service.upload_bytes(
         user_id="local_dev_user",
         category="props/items",
@@ -289,7 +302,7 @@ def test_prop_composition_service(test_db, dummy_image_bytes, tmp_path):
         data=dummy_image_bytes,
     )
 
-    # Seed root baseline generation
+    # Seed root baseline generation (Turn 0)
     root_gen = {
         "id": "gen_prop_root",
         "user_id": "local_dev_user",
@@ -300,6 +313,18 @@ def test_prop_composition_service(test_db, dummy_image_bytes, tmp_path):
         "parent_id": None,
     }
     test_db.create_generation(user_id="local_dev_user", gen_data=root_gen)
+
+    # Seed Turn 1 child generation
+    turn1_gen = {
+        "id": "gen_prop_turn1",
+        "user_id": "local_dev_user",
+        "master_image_path": turn1_path,
+        "seed": 100001,
+        "aspect_ratio": "1:1",
+        "is_baseline": False,
+        "parent_id": "gen_prop_root",
+    }
+    test_db.create_generation(user_id="local_dev_user", gen_data=turn1_gen)
 
     # Seed prop item
     prop_item = {
@@ -363,19 +388,44 @@ def test_prop_composition_service(test_db, dummy_image_bytes, tmp_path):
         "notes": "rest on wooden table with soft contact shadows",
     }
 
-    res = gen_service.compose_props(
+    # Case A: Turn 1 Prop Composition (Parent = gen_prop_root, depth = 0)
+    res_turn1 = gen_service.compose_props(
         parent_id="gen_prop_root",
         assignments=[asgn],
         user_id="local_dev_user",
     )
+    assert res_turn1["generation_id"] is not None
+    assert "Nordic Ceramic Vase" in res_turn1["compiled_prompt"]
+    assert "wooden coffee table" in res_turn1["compiled_prompt"]
+    assert "Strictly preserve model identity" in res_turn1["compiled_prompt"]
+    assert "Reference Image #1" in res_turn1["compiled_prompt"]
+    assert "PROGRESSIVE PROP PLACEMENT TURN #2" not in res_turn1["compiled_prompt"]
 
-    assert res["generation_id"] is not None
-    assert "Nordic Ceramic Vase" in res["compiled_prompt"]
-    assert "wooden coffee table" in res["compiled_prompt"]
-    assert "Strictly preserve model identity" in res["compiled_prompt"]
+    _, call_turn1_kwargs = mock_client.interactions.create.call_args
+    turn1_input = call_turn1_kwargs.get("input", [])
+    turn1_images = [item for item in turn1_input if isinstance(item, dict) and item.get("type") == "image"]
+    assert len(turn1_images) == 2  # 1 parent canvas + 1 prop crop
+
+    # Case B: Turn 2 Prop Composition (Parent = gen_prop_turn1, depth = 1)
+    res_turn2 = gen_service.compose_props(
+        parent_id="gen_prop_turn1",
+        assignments=[asgn],
+        user_id="local_dev_user",
+    )
+    assert res_turn2["generation_id"] is not None
+    assert "PROGRESSIVE SCENE TURN #2 CHROMATIC & BASELINE ANCHOR" in res_turn2["compiled_prompt"]
+    assert "locking overall scene color temperature" in res_turn2["compiled_prompt"]
+    assert "Reference Image #2" in res_turn2["compiled_prompt"]
+    assert "Reference Image #1" in res_turn2["compiled_prompt"]
+
+    _, call_turn2_kwargs = mock_client.interactions.create.call_args
+    turn2_input = call_turn2_kwargs.get("input", [])
+    turn2_images = [item for item in turn2_input if isinstance(item, dict) and item.get("type") == "image"]
+    assert len(turn2_images) == 3  # 1 root baseline + 1 parent canvas + 1 prop crop
 
     # Verify assignments recorded in DB
-    assignments_in_db = test_db.list_prop_assignments(res["generation_id"])
+    assignments_in_db = test_db.list_prop_assignments(res_turn2["generation_id"])
     assert len(assignments_in_db) == 1
     assert assignments_in_db[0]["pin_number"] == 1
+
 

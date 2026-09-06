@@ -42,6 +42,9 @@
 * **Generative Model Feedback Loops & Prompt Invariance Locks**:
   * Generative diffusion/autoregressive image models naturally bias slightly warm on skin and lighting. If prompts instruct the model to calculate unrestricted "ambient color bounce", each progressive turn compounds the warmth of the previous generation.
   * **Fix**: In multi-turn styling/editing system prompts, always include a **Color Constancy & Calibrated White Balance Lock** (locking Kelvin temperature, neutral white points, and background chromaticity), and trace lineage ancestry to anchor multi-turn generations ($\text{Turn} \ge 2$) to the pristine root baseline scene.
+* **Dual-Reference Anchoring for Multi-Turn In-Place Edits (Turn ≥ 2)**:
+  * In iterative styling and prop edits, conditioning solely on the immediate parent canvas causes the model's subtle intrinsic generative bias to compound over successive turns.
+  * **Solution**: On Turn $\ge 2$, pass both the Turn-0 pristine root image (as Reference #1) and the immediate parent canvas (as Reference #2), followed by item crops (Reference #3+). Instruct the model to perform in-place edits on Reference #2 while strictly locking color temperature, neutral white balance, and background chromaticity to Reference #1.
 
 ---
 

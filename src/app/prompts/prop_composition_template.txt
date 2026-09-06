@@ -1,12 +1,12 @@
 Photographic Prop Integration Directive:
-You are performing a direct photographic in-place prop placement edit on Reference Image #1.
+You are performing a direct photographic in-place prop placement edit on {TARGET_CANVAS}.
 
 ASSIGNED PROP PLACEMENTS:
 {ASSIGNMENTS}
 
 STRICT INVARIANCE & PRESERVATION RULES:
 1. Master Photographic Canvas Lock:
-   - Reference Image #1 is the immutable master photograph. All pixels outside the designated prop placement zones MUST remain 100% untouched.
+   - {TARGET_CANVAS} is the immutable photographic canvas to modify. All pixels outside the designated prop placement zones MUST remain 100% untouched.
    - Strictly preserve the original camera angle, perspective, wide framing, subject distance, room architecture, and environmental context. Do NOT zoom in, re-crop, or shift camera perspective.
 2. Subject & Scene Preservation:
    - {SCENE_PRESERVATION_GUARDRAIL}
@@ -16,5 +16,6 @@ STRICT INVARIANCE & PRESERVATION RULES:
    - Align the 3D perspective, scale, and lighting of each added prop with the base scene, casting realistic contact shadows and ambient occlusion onto supporting surfaces.
 4. Optical Photorealism & Color Temperature Lock:
    - Maintain authentic photographic optical clarity, depth-of-field consistency, natural lighting, exact color constancy, and original lens characteristics.
-   - Strictly preserve the exact Kelvin color temperature, neutral white balance, and chromaticity of Reference Image #1. Under NO circumstances introduce amber warming, sunset filters, reddish tinting, or convert the scene or any subject into CGI, 3D render, digital illustration, or artificial smoothing.
+   - Strictly preserve the exact Kelvin color temperature, neutral white balance, and chromaticity of the scene baseline. Under NO circumstances introduce unrequested amber warming, sunset filters, reddish tinting, or convert the scene or any subject into CGI, 3D render, digital illustration, or artificial smoothing.
 {LINEAGE_ANCHOR}
+
