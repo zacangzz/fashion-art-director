@@ -137,9 +137,19 @@
 
 ---
 
+### 11. pnpm v12 Build Scripts in Multi-Stage Docker (`ERR_PNPM_IGNORED_BUILDS`)
+* **The Pitfall**: In pnpm v10+, lifecycle build scripts (e.g., `esbuild`, `protobufjs`, `@firebase/util`) are blocked by default in CI/non-interactive environments unless approved. If `allowBuilds` is configured in `pnpm-workspace.yaml`, omitting that file prior to `pnpm install` in Docker fails with `ERR_PNPM_IGNORED_BUILDS`.
+* **Fix**: Always copy `pnpm-workspace.yaml` alongside `package.json` and `pnpm-lock.yaml` before running `pnpm install --frozen-lockfile`:
+  ```dockerfile
+  COPY src/frontend/package.json src/frontend/pnpm-lock.yaml src/frontend/pnpm-workspace.yaml ./
+  RUN pnpm install --frozen-lockfile
+  ```
+
+---
+
 ## Frontend & Styling Architecture
 
-### 11. Global CSS Consolidation & Component Class Preservation
+### 12. Global CSS Consolidation & Component Class Preservation
 * **The Pitfall**: In large frontend refactorings, replacing a monolithic stylesheet (e.g., `index.css`) with a concise set of generic design-token classes without simultaneously rewriting the JSX class names in every component strips all component-specific CSS selectors (`.ratio-btn`, `.category-card`, `.tag-chip`, `.prompt-review-card`, `.lever-item`, etc.).
 * **Visual Symptom**: The app renders as raw unstyled HTML with broken grids, lost card backdrops, and unformatted controls.
 * **Best Practice**:
