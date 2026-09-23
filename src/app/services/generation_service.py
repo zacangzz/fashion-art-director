@@ -1160,23 +1160,7 @@ class GenerationService:
 
                 assignment_prompts.append(asgn_text)
 
-        is_upload_lineage = (
-            parent_id.startswith("gen_upload_")
-            or parent_gen.get("model_name") == "direct_upload"
-            or (parent_gen.get("schema_json") or {}).get("task") == "direct_photo_upload"
-            or (root_gen is not None and (
-                root_gen.get("id", "").startswith("gen_upload_")
-                or root_gen.get("model_name") == "direct_upload"
-                or (root_gen.get("schema_json") or {}).get("task") == "direct_photo_upload"
-            ))
-        )
-
         lineage_anchor_parts = []
-        if not is_upload_lineage and parent_prompt and not parent_prompt.startswith("Directly ingested photo:"):
-            sanitized_anchor = self._sanitize_prompt_for_safety(parent_prompt)
-            lineage_anchor_parts.append(
-                f"\nORIGINAL BASE SCENE REFERENCE (Latent Trajectory Alignment):\n{sanitized_anchor}"
-            )
         if is_dual_ref:
             turn_num = lineage_depth + 1
             lineage_anchor_parts.append(
@@ -1479,23 +1463,7 @@ class GenerationService:
 
                 assignment_prompts.append(asgn_text)
 
-        is_upload_lineage = (
-            parent_id.startswith("gen_upload_")
-            or parent_gen.get("model_name") == "direct_upload"
-            or (parent_gen.get("schema_json") or {}).get("task") == "direct_photo_upload"
-            or (root_gen is not None and (
-                root_gen.get("id", "").startswith("gen_upload_")
-                or root_gen.get("model_name") == "direct_upload"
-                or (root_gen.get("schema_json") or {}).get("task") == "direct_photo_upload"
-            ))
-        )
-
         lineage_anchor_parts = []
-        if not is_upload_lineage and parent_prompt and not parent_prompt.startswith("Directly ingested photo:"):
-            sanitized_anchor = self._sanitize_prompt_for_safety(parent_prompt)
-            lineage_anchor_parts.append(
-                f"\nORIGINAL BASE SCENE REFERENCE (Latent Trajectory Alignment):\n{sanitized_anchor}"
-            )
         if is_dual_ref:
             turn_num = lineage_depth + 1
             lineage_anchor_parts.append(

@@ -69,7 +69,7 @@
 ### Prerequisites
 
 - **Python 3.10+** (managed via [`uv`](https://docs.astral.sh/uv/))
-- **Node.js 20+** and `npm`
+- **Node.js 20+** and [`pnpm`](https://pnpm.io/)
 - **Google AI Studio API Key** ([Get a key here](https://aistudio.google.com/app/apikey))
 
 ### Quickstart
@@ -104,8 +104,8 @@ uv run uvicorn src.app.main:app --host 127.0.0.1 --port 7860 --reload
 In a separate terminal:
 ```bash
 cd src/frontend
-npm install
-npm run dev
+pnpm install
+pnpm run dev
 ```
 Open **`http://localhost:5173`** in your browser.
 
@@ -123,7 +123,7 @@ uv run pytest
 Run the 104 frontend unit and component tests:
 ```bash
 cd src/frontend
-npm test
+pnpm test
 ```
 
 ### Live Resiliency & Load Test
@@ -159,7 +159,7 @@ gcloud run deploy fashion-art-director \
   --allow-unauthenticated
 
 # 2. Deploy Firebase Hosting
-cd src/frontend && npm run build && cd ../..
+cd src/frontend && pnpm run build && cd ../..
 npx -y firebase-tools deploy --project=ai-art-director-prod --only firestore:rules,firestore:indexes,hosting
 ```
 

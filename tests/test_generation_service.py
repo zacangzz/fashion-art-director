@@ -880,9 +880,9 @@ def test_compose_wardrobe_ai_baseline_retains_scene_anchor(tmp_path):
 
     call_args = image_generator.generate.call_args.kwargs
     prompt_text = call_args["prompt"]
-    # AI baseline: ORIGINAL BASE SCENE REFERENCE is included for diffusion latent alignment
-    assert "ORIGINAL BASE SCENE REFERENCE" in prompt_text
-    assert "A nostalgic 1990s raw photo of two models laughing on a sunlit patio." in prompt_text
+    # AI baseline: ORIGINAL BASE SCENE REFERENCE is suppressed to prevent text-to-image cross-attention override
+    assert "ORIGINAL BASE SCENE REFERENCE" not in prompt_text
+    assert "A nostalgic 1990s raw photo of two models laughing on a sunlit patio." not in prompt_text
     assert "Master Photographic Canvas Lock" in prompt_text
     assert "35mm" not in prompt_text
 

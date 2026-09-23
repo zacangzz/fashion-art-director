@@ -2,6 +2,7 @@
 # Instructions for Agents to follow
 * always use uv to manage python packages, DO NOT use pip.
 * update pyproject.toml accordingly when new packages are required, or when packages are no longer required.
+* always use pnpm instead of npm
 * work within the existing .venv, do not create new virtual environments.
 * always ensure that code is written in a way that is easy to understand and maintain.
     * apply OOP principles, especially using Composition over Inheritance.

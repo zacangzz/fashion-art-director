@@ -300,27 +300,27 @@ print_step "5" "Checking Storage, Frontend Assets & Port Availability"
 mkdir -p "storage/moodboards" "storage/generations" "storage/logs" "storage/wardrobe/items" "storage/wardrobe/sources"
 print_success "Storage directories verified (storage/moodboards, storage/generations, storage/logs, storage/wardrobe)."
 
-# Frontend production assets — build fresh if npm available, otherwise use pre-committed dist/
-if command -v npm &> /dev/null; then
+# Frontend production assets — build fresh if pnpm available, otherwise use pre-committed dist/
+if command -v pnpm &> /dev/null; then
     if [ ! -f "src/frontend/dist/index.html" ] || scripts/frontend_needs_build.sh; then
         print_info "Building frontend production assets with Vite..."
         (
             cd src/frontend
             if [ ! -d "node_modules" ]; then
-                npm install --silent
+                pnpm install --frozen-lockfile
             fi
-            npm run build
+            pnpm run build
         )
         print_success "Frontend assets freshly compiled into src/frontend/dist."
     else
-        print_success "Frontend assets up to date (npm available, no source changes detected)."
+        print_success "Frontend assets up to date (pnpm available, no source changes detected)."
     fi
 else
     if [ -f "src/frontend/dist/index.html" ]; then
         print_success "Using pre-built frontend distribution (src/frontend/dist)."
     else
-        print_error "No pre-built frontend found at src/frontend/dist/index.html and npm is not installed."
-        print_error "Either install Node.js/npm to build the frontend, or ensure dist/ is committed to the repository."
+        print_error "No pre-built frontend found at src/frontend/dist/index.html and pnpm is not installed."
+        print_error "Either install pnpm to build the frontend, or ensure dist/ is committed to the repository."
         exit 1
     fi
 fi

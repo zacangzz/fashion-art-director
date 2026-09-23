@@ -16,7 +16,7 @@ tests/
 # Node & Frontend artifacts
 src/frontend/node_modules
 src/frontend/dist
-.npm
+.pnpm-store
 
 # Environment variables & secrets
 .env

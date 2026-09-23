@@ -3,12 +3,13 @@
 # ==============================================================================
 FROM node:22-alpine AS frontend-builder
 WORKDIR /build
+RUN corepack enable pnpm
 
-COPY src/frontend/package*.json ./
-RUN npm ci
+COPY src/frontend/package.json src/frontend/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
 
 COPY src/frontend/ ./
-RUN npm run build
+RUN pnpm run build
 
 # ==============================================================================
 # Stage 2: Production Python Runtime with uv
