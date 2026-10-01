@@ -1,0 +1,4 @@
+PROGRESSIVE REFINEMENT TURN #{TURN_NUM} CHROMATIC ANCHOR:
+- Reference Image #1 is the PRISTINE ROOT SCENE (Color temperature, neutral white balance, and chromatic baseline ground truth).
+- Reference Image #2 is the CURRENT SCENE to edit in-place.
+- Apply the requested edits onto Reference Image #2 while strictly locking overall scene color temperature, neutral white points, and authentic skin undertones to Reference Image #1.

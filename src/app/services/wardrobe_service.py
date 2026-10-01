@@ -360,12 +360,8 @@ class WardrobeService:
 
             cropped_pil = pil_img.crop((left, top, right, bottom))
             crop_buf = io.BytesIO()
-            save_kw: Dict[str, Any] = {"format": "PNG"}
-            srgb_bytes = get_standard_srgb_profile_bytes()
-            if srgb_bytes:
-                save_kw["icc_profile"] = srgb_bytes
-            cropped_pil.save(crop_buf, **save_kw)
-            crop_bytes = crop_buf.getvalue()
+            cropped_pil.save(crop_buf, format="PNG")
+            crop_bytes = standardize_image_to_srgb(crop_buf.getvalue(), target_format="PNG")
 
             crop_filename = f"{item_id}_cropped.png"
             crop_storage_path = self.storage_service.upload_bytes(

@@ -36,6 +36,7 @@ from app.utils.image_utils import (
 from app.utils.prompt_loader import (
     DEFAULT_NEGATIVE_PROMPT,
     COMPOSITION_NEGATIVE_PROMPT,
+    PROGRESSIVE_REFINEMENT_ANCHOR,
     WARDROBE_COMPOSITION_SYSTEM_PROMPT,
     WARDROBE_COMPOSITION_TEMPLATE,
     PROP_COMPOSITION_SYSTEM_PROMPT,
@@ -624,6 +625,12 @@ class GenerationService:
             except Exception as e:
                 logger.warning(f"Could not load root image bytes for refinement chromatic grounding: {e}")
 
+        is_dual_ref = bool(
+            lineage_depth >= 1
+            and root_image_bytes
+            and (root_gen.get("id") != parent_gen.get("id") if (root_gen and parent_gen) else True)
+        )
+
         # Check for Background Reference Attachment
         bg_bytes = None
         bg_ref_record = None
@@ -714,14 +721,10 @@ class GenerationService:
                 negative_prompt=eff_neg_prompt,
                 audit_request_id=req_id,
             )
-        elif lineage_depth >= 1:
+        elif is_dual_ref:
             base_refine_instruction = self.prompt_compiler.format_refinement_prompt(prompt)
             turn_num = lineage_depth + 1
-            chromatic_anchor = (
-                f"\n\nPROGRESSIVE REFINEMENT TURN #{turn_num} CHROMATIC ANCHOR:\n"
-                "- Maintain absolute color temperature, neutral white balance, and authentic skin undertones matching the original scene.\n"
-                "- Apply the refinement edits onto the current image without compounding warm ambient color bounce or introducing magenta/reddish color casts."
-            )
+            chromatic_anchor = "\n\n" + PROGRESSIVE_REFINEMENT_ANCHOR.format(TURN_NUM=turn_num)
             full_refine_prompt = base_refine_instruction + chromatic_anchor
 
             self._audit(
@@ -735,11 +738,11 @@ class GenerationService:
                 seed=seed,
             )
 
-            image_bytes = self._call_image_model(
-                prompt=full_refine_prompt,
+            all_refs = [root_image_bytes, parent_bytes]
+            image_bytes = self._call_multi_image_model(
+                contents=all_refs + [full_refine_prompt],
                 aspect_ratio=aspect_ratio,
                 model_name=active_model,
-                reference_image_bytes=parent_bytes,
                 seed=seed,
                 negative_prompt=eff_neg_prompt,
                 audit_request_id=req_id,

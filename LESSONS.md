@@ -35,16 +35,15 @@
   * When chaining multi-turn image edits (e.g. progressive wardrobe styling), re-encoding reference images with lossy formats (like standard lossy WebP or JPEG at `quality=90`) uses $\text{YUV 4:2:0}$ chroma subsampling, which discards $75\%$ of color detail and introduces integer quantization error.
   * In iterative loops, this causes noticeable chromatic degradation and shifts midtones/shadows.
   * **Fix**: Always pass conditioning reference images to the API using **lossless PNG or lossless WebP** with $100\%$ chroma preservation.
-* **Color Profile (ICC) Preservation**:
-  * Default PIL `Image.save()` calls strip embedded ICC profiles unless explicitly copied (`icc_profile=pil_img.info.get('icc_profile')`).
-  * Dropping ICC profiles causes wide-gamut images (Display P3, Adobe RGB) to be misinterpreted as uncalibrated sRGB, exaggerating red and magenta saturation.
-  * **Fix**: Retain `icc_profile` across all reference optimization and master saving functions.
-* **Generative Model Feedback Loops & Prompt Invariance Locks**:
-  * Generative diffusion/autoregressive image models naturally bias slightly warm on skin and lighting. If prompts instruct the model to calculate unrestricted "ambient color bounce", each progressive turn compounds the warmth of the previous generation.
-  * **Fix**: In multi-turn styling/editing system prompts, always include a **Color Constancy & Calibrated White Balance Lock** (locking Kelvin temperature, neutral white points, and background chromaticity), and trace lineage ancestry to anchor multi-turn generations ($\text{Turn} \ge 2$) to the pristine root baseline scene.
+* **True Color Gamut Conversion vs. Pseudo-ICC Tagging**:
+  * Blindly attaching sRGB ICC profile bytes (`icc_profile=srgb_bytes`) to PIL images without transforming pixel values misinterprets wide-gamut (Display P3) data, exaggerating magenta and reddish skin saturation.
+  * **Fix**: Always convert pixel channels via `ImageCms.buildTransform` / `standardize_image_to_srgb()` so wide-gamut uploads and crops are converted mathematically into sRGB before saving or forwarding to the API.
+* **Reference Conditioning Resolution Bounds & 4K Degradation**:
+  * Legacy input gates previously clamped `max_dimension=2048`. For native 4K outputs (such as 5504×3072 in 1.85:1 aspect ratio), downscaling to 2048px discards 86% of pixel area, forcing the model to hallucinate micro-textures from low-res conditioning and compounding generational pixelation across multi-turn chains.
+  * **Fix**: Always set `max_dimension=5504` (the native 4K maximum dimension of `gemini-3-pro-image`) across all reference input gates.
 * **Dual-Reference Anchoring for Multi-Turn In-Place Edits (Turn ≥ 2)**:
-  * In iterative styling and prop edits, conditioning solely on the immediate parent canvas causes the model's subtle intrinsic generative bias to compound over successive turns.
-  * **Solution**: On Turn $\ge 2$, pass both the Turn-0 pristine root image (as Reference #1) and the immediate parent canvas (as Reference #2), followed by item crops (Reference #3+). Instruct the model to perform in-place edits on Reference #2 while strictly locking color temperature, neutral white balance, and background chromaticity to Reference #1.
+  * In iterative refinement, styling, and prop edits, conditioning solely on the immediate parent canvas causes the model's subtle intrinsic generative bias to compound over successive turns.
+  * **Solution**: On Turn $\ge 2$, pass both the Turn-0 pristine root image (as Reference #1) and the immediate parent canvas (as Reference #2). Instruct the model to perform in-place edits on Reference #2 while strictly locking color temperature, neutral white balance, and background chromaticity to Reference #1.
 
 ---
 

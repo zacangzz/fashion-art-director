@@ -162,18 +162,22 @@ def detect_closest_aspect_ratio(width: int, height: int) -> str:
 def conform_uploaded_image(
     image_bytes: bytes,
     custom_aspect_ratio: Optional[str] = None,
-    max_dimension: int = 3840,
+    max_dimension: int = 5504,
 ) -> tuple[bytes, str, int, int]:
     """
     Standardizes an uploaded photo using Pillow:
-    1. Detects closest preset aspect ratio (or uses custom).
-    2. Proportionally downscales oversized images (> max_dimension) via Image.Resampling.LANCZOS without cropping.
-    3. Conforms image to exact aspect ratio canvas via Smart Canvas Fit (subtle ambient edge extension),
+    1. Standardizes gamut to calibrated sRGB via ImageCms before processing.
+    2. Detects closest preset aspect ratio (or uses custom).
+    3. Proportionally downscales oversized images (> max_dimension) via Image.Resampling.LANCZOS without cropping.
+    4. Conforms image to exact aspect ratio canvas via Smart Canvas Fit (subtle ambient edge extension),
        ensuring 100% of original photo content is preserved without cropping or black bars.
-    4. Attaches calibrated sRGB color profile and returns (png_bytes, aspect_ratio, width, height).
+    5. Attaches calibrated sRGB color profile and returns (png_bytes, aspect_ratio, width, height).
     """
     if not image_bytes:
         return image_bytes, "2:3", 0, 0
+
+    # Ensure input image has true sRGB pixel values before resizing or canvas fitting
+    image_bytes = standardize_image_to_srgb(image_bytes, target_format="PNG")
 
     pil_img = Image.open(io.BytesIO(image_bytes))
     if pil_img.mode not in ("RGB", "RGBA"):
@@ -266,13 +270,15 @@ def normalize_interaction_aspect_ratio(aspect_ratio: Optional[str]) -> str:
 
 def optimize_reference_image(
     image_bytes: bytes,
-    max_dimension: int = 2048,
+    max_dimension: int = 5504,
     target_format: str = "PNG",
     quality: int = 95,
 ) -> tuple[bytes, str]:
     """
     Optimizes a conditioning reference image prior to network transmission.
-    Resizes oversized images to max_dimension and preserves full chromatic fidelity and calibrated sRGB ICC profile.
+    Standardizes colorspace to calibrated sRGB via ImageCms without gamut distortion,
+    proportionally resizes oversized images (> max_dimension) via Lanczos, and encodes
+    into the target format (defaulting to lossless PNG).
     """
     if not image_bytes:
         return image_bytes, "image/png"
@@ -281,45 +287,38 @@ def optimize_reference_image(
         return image_bytes, "application/pdf"
 
     try:
-        pil_img = Image.open(io.BytesIO(image_bytes))
-        orig_w, orig_h = pil_img.size
-        icc_profile = pil_img.info.get("icc_profile")
-        srgb_bytes = get_standard_srgb_profile_bytes()
-        eff_icc = icc_profile or srgb_bytes
-
-        needs_resize = orig_w > max_dimension or orig_h > max_dimension
-        if needs_resize:
-            pil_img.thumbnail((max_dimension, max_dimension), Image.Resampling.LANCZOS)
-
-        # Standardize color mode while preserving transparency if present
-        if pil_img.mode not in ("RGB", "RGBA"):
-            pil_img = pil_img.convert("RGB")
-
         eff_format = target_format.upper()
         if eff_format not in ("PNG", "WEBP", "JPEG"):
             eff_format = "PNG"
 
-        buf = io.BytesIO()
-        save_kwargs: Dict[str, Any] = {"format": eff_format}
-        if eff_icc:
-            save_kwargs["icc_profile"] = eff_icc
+        # Standardize gamut to calibrated sRGB first (ImageCms transform + sRGB profile)
+        standardized_bytes = standardize_image_to_srgb(image_bytes, target_format=eff_format)
+        pil_img = Image.open(io.BytesIO(standardized_bytes))
+        orig_w, orig_h = pil_img.size
 
-        if eff_format == "WEBP":
-            save_kwargs["lossless"] = True
-        elif eff_format == "JPEG":
-            if pil_img.mode == "RGBA":
-                pil_img = pil_img.convert("RGB")
-            save_kwargs["quality"] = quality
+        needs_resize = orig_w > max_dimension or orig_h > max_dimension
+        if needs_resize:
+            pil_img.thumbnail((max_dimension, max_dimension), Image.Resampling.LANCZOS)
+            buf = io.BytesIO()
+            save_kwargs: Dict[str, Any] = {"format": eff_format}
+            srgb_bytes = get_standard_srgb_profile_bytes()
+            if srgb_bytes:
+                save_kwargs["icc_profile"] = srgb_bytes
 
-        pil_img.save(buf, **save_kwargs)
-        optimized_bytes = buf.getvalue()
+            if eff_format == "WEBP":
+                save_kwargs["lossless"] = True
+            elif eff_format == "JPEG":
+                if pil_img.mode == "RGBA":
+                    pil_img = pil_img.convert("RGB")
+                save_kwargs["quality"] = quality
 
-        # If image was resized or converted to a cleaner format, return optimized bytes
-        if len(optimized_bytes) < len(image_bytes) or needs_resize or eff_icc:
-            mime = f"image/{eff_format.lower()}"
-            return optimized_bytes, mime
+            pil_img.save(buf, **save_kwargs)
+            final_bytes = buf.getvalue()
         else:
-            return image_bytes, detect_image_mime_type(image_bytes)
+            final_bytes = standardized_bytes
+
+        mime = f"image/{eff_format.lower()}"
+        return final_bytes, mime
     except Exception:
         return image_bytes, detect_image_mime_type(image_bytes)
 
@@ -328,7 +327,7 @@ def to_image_part(
     image_bytes: bytes,
     mime_type: Optional[str] = None,
     optimize: bool = True,
-    max_dimension: int = 2048,
+    max_dimension: int = 5504,
 ) -> types.Part:
     """
     Wraps raw image bytes into a Google GenAI types.Part with auto-detected/optimized MIME type.
@@ -347,7 +346,7 @@ def to_image_part(
 def to_interaction_image_input(
     image_bytes: bytes,
     optimize: bool = True,
-    max_dimension: int = 2048,
+    max_dimension: int = 5504,
 ) -> dict:
     """
     Formats image bytes into a dictionary payload for client.interactions.create with base64 data.

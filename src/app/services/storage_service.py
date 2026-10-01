@@ -80,22 +80,21 @@ class StorageService:
         **kwargs,
     ) -> str:
         eff_format = format.upper()
-        if "icc_profile" not in kwargs:
-            try:
-                from app.utils.image_utils import get_standard_srgb_profile_bytes
-                srgb_bytes = get_standard_srgb_profile_bytes()
-                if srgb_bytes:
-                    kwargs["icc_profile"] = srgb_bytes
-            except Exception:
-                pass
-
         buf = io.BytesIO()
         image.save(buf, format=eff_format, **kwargs)
+        raw_bytes = buf.getvalue()
+
+        try:
+            from app.utils.image_utils import standardize_image_to_srgb
+            final_bytes = standardize_image_to_srgb(raw_bytes, target_format=eff_format)
+        except Exception:
+            final_bytes = raw_bytes
+
         return self.upload_bytes(
             user_id=user_id,
             category=category,
             filename=filename,
-            data=buf.getvalue(),
+            data=final_bytes,
             content_type=f"image/{eff_format.lower()}",
         )
 
