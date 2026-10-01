@@ -43,3 +43,39 @@ export function formatTokens(tokens) {
   if (isNaN(count) || count <= 0) return '0';
   return count.toLocaleString('en-US');
 }
+
+/**
+ * Formats a UTC ISO date string into GMT+8 date, time, and timezone.
+ * e.g. "2026-08-24T00:00:00Z" -> "24 Aug 2026, 08:00:00 GMT+8"
+ *
+ * @param {string|Date|null|undefined} dateInput - ISO string or Date object in UTC
+ * @param {Intl.DateTimeFormatOptions} [options] - Optional custom overrides for Intl.DateTimeFormat
+ * @returns {string} Formatted date time string with GMT+8 timezone
+ */
+export function formatDateTimeGMT8(dateInput, options = {}) {
+  if (!dateInput) return '';
+  try {
+    let str = typeof dateInput === 'string' ? dateInput.trim() : dateInput;
+    if (typeof str === 'string' && !str.endsWith('Z') && !/[+-]\d{2}:\d{2}$/.test(str)) {
+      str += 'Z';
+    }
+    const d = new Date(str);
+    if (isNaN(d.getTime())) return '';
+
+    return new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Singapore',
+      year: 'numeric',
+      month: 'short',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+      timeZoneName: 'shortOffset',
+      ...options,
+    }).format(d);
+  } catch (err) {
+    console.error('Failed to format GMT+8 date:', err);
+    return '';
+  }
+}

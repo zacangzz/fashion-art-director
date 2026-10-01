@@ -20,7 +20,7 @@ import {
   Shirt,
   Box,
 } from 'lucide-react';
-import { formatSpendSGD, formatTokens } from '../utils/formatters';
+import { formatSpendSGD, formatTokens, formatDateTimeGMT8 } from '../utils/formatters';
 
 export default function HistoryDrawer({
   isOpen = false,
@@ -167,9 +167,12 @@ export default function HistoryDrawer({
                         <Hash size={11} />
                         <span>Seed #{item.seed}</span>
                       </span>
-                      <span className="history-card-time">
+                      <span
+                        className="history-card-time"
+                        title={item.created_at ? `GMT+8: ${formatDateTimeGMT8(item.created_at)}\nUTC: ${item.created_at}` : undefined}
+                      >
                         <Clock size={11} />
-                        <span>{item.created_at ? new Date(item.created_at).toLocaleTimeString() : ''}</span>
+                        <span>{formatDateTimeGMT8(item.created_at)}</span>
                       </span>
                       {maskCoverage !== undefined && (
                         <span className="history-card-mask-stat" title={`Masked area covers ${maskCoverage}% of the canvas`}>

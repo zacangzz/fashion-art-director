@@ -2126,6 +2126,8 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 8px;
   font-size: 0.72rem;
   color: var(--text-muted);
 }
@@ -2136,6 +2138,15 @@ body {
   gap: 3px;
   font-family: var(--font-mono);
   color: var(--text-primary);
+}
+
+.history-card-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 0.70rem;
+  color: var(--text-secondary);
 }
 
 .history-card-badges-row {

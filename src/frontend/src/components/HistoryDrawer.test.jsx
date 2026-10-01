@@ -229,6 +229,20 @@ describe('HistoryDrawer', () => {
     expect(screen.getByText('S$0.11')).toBeInTheDocument();
     expect(screen.getByText('(+S$0.06)')).toBeInTheDocument();
   });
+
+  it('renders timestamps with date, time, and GMT+8 timezone', () => {
+    render(
+      <HistoryDrawer
+        isOpen={true}
+        history={mockHistory}
+        activeGenerationId="gen_2"
+        onClose={() => {}}
+      />
+    );
+
+    expect(screen.getByText('24 Aug 2026, 08:00:00 GMT+8')).toBeInTheDocument();
+    expect(screen.getByText('24 Aug 2026, 08:05:00 GMT+8')).toBeInTheDocument();
+  });
 });
 
 
